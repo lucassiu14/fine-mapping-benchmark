@@ -19,6 +19,10 @@
 #'   If a single integer, the same target is used for all regions.
 #'   If a vector, must have length equal to \code{n_regions}, and \code{p[i]}
 #'   is the target number of SNPs for region \code{i}. Default: 200.
+#'   Note: when using the bundled sim1000G example VCF (i.e. \code{vcf_files = NULL}),
+#'   the maximum usable value is approximately 500. Values above this are
+#'   automatically capped with a warning. To use larger p, supply your own
+#'   VCF files via \code{vcf_files}.
 #' @param vcf_files Character vector of paths to VCF files (one per region),
 #'   or NULL to use the example VCF bundled with sim1000G. If a single path
 #'   is provided and \code{n_regions > 1}, that VCF is reused for all regions
@@ -131,6 +135,17 @@ simulate_genotypes <- function(n_regions = 3,
     )
   }
   p <- as.integer(p)
+
+  # Cap p at 500 when using the bundled VCF (which has ~567 variants)
+  if (is.null(vcf_files) && any(p > 500)) {
+    warning(
+      "The bundled sim1000G example VCF contains ~567 variants. ",
+      "Capping p at 500 for regions where p > 500. ",
+      "To use larger p, supply your own VCF files via the vcf_files argument.",
+      call. = FALSE
+    )
+    p[p > 500] <- 500L
+  }
 
   # vcf_files
   if (!is.null(vcf_files)) {
