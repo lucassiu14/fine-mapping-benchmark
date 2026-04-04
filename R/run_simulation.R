@@ -236,6 +236,24 @@ run_simulation <- function(n_regions = 3,
     genotypes[[i]]$LD <- cor(genotypes[[i]]$X)
   }
 
+  # Pre-generate annotation matrices (once per region, shared across all scenarios)
+  # Only applies to synthetic annotations; user-supplied matrices are already fixed.
+  annotation_type_internal <- if (is.matrix(annotations)) "user_supplied" else annotations
+  if (annotation_type_internal %in% c("binary", "continuous")) {
+    if (verbose) message("\nPre-generating annotation matrices...")
+    for (i in seq_len(n_regions)) {
+      annot <- simulate_annotations_for_region(
+        p = genotypes[[i]]$p,
+        annotation_type = annotation_type_internal,
+        n_annotations = n_annotations,
+        annotation_proportions = annotation_proportions,
+        user_annotation_matrix = NULL
+      )
+      genotypes[[i]]$annotations_matrix    <- annot$matrix
+      genotypes[[i]]$annotation_proportions <- annot$proportions
+    }
+  }
+
   # Check that S values are feasible for all regions
   min_p <- min(vapply(genotypes, function(r) r$p, integer(1)))
   if (max(S) > min_p) {

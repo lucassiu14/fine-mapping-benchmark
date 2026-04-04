@@ -238,17 +238,25 @@ simulate_phenotypes <- function(genotypes,
     X_i <- genotypes[[i]]$X  # standardised genotype matrix
 
     # --- Simulate annotations for this region ---------------------------------
+    # If a pre-computed annotation matrix is already stored in this region
+    # (e.g. generated once by run_simulation and shared across scenarios),
+    # reuse it directly instead of generating a new one.
 
-    annot_result <- simulate_annotations_for_region(
-      p = p_i,
-      annotation_type = annotation_type,
-      n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
-      annotation_proportions = annotation_proportions,
-      user_annotation_matrix = user_annotation_matrix
-    )
-
-    A_i <- annot_result$matrix           # p x m annotation matrix, or NULL
-    props_i <- annot_result$proportions   # realised proportions, or NULL
+    if (!is.null(genotypes[[i]]$annotations_matrix) &&
+        annotation_type %in% c("binary", "continuous")) {
+      A_i     <- genotypes[[i]]$annotations_matrix
+      props_i <- genotypes[[i]]$annotation_proportions
+    } else {
+      annot_result <- simulate_annotations_for_region(
+        p = p_i,
+        annotation_type = annotation_type,
+        n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
+        annotation_proportions = annotation_proportions,
+        user_annotation_matrix = user_annotation_matrix
+      )
+      A_i     <- annot_result$matrix
+      props_i <- annot_result$proportions
+    }
 
     # --- Select causal variants -----------------------------------------------
 
