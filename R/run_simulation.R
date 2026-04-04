@@ -54,6 +54,13 @@
 #' @param max_maf Numeric or NA. Maximum MAF filter. Default: NA.
 #' @param standardise Logical. Standardise genotypes. Default: TRUE.
 #' @param seed Integer or NULL. Master random seed. Default: NULL.
+#' @param save Logical. If TRUE, save the result to \code{output_dir} as an
+#'   \code{.rds} file. The filename encodes the key simulation parameters
+#'   (model, n, p, S values, n_iter) and the seed (or "noseed" if NULL).
+#'   Default: FALSE.
+#' @param output_dir Character. Directory in which to save the result when
+#'   \code{save = TRUE}. Created automatically if it does not exist.
+#'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress. Default: TRUE.
 #'
 #' @return A list with two elements:
@@ -99,6 +106,12 @@
 #'   model = "sparse_inf", seed = 42
 #' )
 #' length(result_inf$scenarios)  # 4 * 4 * 3 * 5 = 240
+#'
+#' # Save result to disk
+#' result <- run_simulation(
+#'   n_regions = 2, n = 200, p = 100, seed = 42,
+#'   save = TRUE, output_dir = "results"
+#' )
 #' }
 #'
 #' @export
@@ -122,6 +135,8 @@ run_simulation <- function(n_regions = 3,
                            max_maf = NA,
                            standardise = TRUE,
                            seed = NULL,
+                           save = FALSE,
+                           output_dir = "results",
                            verbose = TRUE) {
 
   # --- Input validation -------------------------------------------------------
@@ -326,6 +341,40 @@ run_simulation <- function(n_regions = 3,
     n_scenarios = n_scenarios
   )
 
+  # --- Assemble result --------------------------------------------------------
+
+  result <- list(
+    genotypes = genotypes,
+    scenarios = scenarios,
+    params = params
+  )
+
+  # --- Save to disk (optional) ------------------------------------------------
+
+  if (save) {
+    stopifnot(
+      "output_dir must be a single character string" =
+        is.character(output_dir) && length(output_dir) == 1
+    )
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+
+    seed_tag  <- if (!is.null(seed)) paste0("seed", seed) else "noseed"
+    S_tag     <- paste(S, collapse = "-")
+    p_tag     <- if (length(unique(p)) == 1) as.character(p[1]) else paste(p, collapse = "-")
+    fname     <- sprintf(
+      "simulation_%s_n%d_p%s_S%s_iter%d_%s.rds",
+      model, n, p_tag, S_tag, n_iter, seed_tag
+    )
+    fpath <- file.path(output_dir, fname)
+    saveRDS(result, file = fpath)
+
+    if (verbose) {
+      message(sprintf("Result saved to: %s", fpath))
+    }
+  }
+
   # --- Return -----------------------------------------------------------------
 
   if (verbose) {
@@ -335,9 +384,5 @@ run_simulation <- function(n_regions = 3,
     ))
   }
 
-  list(
-    genotypes = genotypes,
-    scenarios = scenarios,
-    params = params
-  )
+  result
 }

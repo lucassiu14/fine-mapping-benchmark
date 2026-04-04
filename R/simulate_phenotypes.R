@@ -310,7 +310,10 @@ simulate_phenotypes <- function(genotypes,
     genotypes[[i]]$z <- sumstats$z
     genotypes[[i]]$beta_hat <- sumstats$beta_hat
     genotypes[[i]]$se <- sumstats$se
-    genotypes[[i]]$LD <- sumstats$LD
+    # Only compute LD if not already present (e.g. pre-computed by run_simulation)
+    if (is.null(genotypes[[i]]$LD)) {
+      genotypes[[i]]$LD <- cor(X_i)
+    }
     genotypes[[i]]$annotations_matrix <- A_i
 
     genotypes[[i]]$truth <- list(
@@ -508,8 +511,9 @@ generate_phenotype_sparse <- function(X, beta_true, phi, effect_distribution,
   g_sparse <- as.numeric(X %*% beta_true)
   var_g <- var(g_sparse)
 
-  # Handle "equal" effect distribution: rescale so each causal variant
-  # contributes equally to genetic variance
+  # Handle "equal" effect distribution: effects are pre-set to 1 (equal
+  # magnitudes); the PVE target is achieved by calibrating sigma^2, not by
+  # rescaling effects. Random signs are tried only if Var(Xb) == 0.
   if (effect_distribution == "equal") {
     S <- length(causal_indices)
     # Set effects so that Var(Xb) gives a reasonable signal,
@@ -654,7 +658,7 @@ generate_phenotype_sparse_inf <- function(X, beta_true, phi, p_causal,
 
 
 # =============================================================================
-# Internal: compute marginal summary statistics and LD matrix
+# Internal: compute marginal summary statistics
 # =============================================================================
 
 compute_summary_statistics <- function(X, y) {
@@ -685,15 +689,9 @@ compute_summary_statistics <- function(X, y) {
   # z-scores
   z <- beta_hat / se
 
-  # LD matrix: correlation matrix of standardised genotypes
-  # For standardised X (mean 0, var 1), this equals (1/(n-1)) * X^T X
-  # We use cor() to be safe regardless of exact standardisation
-  LD <- cor(X)
-
   list(
     beta_hat = beta_hat,
     se = se,
-    z = z,
-    LD = LD
+    z = z
   )
 }
