@@ -24,10 +24,19 @@ Open R in the project directory and restore all R package dependencies:
 renv::restore()
 ```
 
-> **Note:** Two packages (CARMA and susieR) install from GitHub. If you hit
-> rate limits, set a GitHub personal access token first:
-> `Sys.setenv(GITHUB_PAT = "your_token_here")` — or create one at
-> github.com/settings/tokens (no scopes needed for public repos).
+> **Note:** CARMA and susieR install from GitHub. A GitHub personal access
+> token is required (even for public repos, unauthenticated installs hit rate
+> limits quickly). Set one before running `renv::restore()`:
+>
+> ```r
+> Sys.setenv(GITHUB_PAT = "your_token_here")
+> renv::restore()
+> ```
+>
+> Create a token at github.com/settings/tokens — no scopes needed.
+>
+> `sim1000G` and `hapsim` are archived from CRAN and are fetched directly
+> from the CRAN archive; this is handled automatically by the lockfile.
 
 This installs everything needed to run SuSiE, SuSiE-inf, ABF, and CARMA
 immediately. The other methods require additional steps described below.

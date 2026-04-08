@@ -1133,7 +1133,8 @@
     "hapsim": {
       "Package": "hapsim",
       "Version": "0.31",
-      "Source": "Repository",
+      "Source": "URL",
+      "URL": ["https://cran.r-project.org/src/contrib/Archive/hapsim/hapsim_0.31.tar.gz"],
       "Title": "Haplotype Data Simulation",
       "Date": "2017-06-05",
       "Author": "Giovanni Montana",
@@ -1143,7 +1144,6 @@
         "MASS"
       ],
       "License": "GPL (>= 2)",
-      "Repository": "RSPM",
       "NeedsCompilation": "yes",
       "Encoding": "UTF-8"
     },
@@ -2215,7 +2215,7 @@
     "sim1000G": {
       "Package": "sim1000G",
       "Version": "1.40",
-      "Source": "Repository",
+      "Source": "URL",
       "Type": "Package",
       "Title": "Genotype Simulations for Rare or Common Variants Using Haplotypes from 1000 Genomes",
       "Date": "2019-05-30",
@@ -2242,7 +2242,8 @@
         "rmarkdown"
       ],
       "Encoding": "UTF-8",
-      "Repository": "RSPM"
+      "Source": "URL",
+      "URL": ["https://cran.r-project.org/src/contrib/Archive/sim1000G/sim1000G_1.40.tar.gz"]
     },
     "stringi": {
       "Package": "stringi",
