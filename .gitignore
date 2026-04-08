@@ -58,5 +58,12 @@ rsconnect/
 results/
 figures/
 
+# Downloaded 1000 Genomes VCF files (regenerate with scripts/prepare_vcfs.R)
+data/vcf/*.vcf.gz
+data/vcf/*.vcf.gz.tbi
+
+# Cached HapMap GRCh37 genetic maps (downloaded automatically by sim1000G)
+data/genetic_maps/*.txt.gz
+
 # CARMA writes per-locus working files to the current directory
 post_locus_*

@@ -34,6 +34,11 @@
 #' @param standardise Logical. If TRUE, standardise each genotype column to
 #'   mean 0, variance 1 (as in BEATRICE). If FALSE, return raw 0/1/2
 #'   genotype coding. Default: TRUE.
+#' @param genetic_map_dir Character or NULL. Directory for caching the HapMap
+#'   GRCh37 genetic maps downloaded by sim1000G. Each chromosome's map (~1 MB)
+#'   is downloaded once and reused across R sessions. If NULL, maps are cached
+#'   in the session's temporary directory and re-downloaded each session.
+#'   Default: NULL.
 #' @param seed Integer or NULL. Random seed for reproducibility. If NULL,
 #'   no seed is set. Default: NULL.
 #' @param verbose Logical. Print progress messages. Default: TRUE.
@@ -91,6 +96,7 @@ simulate_genotypes <- function(n_regions = 3,
                                min_maf = 0.01,
                                max_maf = NA,
                                standardise = TRUE,
+                               genetic_map_dir = NULL,
                                seed = NULL,
                                verbose = TRUE) {
 
@@ -229,6 +235,7 @@ simulate_genotypes <- function(n_regions = 3,
       min_maf = min_maf,
       max_maf = max_maf,
       standardise = standardise,
+      genetic_map_dir = genetic_map_dir,
       region_id = i,
       verbose = verbose
     )
@@ -260,6 +267,7 @@ simulate_single_region <- function(vcf_file,
                                    min_maf,
                                    max_maf,
                                    standardise,
+                                   genetic_map_dir,
                                    region_id,
                                    verbose) {
 
@@ -323,6 +331,27 @@ simulate_single_region <- function(vcf_file,
     vcf_obj <- sim1000G::subsetVCF(vcf_obj, var_index = selected_indices)
   }
 
+  # --- Load genetic map for the chromosome in this VCF -----------------------
+  # sim1000G keeps genetic map state globally. Clear it before each region so
+  # the correct per-chromosome map is (down)loaded. generateUniformGeneticMap()
+  # is hardcoded to chr4 and must NOT be used with multi-chromosome VCFs.
+
+  gm_env <- sim1000G::geneticMap
+  rm(list = ls(envir = gm_env), envir = gm_env)
+
+  # Determine chromosome from VCF (first data row, first column)
+  vcf_chrom <- as.character(vcf_obj$vcf[1L, 1L])
+
+  # Pre-load the genetic map for this chromosome. This triggers a one-time
+  # download (~1 MB) from GitHub, cached in genetic_map_dir (or tempdir()).
+  if (!verbose) {
+    invisible(utils::capture.output(
+      sim1000G::readGeneticMap(vcf_chrom, dir = genetic_map_dir)
+    ))
+  } else {
+    sim1000G::readGeneticMap(vcf_chrom, dir = genetic_map_dir)
+  }
+
   # --- Initialise simulation and generate individuals -------------------------
 
   # totalNumberOfIndividuals must be >= n; give some headroom
@@ -331,13 +360,11 @@ simulate_single_region <- function(vcf_file,
   # sim1000G uses cat() and global state; capture output to keep things tidy
   if (!verbose) {
     invisible(utils::capture.output({
-      sim1000G::generateUniformGeneticMap()
       sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
       ids <- sim1000G::generateUnrelatedIndividuals(n)
       genotype_raw <- sim1000G::retrieveGenotypes(ids)
     }))
   } else {
-    sim1000G::generateUniformGeneticMap()
     sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
     ids <- sim1000G::generateUnrelatedIndividuals(n)
     genotype_raw <- sim1000G::retrieveGenotypes(ids)

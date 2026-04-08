@@ -48,8 +48,14 @@
 #'   annotations. Default: NULL (random).
 #' @param enrichment Numeric or NULL. Fold-enrichment for annotations.
 #'   Default: NULL (random).
+#' @param vcf_dir Character or NULL. Path to a directory of VCF files prepared
+#'   by \code{scripts/prepare_vcfs.R} (e.g. \code{"data/vcf"}). If provided,
+#'   \code{n_regions} files are sampled at random from this directory for each
+#'   run (reproducibly if \code{seed} is set). Each file provides a distinct
+#'   genomic region with real LD structure from 1000 Genomes Phase 3. Ignored
+#'   when \code{vcf_files} is also supplied. Default: NULL.
 #' @param vcf_files Character vector or NULL. VCF files for genotype
-#'   simulation. Default: NULL (use bundled example).
+#'   simulation. Overrides \code{vcf_dir}. Default: NULL (use bundled example).
 #' @param min_maf Numeric. Minimum MAF filter. Default: 0.01.
 #' @param max_maf Numeric or NA. Maximum MAF filter. Default: NA.
 #' @param standardise Logical. Standardise genotypes. Default: TRUE.
@@ -130,7 +136,9 @@ run_simulation <- function(n_regions = 3,
                            n_annotations = 3,
                            annotation_proportions = NULL,
                            enrichment = NULL,
+                           vcf_dir = NULL,
                            vcf_files = NULL,
+                           genetic_map_dir = "data/genetic_maps",
                            min_maf = 0.01,
                            max_maf = NA,
                            standardise = TRUE,
@@ -214,9 +222,53 @@ run_simulation <- function(n_regions = 3,
     message(sprintf("Total phenotype simulations: %d", n_scenarios * n_regions))
   }
 
+  # --- Resolve vcf_dir → vcf_files --------------------------------------------
+
+  if (!is.null(vcf_dir) && is.null(vcf_files)) {
+    if (!dir.exists(vcf_dir)) {
+      stop(
+        "vcf_dir does not exist: ", vcf_dir, "\n",
+        "Run scripts/prepare_vcfs.R first to download the reference VCF files.",
+        call. = FALSE
+      )
+    }
+    available <- list.files(vcf_dir, pattern = "\\.vcf\\.gz$", full.names = TRUE)
+    # Exclude index files (*.vcf.gz.tbi)
+    available <- available[!grepl("\\.tbi$", available)]
+    if (length(available) == 0) {
+      stop(
+        "No .vcf.gz files found in vcf_dir: ", vcf_dir, "\n",
+        "Run scripts/prepare_vcfs.R first.",
+        call. = FALSE
+      )
+    }
+    if (length(available) < n_regions) {
+      stop(
+        sprintf(
+          "vcf_dir contains %d VCF file(s) but n_regions = %d. ",
+          length(available), n_regions
+        ),
+        "Add more regions to data/regions.csv and re-run scripts/prepare_vcfs.R,",
+        " or reduce n_regions.",
+        call. = FALSE
+      )
+    }
+    vcf_files <- sort(sample(available, n_regions))
+    if (verbose) {
+      message(sprintf(
+        "Sampled %d region(s) from %d available in %s",
+        n_regions, length(available), vcf_dir
+      ))
+    }
+  }
+
   # --- Step 1: Simulate genotypes (once) --------------------------------------
 
   if (verbose) message("\n=== Simulating genotypes ===")
+
+  if (!is.null(genetic_map_dir) && !dir.exists(genetic_map_dir)) {
+    dir.create(genetic_map_dir, recursive = TRUE)
+  }
 
   genotypes <- simulate_genotypes(
     n_regions = n_regions,
@@ -226,6 +278,7 @@ run_simulation <- function(n_regions = 3,
     min_maf = min_maf,
     max_maf = max_maf,
     standardise = standardise,
+    genetic_map_dir = genetic_map_dir,
     seed = NULL,  # seed already set above
     verbose = verbose
   )
@@ -355,6 +408,7 @@ run_simulation <- function(n_regions = 3,
     annotation_proportions = annotation_proportions,
     enrichment = enrichment,
     min_maf = min_maf,
+    vcf_files_used = vcf_files,
     seed = seed,
     n_scenarios = n_scenarios
   )
