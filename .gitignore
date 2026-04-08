@@ -39,8 +39,11 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 
-# pkgdown site
-docs/
+# pkgdown generated site (not hand-written docs in docs/)
+docs/reference/
+docs/articles/
+docs/news/
+docs/index.html
 
 # translation temp files
 po/*~
@@ -54,3 +57,6 @@ rsconnect/
 # Benchmark outputs
 results/
 figures/
+
+# CARMA writes per-locus working files to the current directory
+post_locus_*
