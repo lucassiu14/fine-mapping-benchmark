@@ -88,8 +88,8 @@ Output is written to `results/test_run/`.
 | **CARMA** | R package | None (installed via renv) |
 | **FINEMAP** | C++ binary | Auto-downloaded by `setup_finemap()` |
 | **PAINTOR** | C++ binary | `conda install -c bioconda paintor` |
-| **Funmap** | Python package | Python + Funmap (see below) |
-| **BEATRICE** | Python script | Python + BEATRICE repo (see below) |
+| **Funmap** | Python package | `conda env create -f environment.yml` |
+| **BEATRICE** | Python script | `conda env create -f environment.yml` + BEATRICE repo |
 
 Methods that fail (binary not found, Python error, etc.) are skipped gracefully
 and reported in the results summary. They do not crash the pipeline.
@@ -122,56 +122,44 @@ source("R/wrappers/paintor.R")
 pp <- setup_paintor()   # finds PAINTOR on PATH
 ```
 
-### Funmap
+### Funmap and BEATRICE (shared Python environment)
 
-Funmap is a Python package called from R via reticulate.
-
-```bash
-git clone https://github.com/LeeHITsz/Funmap.git
-cd Funmap
-pip install -r requirements.txt
-pip install .
-```
-
-Then in R:
-
-```r
-source("R/wrappers/funmap.R")
-setup_funmap(python = "/path/to/python3")   # pass your Python path
-```
-
-### BEATRICE
-
-BEATRICE is a Python script. Clone the repository and create its conda environment:
+Both Funmap and BEATRICE require Python. A single conda environment covers both.
+An `environment.yml` is included in the repo:
 
 ```bash
-git clone https://github.com/sayangsep/Beatrice-Finemapping
-cd Beatrice-Finemapping
-conda env create -f conda_environment.yml
-conda activate beatrice
+conda env create -f environment.yml
+conda activate finemapping-python
 ```
 
-Then in R:
+> **Apple Silicon:** remove the `cpuonly` line from `environment.yml` before creating
+> the environment — PyTorch has native arm64 support and does not need that flag.
 
-```r
-source("R/wrappers/beatrice.R")
-setup_beatrice(
-  beatrice_dir = "~/Beatrice-Finemapping",
-  python       = "~/anaconda3/envs/beatrice/bin/python"
-)
+> **GPU:** also remove `cpuonly` if you have a CUDA-capable GPU.
+
+BEATRICE additionally requires its own repository (a Python script, not a package):
+
+```bash
+git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 ```
 
-Pass `beatrice_dir` and `python` via `method_args` in `run_methods()`:
+Then get the Python path for use in R:
+
+```bash
+conda run -n finemapping-python which python   # copy this path
+```
+
+Pass it via `method_args` in `run_methods()`:
 
 ```r
+PYTHON <- "/path/to/envs/finemapping-python/bin/python"   # from above
+
 results <- run_methods(
   simulation  = sim,
-  methods     = "beatrice",
+  methods     = c("funmap", "beatrice"),
   method_args = list(
-    beatrice = list(
-      beatrice_dir = "~/Beatrice-Finemapping",
-      python       = "~/anaconda3/envs/beatrice/bin/python"
-    )
+    funmap   = list(python = PYTHON, L = 10),
+    beatrice = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping")
   )
 )
 ```
@@ -203,6 +191,7 @@ fine-mapping-benchmark/
 │   ├── methods.md              # Method descriptions and wrapper API
 │   └── evaluation.md           # Evaluation metrics: formulas and implementation details
 ├── renv.lock                   # R package lockfile (use renv::restore())
+├── environment.yml             # conda environment for Funmap + BEATRICE
 └── README.md
 ```
 

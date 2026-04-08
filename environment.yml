@@ -1,0 +1,38 @@
+# Conda environment for Python-based fine-mapping methods:
+#   - Funmap  (reticulate calls Python via R)
+#   - BEATRICE (PyTorch-based; requires the BEATRICE repo to be cloned separately)
+#
+# Create the environment:
+#   conda env create -f environment.yml
+#
+# Activate it:
+#   conda activate finemapping-python
+#
+# Then tell R where to find this Python (in method_args or setup_funmap/setup_beatrice):
+#   python = reticulate::conda_python("finemapping-python")
+#
+# GPU users: remove the 'cpuonly' line below to allow CUDA builds of PyTorch.
+# Apple Silicon: 'cpuonly' is not needed — remove it; MPS acceleration is automatic.
+
+name: finemapping-python
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  # Scientific stack (required by both Funmap and BEATRICE)
+  - numpy>=1.26
+  - scipy>=1.11
+  - pandas>=2.1
+  - matplotlib>=3.8
+  - scikit-learn>=1.3
+  - seaborn>=0.12
+  - tqdm>=4.65
+  # PyTorch (required by BEATRICE)
+  - pytorch>=2.0
+  - cpuonly          # remove this line on Apple Silicon or if you have a CUDA GPU
+  - pip
+  - pip:
+    # Funmap — installed from GitHub (no PyPI release)
+    - git+https://github.com/LeeHITsz/Funmap.git
