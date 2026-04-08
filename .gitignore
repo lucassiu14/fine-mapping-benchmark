@@ -56,7 +56,9 @@ rsconnect/
 
 # Benchmark outputs
 results/
-figures/
+
+# Claude Code settings (local only)
+.claude/
 
 # Downloaded 1000 Genomes VCF files (regenerate with scripts/prepare_vcfs.R)
 data/vcf/*.vcf.gz

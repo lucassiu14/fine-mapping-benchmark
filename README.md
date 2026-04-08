@@ -9,8 +9,7 @@ multi-page PDF plots with stratified results.
 
 - R >= 4.1.0
 - [renv](https://rstudio.github.io/renv/) (installed automatically with the project)
-
-For methods that rely on external tools, see [Method-specific setup](#method-specific-setup) below.
+- [htslib](https://github.com/samtools/htslib) for `tabix` and `bgzip` (required by `scripts/prepare_vcfs.R`)
 
 ## Installation
 
@@ -25,7 +24,30 @@ Open R in the project directory and restore all R package dependencies:
 renv::restore()
 ```
 
-This installs everything needed to run SuSiE, SuSiE-inf, ABF, and CARMA immediately. The other methods require additional steps described below.
+> **Note:** Two packages (CARMA and susieR) install from GitHub. If you hit
+> rate limits, set a GitHub personal access token first:
+> `Sys.setenv(GITHUB_PAT = "your_token_here")` — or create one at
+> github.com/settings/tokens (no scopes needed for public repos).
+
+This installs everything needed to run SuSiE, SuSiE-inf, ABF, and CARMA
+immediately. The other methods require additional steps described below.
+
+## One-time reference data setup
+
+The genotype simulator draws from real 1000 Genomes Phase 3 haplotypes.
+Download 50 diverse 300 kb regions (one per genomic window in `data/regions.csv`,
+covering all 22 autosomes):
+
+```bash
+Rscript scripts/prepare_vcfs.R
+```
+
+This streams each window from the 1000 Genomes EBI FTP via tabix — no
+whole-chromosome downloads. Total download is ~150 MB. Files are saved to
+`data/vcf/` and `data/genetic_maps/` (both gitignored).
+
+> **Requires:** `tabix` and `bgzip` from htslib.
+> Install with `brew install htslib` (macOS) or `conda install -c bioconda htslib`.
 
 ## Quick start
 
@@ -40,16 +62,19 @@ source("R/wrappers/susie.R")
 source("R/wrappers/abf.R")
 
 # 1. Simulate genotypes + phenotypes
+#    vcf_dir randomly samples n_regions from the 50 downloaded regions.
+#    Set seed for reproducibility.
 sim <- run_simulation(
-  n_regions     = 5,
+  n_regions     = 20,
   n             = 500,
-  p             = 200,
-  n_iter        = 10,
-  S             = c(1, 2, 3),      # number of causal variants per region
-  phi           = c(0.2, 0.5),     # per-causal heritability
+  p             = 400,
+  n_iter        = 20,
+  S             = c(1, 2, 3, 5),
+  phi           = c(0.1, 0.2, 0.4),
   model         = "sparse",
   annotations   = "binary",
   n_annotations = 3,
+  vcf_dir       = "data/vcf",
   seed          = 42
 )
 
@@ -70,13 +95,8 @@ eval_out <- evaluate_methods(sim, results, save = TRUE, output_dir = "results/ru
 plot_results(eval_out, output_file = "results/run1/results.pdf")
 ```
 
-Or run the end-to-end test pipeline (all 6 methods, 3 regions, save + plot):
-
-```bash
-Rscript scripts/test_pipeline.R
-```
-
-Output is written to `results/test_run/`.
+> **Without `prepare_vcfs.R`:** omit `vcf_dir` and the simulator falls back to
+> the small bundled VCF (one chr4 region, ~500 SNPs). Useful for quick tests.
 
 ## Supported methods
 
@@ -132,8 +152,8 @@ conda env create -f environment.yml
 conda activate finemapping-python
 ```
 
-> **Apple Silicon:** remove the `cpuonly` line from `environment.yml` before creating
-> the environment — PyTorch has native arm64 support and does not need that flag.
+> **Apple Silicon:** remove the `cpuonly` line from `environment.yml` before
+> creating the environment — PyTorch has native arm64 support.
 
 > **GPU:** also remove `cpuonly` if you have a CUDA-capable GPU.
 
@@ -169,10 +189,10 @@ results <- run_methods(
 ```
 fine-mapping-benchmark/
 ├── R/
-│   ├── simulate_genotypes.R    # Genotype simulation (sim1000G)
+│   ├── simulate_genotypes.R    # Genotype simulation (sim1000G + 1000G haplotypes)
 │   ├── simulate_phenotypes.R   # Phenotype simulation (sparse / infinitesimal)
-│   ├── run_simulation.R        # Orchestration: runs simulation over scenarios
-│   ├── run_methods.R           # Runs all methods on a simulation object
+│   ├── run_simulation.R        # Orchestration: simulates over a parameter grid
+│   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
 │   ├── plot_results.R          # Generates multi-page PDF plots
 │   └── wrappers/               # One file per method
@@ -184,18 +204,25 @@ fine-mapping-benchmark/
 │       ├── paintor.R
 │       ├── funmap.R
 │       └── beatrice.R
+├── data/
+│   ├── regions.csv             # 50 genomic regions used for genotype simulation
+│   ├── vcf/                    # Downloaded 1000G VCF files (prepare_vcfs.R)
+│   └── genetic_maps/           # Cached HapMap GRCh37 genetic maps (auto-downloaded)
 ├── scripts/
+│   ├── prepare_vcfs.R          # One-time download of 1000G reference VCFs
 │   ├── test_pipeline.R         # End-to-end pipeline test (all methods)
-│   └── test_evaluate.R         # Unit tests for evaluation module (127 tests)
+│   └── test_evaluate.R         # Unit tests for evaluation module (125 tests)
 ├── docs/
 │   ├── methods.md              # Method descriptions and wrapper API
-│   └── evaluation.md           # Evaluation metrics: formulas and implementation details
-├── renv.lock                   # R package lockfile (use renv::restore())
+│   ├── evaluation.md           # Evaluation metrics: formulas and implementation
+│   ├── Benchmarking.pdf        # Benchmarking design document
+│   └── simulation_documentation.pdf  # Simulation methodology documentation
 ├── environment.yml             # conda environment for Funmap + BEATRICE
+├── renv.lock                   # R package lockfile (use renv::restore())
 └── README.md
 ```
 
-Results and figures are written to `results/` and `figures/` (both gitignored).
+Results are written to `results/` (gitignored).
 
 ## Simulation parameters
 
@@ -205,19 +232,22 @@ Results and figures are written to `results/` and `figures/` (both gitignored).
 |---|---|
 | `n_regions` | Number of independent genomic regions |
 | `n` | Sample size per region |
-| `p` | Number of variants per region (capped at 500 for bundled VCF data) |
+| `p` | Number of variants per region |
 | `n_iter` | Number of simulation replicates per scenario |
 | `S` | Vector of causal variant counts (one scenario per value) |
 | `phi` | Vector of per-causal heritability values (crossed with S) |
-| `model` | `"sparse"` or `"infinitesimal"` |
-| `annotations` | `"binary"` or `"none"` |
-| `n_annotations` | Number of binary annotation columns |
+| `model` | `"sparse"` or `"sparse_inf"` |
+| `annotations` | `"binary"`, `"continuous"`, or `"none"` |
+| `n_annotations` | Number of annotation columns |
+| `vcf_dir` | Directory of prepared 1000G VCF files (see `scripts/prepare_vcfs.R`) |
+| `genetic_map_dir` | Cache directory for HapMap genetic maps (default: `data/genetic_maps`) |
 | `seed` | Random seed |
 | `save` | Write simulation RDS to `output_dir` if `TRUE` |
 
 ## Evaluation output
 
-`evaluate_methods()` returns metrics for each method, globally and stratified by S, phi, and p_causal (sparse/infinitesimal). Key metrics:
+`evaluate_methods()` returns metrics for each method, globally and stratified
+by S, phi, and p_causal (sparse_inf model). Key metrics:
 
 - **AUPRC** — area under the precision-recall curve (PIPs vs causal truth)
 - **CS coverage** — proportion of credible sets containing at least one causal variant
@@ -225,15 +255,16 @@ Results and figures are written to `results/` and `figures/` (both gitignored).
 - **Median CS size** — median number of variants per credible set
 - **PIP calibration** — binned mean PIP vs observed fraction causal
 
-Standard errors are computed across replicates (`n_iter`) and stored alongside each metric. With `save = TRUE`, results are written as `evaluation.rds` and `evaluation_summary.csv`.
+Standard errors are computed across replicates (`n_iter`). With `save = TRUE`,
+results are written as `evaluation.rds` and `evaluation_summary.csv`.
 
 See [`docs/evaluation.md`](docs/evaluation.md) for full details.
 
 ## Adding a new method
 
-1. Create `R/wrappers/wrap_mymethod.R` with a `run_mymethod_region(region, params)` function.
+1. Create `R/wrappers/mymethod.R` with a `run_mymethod_region(region, params)` function.
 2. Return a named list with at minimum: `pip` (numeric vector, length p), `credible_sets` (list of integer vectors), `method`, `runtime_seconds`.
-3. Register the method in `R/run_methods.R` in the `METHOD_REGISTRY` list.
+3. Register the method in `R/run_methods.R` in `.FM_REGISTRY`.
 4. Add a `setup_mymethod()` function if external dependencies are required.
 
 See [`docs/methods.md`](docs/methods.md) for the full wrapper API specification.
