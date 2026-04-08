@@ -1134,7 +1134,7 @@
       "Package": "hapsim",
       "Version": "0.31",
       "Source": "URL",
-      "URL": ["https://cran.r-project.org/src/contrib/Archive/hapsim/hapsim_0.31.tar.gz"],
+      "URL": "https://cran.r-project.org/src/contrib/Archive/hapsim/hapsim_0.31.tar.gz",
       "Title": "Haplotype Data Simulation",
       "Date": "2017-06-05",
       "Author": "Giovanni Montana",
@@ -2243,7 +2243,7 @@
       ],
       "Encoding": "UTF-8",
       "Source": "URL",
-      "URL": ["https://cran.r-project.org/src/contrib/Archive/sim1000G/sim1000G_1.40.tar.gz"]
+      "URL": "https://cran.r-project.org/src/contrib/Archive/sim1000G/sim1000G_1.40.tar.gz"
     },
     "stringi": {
       "Package": "stringi",
