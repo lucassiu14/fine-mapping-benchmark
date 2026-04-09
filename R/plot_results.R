@@ -425,16 +425,27 @@
 #' metric summary panels with ±1 SE error bands/bars.
 #'
 #' @param eval_out  Output of \code{\link{evaluate_methods}}.
-#' @param output_file Character. Path of the PDF to write.
-#'   Default: \code{"results/evaluation.pdf"}.
+#' @param output_file Character or NULL. Full path of the PDF to write.
+#'   Takes precedence over \code{output_dir} when specified. If NULL
+#'   (default), the file is written as \code{evaluation.pdf} inside
+#'   \code{output_dir}.
+#' @param output_dir Character. Directory in which to save the PDF when
+#'   \code{output_file} is NULL and \code{save = TRUE}. Created
+#'   automatically if it does not exist. Default: \code{"results"}.
+#' @param save Logical. If FALSE, the PDF is not written to disk (useful
+#'   for checking that the function runs without producing a file).
+#'   Default: TRUE.
 #' @param methods Character vector or NULL. Methods to include. NULL = all
 #'   evaluated methods.
 #' @param verbose Logical. Print progress. Default: TRUE.
 #'
-#' @return Invisibly returns \code{output_file}.
+#' @return Invisibly returns the path of the PDF that was (or would have
+#'   been) written.
 #' @export
 plot_results <- function(eval_out,
-                          output_file = "results/evaluation.pdf",
+                          output_file = NULL,
+                          output_dir  = "results",
+                          save        = TRUE,
                           methods     = NULL,
                           verbose     = TRUE) {
 
@@ -444,6 +455,19 @@ plot_results <- function(eval_out,
                    pkg, pkg), call. = FALSE)
     }
   }
+
+  # --- Resolve output path ----------------------------------------------------
+
+  stopifnot(
+    "output_dir must be a single character string" =
+      is.character(output_dir) && length(output_dir) == 1L
+  )
+
+  if (is.null(output_file)) {
+    output_file <- file.path(output_dir, "evaluation.pdf")
+  }
+
+  # --- Validate methods -------------------------------------------------------
 
   all_methods <- eval_out$methods_evaluated
   if (is.null(methods)) methods <- all_methods
@@ -458,6 +482,11 @@ plot_results <- function(eval_out,
   has_p_causal <- any(sapply(valid_methods, function(m) {
     !is.null(eval_out[[m]]$by_p_causal)
   }))
+
+  if (!save) {
+    if (verbose) message("  save = FALSE: skipping PDF output.")
+    return(invisible(output_file))
+  }
 
   # Create parent dir if needed
   out_dir <- dirname(output_file)

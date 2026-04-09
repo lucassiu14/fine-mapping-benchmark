@@ -64,6 +64,12 @@
 #'   \code{n_annotations}. Values must be > 0 (values < 1 indicate
 #'   depletion). Default: NULL.
 #' @param seed Integer or NULL. Random seed. Default: NULL.
+#' @param save Logical. If TRUE, save the returned list (genotypes augmented
+#'   with phenotypes) as an \code{.rds} file inside \code{output_dir}. The
+#'   filename encodes the key simulation parameters and the seed. Default: FALSE.
+#' @param output_dir Character. Directory in which to save the result when
+#'   \code{save = TRUE}. Created automatically if it does not exist.
+#'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress. Default: TRUE.
 #'
 #' @return The input \code{genotypes} list, with additional fields appended
@@ -122,6 +128,8 @@ simulate_phenotypes <- function(genotypes,
                                 annotation_proportions = NULL,
                                 enrichment = NULL,
                                 seed = NULL,
+                                save = FALSE,
+                                output_dir = "results",
                                 verbose = TRUE) {
 
   # --- Input validation -------------------------------------------------------
@@ -353,6 +361,28 @@ simulate_phenotypes <- function(genotypes,
   if (verbose) {
     message("Phenotype simulation complete.")
   }
+
+  # --- Save to disk (optional) ------------------------------------------------
+
+  if (save) {
+    stopifnot(
+      "output_dir must be a single character string" =
+        is.character(output_dir) && length(output_dir) == 1L
+    )
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+    seed_tag <- if (!is.null(seed)) paste0("seed", seed) else "noseed"
+    S_tag    <- paste(sort(unique(S)),   collapse = "-")
+    phi_tag  <- paste(sort(unique(phi)), collapse = "-")
+    fname    <- sprintf("phenotypes_%s_S%s_phi%s_%s.rds",
+                        model, S_tag, phi_tag, seed_tag)
+    fpath    <- file.path(output_dir, fname)
+    saveRDS(genotypes, file = fpath)
+    if (verbose) message(sprintf("Phenotypes saved to: %s", fpath))
+  }
+
+  # --- Return -----------------------------------------------------------------
 
   genotypes
 }

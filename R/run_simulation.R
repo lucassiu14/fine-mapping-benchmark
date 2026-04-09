@@ -294,12 +294,17 @@ run_simulation <- function(n_regions = 3,
   annotation_type_internal <- if (is.matrix(annotations)) "user_supplied" else annotations
   if (annotation_type_internal %in% c("binary", "continuous")) {
     if (verbose) message("\nPre-generating annotation matrices...")
+    # Broadcast scalar annotation_proportions to the required length so that
+    # simulate_annotations_for_region receives a proper vector (not a scalar
+    # that would produce NA when indexed beyond position 1).
+    ap_internal <- if (!is.null(annotation_proportions) && length(annotation_proportions) == 1L)
+      rep(annotation_proportions, n_annotations) else annotation_proportions
     for (i in seq_len(n_regions)) {
       annot <- simulate_annotations_for_region(
         p = genotypes[[i]]$p,
         annotation_type = annotation_type_internal,
         n_annotations = n_annotations,
-        annotation_proportions = annotation_proportions,
+        annotation_proportions = ap_internal,
         user_annotation_matrix = NULL
       )
       genotypes[[i]]$annotations_matrix    <- annot$matrix

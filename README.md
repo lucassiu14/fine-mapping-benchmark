@@ -70,9 +70,7 @@ source("R/plot_results.R")
 source("R/wrappers/susie.R")
 source("R/wrappers/abf.R")
 
-# 1. Simulate genotypes + phenotypes
-#    vcf_dir randomly samples n_regions from the 50 downloaded regions.
-#    Set seed for reproducibility.
+# 1. Simulate genotypes + phenotypes across a parameter grid
 sim <- run_simulation(
   n_regions     = 20,
   n             = 500,
@@ -84,7 +82,9 @@ sim <- run_simulation(
   annotations   = "binary",
   n_annotations = 3,
   vcf_dir       = "data/vcf",
-  seed          = 42
+  seed          = 42,
+  save          = TRUE,
+  output_dir    = "results/run1"
 )
 
 # 2. Run fine-mapping methods
@@ -94,14 +94,20 @@ results <- run_methods(
   method_args = list(
     susie = list(L = 10, coverage = 0.95),
     abf   = list(prior_variance = 0.04)
-  )
+  ),
+  save       = TRUE,
+  output_dir = "results/run1"
 )
 
 # 3. Evaluate
-eval_out <- evaluate_methods(sim, results, save = TRUE, output_dir = "results/run1")
+eval_out <- evaluate_methods(
+  sim, results,
+  save       = TRUE,
+  output_dir = "results/run1"
+)
 
 # 4. Plot
-plot_results(eval_out, output_file = "results/run1/results.pdf")
+plot_results(eval_out, output_dir = "results/run1")
 ```
 
 > **Without `prepare_vcfs.R`:** omit `vcf_dir` and the simulator falls back to
@@ -220,10 +226,12 @@ fine-mapping-benchmark/
 ├── scripts/
 │   ├── prepare_vcfs.R          # One-time download of 1000G reference VCFs
 │   ├── test_pipeline.R         # End-to-end pipeline test (all methods)
-│   └── test_evaluate.R         # Unit tests for evaluation module (125 tests)
+│   ├── test_evaluate.R         # Unit tests for evaluation module (125 tests)
+│   └── test_comprehensive.R    # Argument-level tests for all functions (201 tests)
 ├── docs/
 │   ├── methods.md              # Method descriptions and wrapper API
 │   ├── evaluation.md           # Evaluation metrics: formulas and implementation
+│   ├── testing_report.md       # Auto-generated argument-level test report
 │   ├── Benchmarking.pdf        # Benchmarking design document
 │   └── simulation_documentation.pdf  # Simulation methodology documentation
 ├── environment.yml             # conda environment for Funmap + BEATRICE
@@ -233,25 +241,311 @@ fine-mapping-benchmark/
 
 Results are written to `results/` (gitignored).
 
-## Simulation parameters
+---
 
-`run_simulation()` accepts:
+## API Reference
 
-| Parameter | Description |
-|---|---|
-| `n_regions` | Number of independent genomic regions |
-| `n` | Sample size per region |
-| `p` | Number of variants per region |
-| `n_iter` | Number of simulation replicates per scenario |
-| `S` | Vector of causal variant counts (one scenario per value) |
-| `phi` | Vector of per-causal heritability values (crossed with S) |
-| `model` | `"sparse"` or `"sparse_inf"` |
-| `annotations` | `"binary"`, `"continuous"`, or `"none"` |
-| `n_annotations` | Number of annotation columns |
-| `vcf_dir` | Directory of prepared 1000G VCF files (see `scripts/prepare_vcfs.R`) |
-| `genetic_map_dir` | Cache directory for HapMap genetic maps (default: `data/genetic_maps`) |
-| `seed` | Random seed |
-| `save` | Write simulation RDS to `output_dir` if `TRUE` |
+All six main functions share a consistent interface: every function accepts
+`save`, `output_dir`, and `verbose` arguments. Setting `save = TRUE` writes
+output to `output_dir` (which is created automatically if it does not exist).
+Setting `verbose = FALSE` suppresses all progress messages.
+
+---
+
+### `simulate_genotypes()`
+
+Simulates genotype matrices from 1000 Genomes haplotypes using sim1000G.
+Returns one matrix per region with realistic LD structure.
+
+```r
+genotypes <- simulate_genotypes(
+  n_regions       = 3,
+  n               = 500,
+  p               = 200,
+  vcf_files       = NULL,
+  min_maf         = 0.01,
+  max_maf         = NA,
+  standardise     = TRUE,
+  genetic_map_dir = "data/genetic_maps",
+  seed            = NULL,
+  save            = FALSE,
+  output_dir      = "results",
+  verbose         = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `n_regions` | integer ≥ 1 | `3` | Number of independent genomic regions to simulate |
+| `n` | integer ≥ 1 | `500` | Number of unrelated individuals |
+| `p` | integer or integer vector | `200` | Target number of SNPs per region. Scalar = same for all regions; vector of length `n_regions` = per-region targets. Capped at 500 when using the bundled VCF |
+| `vcf_files` | character vector or `NULL` | `NULL` | VCF files to simulate from (one per region, or one path reused for all). `NULL` uses the bundled sim1000G example VCF |
+| `min_maf` | numeric ∈ [0, 0.5] | `0.01` | Minimum minor allele frequency filter |
+| `max_maf` | numeric or `NA` | `NA` | Maximum MAF filter; `NA` = no upper limit |
+| `standardise` | logical | `TRUE` | If `TRUE`, standardise each column to mean 0, variance 1. If `FALSE`, return raw 0/1/2 dosages |
+| `genetic_map_dir` | character or `NULL` | `NULL` | Directory for caching HapMap GRCh37 genetic maps. `NULL` uses `tempdir()` (re-downloaded each session) |
+| `seed` | integer or `NULL` | `NULL` | Random seed for reproducibility |
+| `save` | logical | `FALSE` | If `TRUE`, write the returned list as `genotypes_{n_regions}regions_n{n}_p{p}_{seed}.rds` inside `output_dir` |
+| `output_dir` | character | `"results"` | Directory for saved output; created automatically if absent |
+| `verbose` | logical | `TRUE` | Print progress messages |
+
+**Returns:** A list of length `n_regions`. Each element contains:
+`X` (standardised genotype matrix, n × p), `X_raw` (raw 0/1/2 matrix),
+`n`, `p`, `maf`, `variant_ids`, `region_id`, `vcf_source`.
+
+---
+
+### `simulate_phenotypes()`
+
+Takes the output of `simulate_genotypes()` and adds phenotypes, summary
+statistics, LD matrices, and ground truth to each region.
+
+```r
+sim <- simulate_phenotypes(
+  genotypes              = genotypes,
+  S                      = 1,
+  phi                    = 0.1,
+  model                  = "sparse",
+  p_causal               = 0.5,
+  inf_model              = "beatrice",
+  effect_distribution    = "normal",
+  effect_variance        = 0.36,
+  annotations            = "none",
+  n_annotations          = 3,
+  annotation_proportions = NULL,
+  enrichment             = NULL,
+  seed                   = NULL,
+  save                   = FALSE,
+  output_dir             = "results",
+  verbose                = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `genotypes` | list | — | Output from `simulate_genotypes()` |
+| `S` | integer or integer vector | `1` | Number of causal variants per region. Scalar = same for all; vector of length `n_regions` = per-region |
+| `phi` | numeric or numeric vector | `0.1` | Proportion of variance explained (PVE). Must be in (0, 1). Scalar or per-region vector |
+| `model` | `"sparse"` or `"sparse_inf"` | `"sparse"` | Genetic architecture. `"sparse"` = causal effects only; `"sparse_inf"` = sparse + infinitesimal background |
+| `p_causal` | numeric ∈ (0, 1] | `0.5` | Fraction of total genetic variance from the sparse component. Only used when `model = "sparse_inf"` |
+| `inf_model` | `"beatrice"` or `"susie_inf"` | `"beatrice"` | Infinitesimal formulation: `"beatrice"` draws background effects from non-causal variants only; `"susie_inf"` uses all variants. Only used when `model = "sparse_inf"` |
+| `effect_distribution` | `"normal"` or `"equal"` | `"normal"` | Distribution for causal effect sizes. `"normal"` draws from N(0, `effect_variance`); `"equal"` partitions variance equally |
+| `effect_variance` | numeric > 0 | `0.36` | Variance of the normal effect size distribution (SD ≈ 0.6). Only used when `effect_distribution = "normal"` |
+| `annotations` | `"none"`, `"binary"`, `"continuous"`, or matrix | `"none"` | Functional annotation mode. A user-supplied p × m matrix is also accepted |
+| `n_annotations` | integer ≥ 1 | `3` | Number of annotation columns (for `"binary"` or `"continuous"`) |
+| `annotation_proportions` | numeric, vector, or `NULL` | `NULL` | Proportion of SNPs with value 1 per binary annotation. `NULL` = random from Uniform(0.01, 0.30). Scalar or vector of length `n_annotations` |
+| `enrichment` | numeric, vector, or `NULL` | `NULL` | Fold-enrichment of each annotation for causal variant selection. `NULL` = random from Uniform(2, 10). Scalar or vector of length `n_annotations` |
+| `seed` | integer or `NULL` | `NULL` | Random seed |
+| `save` | logical | `FALSE` | If `TRUE`, write the returned list as `phenotypes_{model}_S{S}_phi{phi}_{seed}.rds` inside `output_dir` |
+| `output_dir` | character | `"results"` | Directory for saved output; created automatically if absent |
+| `verbose` | logical | `TRUE` | Print progress messages |
+
+**Returns:** The input `genotypes` list with additional fields per region:
+`y`, `z`, `beta_hat`, `se`, `LD`, `annotations_matrix`, `truth`.
+The `truth` sub-list records `causal_indices`, `causal_effects`, `beta_true`, `pve`, `S`, `phi`, `model`, and annotation settings.
+
+---
+
+### `run_simulation()`
+
+Orchestrates a full benchmarking simulation. Simulates genotypes once, then
+sweeps over all combinations of S, phi (and optionally p_causal), generating
+`n_iter` independent replicates per combination.
+
+```r
+sim <- run_simulation(
+  n_regions              = 3,
+  n                      = 500,
+  p                      = 200,
+  n_iter                 = 5,
+  S                      = c(1, 2, 3, 5),
+  phi                    = c(0.1, 0.2, 0.4, 0.6),
+  model                  = "sparse",
+  p_causal               = c(0.1, 0.2, 0.4),
+  inf_model              = "beatrice",
+  effect_distribution    = "normal",
+  effect_variance        = 0.36,
+  annotations            = "none",
+  n_annotations          = 3,
+  annotation_proportions = NULL,
+  enrichment             = NULL,
+  vcf_dir                = NULL,
+  vcf_files              = NULL,
+  genetic_map_dir        = "data/genetic_maps",
+  min_maf                = 0.01,
+  max_maf                = NA,
+  standardise            = TRUE,
+  seed                   = NULL,
+  save                   = FALSE,
+  output_dir             = "results",
+  verbose                = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `n_regions` | integer ≥ 1 | `3` | Number of independent genomic regions |
+| `n` | integer ≥ 1 | `500` | Number of individuals |
+| `p` | integer or vector | `200` | Target SNPs per region |
+| `n_iter` | integer ≥ 1 | `5` | Independent replicates per parameter combination |
+| `S` | integer vector | `c(1,2,3,5)` | Causal-variant counts to sweep over |
+| `phi` | numeric vector ∈ (0, 1) | `c(0.1,0.2,0.4,0.6)` | PVE values to sweep over |
+| `model` | `"sparse"` or `"sparse_inf"` | `"sparse"` | Genetic architecture model |
+| `p_causal` | numeric vector ∈ (0, 1] | `c(0.1,0.2,0.4)` | Sparse-component fractions to sweep. Only used when `model = "sparse_inf"` |
+| `inf_model` | `"beatrice"` or `"susie_inf"` | `"beatrice"` | Infinitesimal formulation. Only used when `model = "sparse_inf"` |
+| `effect_distribution` | `"normal"` or `"equal"` | `"normal"` | Effect size distribution |
+| `effect_variance` | numeric > 0 | `0.36` | Variance for normal effect sizes |
+| `annotations` | `"none"`, `"binary"`, `"continuous"`, or matrix | `"none"` | Functional annotation mode |
+| `n_annotations` | integer ≥ 1 | `3` | Number of annotation columns |
+| `annotation_proportions` | numeric, vector, or `NULL` | `NULL` | Proportion of 1s per binary annotation (scalar or per-annotation vector) |
+| `enrichment` | numeric, vector, or `NULL` | `NULL` | Fold-enrichment per annotation for causal selection |
+| `vcf_dir` | character or `NULL` | `NULL` | Directory of VCF files from `scripts/prepare_vcfs.R`. `n_regions` files are sampled at random (reproducibly if `seed` is set) |
+| `vcf_files` | character vector or `NULL` | `NULL` | Explicit VCF paths; overrides `vcf_dir` when supplied |
+| `genetic_map_dir` | character or `NULL` | `"data/genetic_maps"` | Cache directory for HapMap genetic maps |
+| `min_maf` | numeric | `0.01` | Minimum MAF filter |
+| `max_maf` | numeric or `NA` | `NA` | Maximum MAF filter |
+| `standardise` | logical | `TRUE` | Standardise genotype columns |
+| `seed` | integer or `NULL` | `NULL` | Master random seed |
+| `save` | logical | `FALSE` | If `TRUE`, write the full result as an `.rds` file inside `output_dir` |
+| `output_dir` | character | `"results"` | Output directory; created automatically if absent |
+| `verbose` | logical | `TRUE` | Print progress messages |
+
+**Returns:** A list with:
+- `genotypes` — output of `simulate_genotypes()`, with pre-computed LD matrices
+- `scenarios` — list of simulation scenarios, each containing `S`, `phi`, `p_causal`, `iter`, `model`, and `regions` (per-region phenotypes + truth)
+- `params` — all simulation parameters for reproducibility
+
+The total number of scenarios is `length(S) × length(phi) × n_iter` (sparse) or
+`length(S) × length(phi) × length(p_causal) × n_iter` (sparse_inf).
+
+---
+
+### `run_methods()`
+
+Applies one or more fine-mapping methods to every scenario × region combination
+in a simulation object.
+
+```r
+results <- run_methods(
+  simulation  = sim,
+  methods     = "susie",
+  method_args = list(),
+  save        = FALSE,
+  output_dir  = "results",
+  verbose     = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `simulation` | list | — | Output of `run_simulation()` |
+| `methods` | character vector | `"susie"` | Methods to run (case-insensitive). Any combination of the supported methods below |
+| `method_args` | named list | `list()` | Per-method argument overrides. Each entry is a named list passed to that method's region runner. Arguments not listed use the method's own defaults |
+| `save` | logical | `FALSE` | If `TRUE`, write each method's results as `{method}.rds` and a `run_metadata.rds` file inside a sub-directory of `output_dir` |
+| `output_dir` | character | `"results"` | Root output directory; sub-directory is named after simulation parameters |
+| `verbose` | logical | `TRUE` | Print per-fit progress |
+
+**Supported methods and their tuneable arguments (via `method_args`):**
+
+| Method key | Key arguments |
+|-----------|--------------|
+| `"susie"` | `L` (int, default 10), `coverage` (0–1, default 0.95), `min_abs_corr` (default 0.5), `max_iter` (default 100), `estimate_residual_variance` (logical), `estimate_prior_variance` (logical), `prior_variance` (numeric) |
+| `"susie_inf"` | `L` (int, default 10), `coverage` (0–1, default 0.95), `max_iter` (default 100) |
+| `"abf"` | `prior_variance` (default 0.04), `coverage` (0–1, default 0.95) |
+| `"carma"` | `rho.index` (default 0.95), `num.causal` (default 10) |
+| `"finemap"` | `finemap_path` (path to binary), `n_causal` (default 5), `prior_std` (default 0.05) |
+| `"paintor"` | `paintor_path` (path to binary), `max_causal` (default 2) |
+| `"beatrice"` | `beatrice_dir` (path to repo), `python` (Python executable), `max_iter` (default 2000) |
+| `"funmap"` | `python` (Python executable), `L` (default 10), `max_iter` (default 100) |
+
+**Returns:** A named list, one entry per method plus `methods_run`, `simulation_params`, `run_timestamp`.
+Each method entry contains `results` (flat list of per-fit outputs), `n_total`, `n_failed`, `total_runtime_seconds`.
+Each per-fit result has `pip`, `credible_sets`, `method`, `input_type`, `params`, `runtime_seconds`, `additional`, plus scenario metadata (`scenario_id`, `region_id`, `S`, `phi`, `iter`).
+
+---
+
+### `evaluate_methods()`
+
+Computes evaluation metrics for each method against the simulation ground truth.
+Results are stratified globally and by S, phi, and p_causal (sparse_inf only).
+
+```r
+eval_out <- evaluate_methods(
+  simulation     = sim,
+  results        = results,
+  pip_thresholds = seq(0, 1, by = 0.005),
+  n_pip_cal_bins = 10L,
+  save           = FALSE,
+  output_dir     = "results",
+  verbose        = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `simulation` | list | — | Output of `run_simulation()` |
+| `results` | list | — | Output of `run_methods()` |
+| `pip_thresholds` | numeric vector | `seq(0, 1, by = 0.005)` | PIP thresholds at which to compute power and FDR for the precision-recall curve |
+| `n_pip_cal_bins` | integer ≥ 1 | `10` | Number of equal-width bins for the PIP calibration plot |
+| `save` | logical | `FALSE` | If `TRUE`, write `evaluation.rds` (full object) and `evaluation_summary.csv` (per-method global metrics) to `output_dir` |
+| `output_dir` | character | `"results"` | Output directory; created automatically if absent |
+| `verbose` | logical | `TRUE` | Print progress messages |
+
+**Returns:** A named list (one entry per method) containing `global`, `by_S`, `by_phi`, and `by_p_causal` strata.
+Each stratum contains:
+
+| Field | Description |
+|-------|-------------|
+| `fdr_power_curve` | Data frame with columns `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`, `power_se`, `precision_se` |
+| `auprc` | Area under the precision-recall curve (±`auprc_se`) |
+| `pip_calibration` | Data frame: binned mean PIP vs observed fraction causal (±`frac_causal_se`) |
+| `cs_coverage` | Proportion of reported credible sets containing ≥1 true causal variant (±`cs_coverage_se`) |
+| `cs_power` | Proportion of true causal variants captured by any credible set (±`cs_power_se`) |
+| `cs_size_median` | Median number of variants per credible set (±SE) |
+| `cs_size_mean` | Mean number of variants per credible set (±SE) |
+| `n_cs_reported` | Total credible sets reported across all fits |
+| `runtime_mean` | Mean runtime in seconds across successful fits (±`runtime_mean_se`) |
+| `n_fits` | Total fits attempted |
+| `n_failed` | Fits that errored |
+
+Standard errors are computed across replicates (`n_iter`). SE fields are `NA` when `n_iter < 2`.
+
+---
+
+### `plot_results()`
+
+Generates a multi-page PDF with precision-recall curves, PIP calibration plots,
+and summary metric panels — globally and stratified by S, phi, and p_causal.
+
+```r
+plot_results(
+  eval_out    = eval_out,
+  output_file = NULL,
+  output_dir  = "results",
+  save        = TRUE,
+  methods     = NULL,
+  verbose     = TRUE
+)
+```
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `eval_out` | list | — | Output of `evaluate_methods()` |
+| `output_file` | character or `NULL` | `NULL` | Full path for the PDF. When specified, takes precedence over `output_dir`. When `NULL`, the file is written as `evaluation.pdf` inside `output_dir` |
+| `output_dir` | character | `"results"` | Directory in which to write `evaluation.pdf` when `output_file` is `NULL`. Created automatically if absent |
+| `save` | logical | `TRUE` | If `FALSE`, skip writing the PDF entirely (useful for dry runs) |
+| `methods` | character vector or `NULL` | `NULL` | Methods to include in the plots. `NULL` = all evaluated methods |
+| `verbose` | logical | `TRUE` | Print section progress |
+
+**Returns:** Invisibly returns the path of the PDF that was (or would have been) written.
+
+**PDF sections:**
+1. **Global** — PR curve (all methods), PIP calibration (faceted by method), summary table with ±SE
+2. **By S** — PR grid, calibration grid, metric line plots vs S with error bars
+3. **By phi** — same structure as By S
+4. **By p_causal** — same structure (sparse_inf model only)
+
+---
 
 ## Evaluation output
 
@@ -271,9 +565,32 @@ See [`docs/evaluation.md`](docs/evaluation.md) for full details.
 
 ## Adding a new method
 
-1. Create `R/wrappers/mymethod.R` with a `run_mymethod_region(region, params)` function.
-2. Return a named list with at minimum: `pip` (numeric vector, length p), `credible_sets` (list of integer vectors), `method`, `runtime_seconds`.
+1. Create `R/wrappers/mymethod.R` with a `run_mymethod_region(region_geno, region_pheno, ...)` function.
+2. Return a named list with at minimum: `pip` (numeric vector, length p), `credible_sets` (list of integer vectors), `method`, `input_type`, `params`, `runtime_seconds`, `additional`.
 3. Register the method in `R/run_methods.R` in `.FM_REGISTRY`.
 4. Add a `setup_mymethod()` function if external dependencies are required.
 
 See [`docs/methods.md`](docs/methods.md) for the full wrapper API specification.
+
+## Testing
+
+Three test scripts are provided:
+
+| Script | Coverage | Tests |
+|--------|----------|-------|
+| `scripts/test_comprehensive.R` | Every argument of every public function | 201 PASS / 2 SKIP |
+| `scripts/test_evaluate.R` | Evaluation module unit tests | 125 PASS |
+| `scripts/test_pipeline.R` | End-to-end pipeline (all methods) | Informational |
+
+Run any test from the project root:
+
+```bash
+Rscript scripts/test_comprehensive.R
+```
+
+The 2 SKIPs in `test_comprehensive.R` are the FINEMAP and PAINTOR binary tests,
+which require external binaries unavailable on Apple Silicon without additional setup
+(see method-specific setup above).
+
+A human-readable argument-level test report is generated automatically at
+[`docs/testing_report.md`](docs/testing_report.md).

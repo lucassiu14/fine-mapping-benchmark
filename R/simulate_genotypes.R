@@ -41,6 +41,12 @@
 #'   Default: NULL.
 #' @param seed Integer or NULL. Random seed for reproducibility. If NULL,
 #'   no seed is set. Default: NULL.
+#' @param save Logical. If TRUE, save the returned genotype list as an
+#'   \code{.rds} file inside \code{output_dir}. The filename encodes
+#'   \code{n_regions}, \code{n}, \code{p}, and the seed. Default: FALSE.
+#' @param output_dir Character. Directory in which to save the result when
+#'   \code{save = TRUE}. Created automatically if it does not exist.
+#'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress messages. Default: TRUE.
 #'
 #' @return A list of length \code{n_regions}. Each element is a list with:
@@ -98,6 +104,8 @@ simulate_genotypes <- function(n_regions = 3,
                                standardise = TRUE,
                                genetic_map_dir = NULL,
                                seed = NULL,
+                               save = FALSE,
+                               output_dir = "results",
                                verbose = TRUE) {
 
   # --- Input validation -------------------------------------------------------
@@ -241,6 +249,26 @@ simulate_genotypes <- function(n_regions = 3,
     )
   }
 
+  # --- Save to disk (optional) ------------------------------------------------
+
+  if (save) {
+    stopifnot(
+      "output_dir must be a single character string" =
+        is.character(output_dir) && length(output_dir) == 1L
+    )
+    if (!dir.exists(output_dir)) {
+      dir.create(output_dir, recursive = TRUE)
+    }
+    seed_tag <- if (!is.null(seed)) paste0("seed", seed) else "noseed"
+    p_tag    <- if (length(unique(p)) == 1L) as.character(p[1L]) else
+                  paste(p, collapse = "-")
+    fname    <- sprintf("genotypes_%dregions_n%d_p%s_%s.rds",
+                        n_regions, n, p_tag, seed_tag)
+    fpath    <- file.path(output_dir, fname)
+    saveRDS(regions, file = fpath)
+    if (verbose) message(sprintf("Genotypes saved to: %s", fpath))
+  }
+
   # --- Return -----------------------------------------------------------------
 
   if (verbose) {
@@ -291,9 +319,9 @@ simulate_single_region <- function(vcf_file,
   }
 
   if (!verbose) {
-    invisible(utils::capture.output({
+    suppressMessages(invisible(utils::capture.output({
       vcf_obj <- read_vcf_call()
-    }))
+    })))
   } else {
     vcf_obj <- read_vcf_call()
   }
@@ -344,12 +372,14 @@ simulate_single_region <- function(vcf_file,
 
   # Pre-load the genetic map for this chromosome. This triggers a one-time
   # download (~1 MB) from GitHub, cached in genetic_map_dir (or tempdir()).
+  # Use tempdir() when genetic_map_dir is NULL so readGeneticMap gets a valid path.
+  map_dir <- if (is.null(genetic_map_dir)) tempdir() else genetic_map_dir
   if (!verbose) {
-    invisible(utils::capture.output(
-      sim1000G::readGeneticMap(vcf_chrom, dir = genetic_map_dir)
-    ))
+    suppressMessages(invisible(utils::capture.output(
+      sim1000G::readGeneticMap(vcf_chrom, dir = map_dir)
+    )))
   } else {
-    sim1000G::readGeneticMap(vcf_chrom, dir = genetic_map_dir)
+    sim1000G::readGeneticMap(vcf_chrom, dir = map_dir)
   }
 
   # --- Initialise simulation and generate individuals -------------------------
@@ -359,11 +389,11 @@ simulate_single_region <- function(vcf_file,
 
   # sim1000G uses cat() and global state; capture output to keep things tidy
   if (!verbose) {
-    invisible(utils::capture.output({
+    suppressMessages(invisible(utils::capture.output({
       sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
       ids <- sim1000G::generateUnrelatedIndividuals(n)
       genotype_raw <- sim1000G::retrieveGenotypes(ids)
-    }))
+    })))
   } else {
     sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
     ids <- sim1000G::generateUnrelatedIndividuals(n)
