@@ -73,7 +73,19 @@
 #'   A chromosome name (e.g. \code{"chr1"} or \code{"1"}) loads only blocks
 #'   from that chromosome (useful for small-scale testing). A data frame with
 #'   columns \code{region_id}, \code{chrom}, \code{start}, \code{end} uses
-#'   user-supplied coordinates. Default: \code{"representative"}.
+#'   user-supplied coordinates (e.g. a full LDetect partition loaded from
+#'   \code{data/gwfm_regions_ldetect_EUR.csv}). Default: \code{"representative"}.
+#' @param coverage Numeric in \code{(0, 1]}. Fraction of the loaded region set
+#'   to use. Regions are subsampled \emph{proportionally within each chromosome}
+#'   so that genome-wide spread is preserved at all coverage levels. For each
+#'   chromosome, \code{round(coverage * n_chr_regions)} regions are sampled
+#'   without replacement; chromosomes where this rounds to zero are omitted.
+#'   \code{coverage = 1} (default) uses all available regions. Lower values
+#'   reduce compute and download requirements proportionally. When using the
+#'   bundled 128-region set: \code{coverage = 0.25} gives ~32 regions;
+#'   \code{coverage = 0.1} gives ~13 regions. When using a full LDetect
+#'   partition (~1,703 blocks), \code{coverage = 1} approximates the entire
+#'   autosome. Default: \code{1}.
 #' @param p Integer or integer vector. Target number of SNPs per region.
 #'   Default: 200.
 #' @param min_maf Numeric. Minimum minor allele frequency filter. Default: 0.01.
@@ -163,6 +175,7 @@ simulate_gwfm_data <- function(n,
                                 annotation_proportions = NULL,
                                 enrichment          = NULL,
                                 regions             = "representative",
+                                coverage            = 1,
                                 p                   = 200,
                                 min_maf             = 0.01,
                                 vcf_dir             = "data/gwfm_vcf",
@@ -237,6 +250,12 @@ simulate_gwfm_data <- function(n,
     n_annotations <- as.integer(n_annotations)
   }
 
+  stopifnot(
+    "coverage must be a single number in (0, 1]" =
+      is.numeric(coverage) && length(coverage) == 1 &&
+      coverage > 0 && coverage <= 1
+  )
+
   if (annotation_type == "binary" && !is.null(annotation_proportions)) {
     annotation_proportions <- gwfm_validate_annotation_param(
       annotation_proportions, n_annotations, "annotation_proportions"
@@ -257,6 +276,19 @@ simulate_gwfm_data <- function(n,
   # ---------------------------------------------------------------------------
 
   region_df <- gwfm_load_regions(regions)
+
+  # Subsample regions if coverage < 1
+  if (coverage < 1) {
+    region_df <- gwfm_subsample_regions(region_df, coverage)
+    if (verbose) {
+      message(sprintf(
+        "coverage = %.2f: using %d of %d available regions (stratified by chromosome).",
+        coverage, nrow(region_df),
+        nrow(gwfm_load_regions(regions))
+      ))
+    }
+  }
+
   n_regions <- nrow(region_df)
 
   # Map region IDs to VCF files
@@ -541,6 +573,7 @@ simulate_gwfm_data <- function(n,
     n_annotations          = if (annotation_type %in% c("binary", "continuous")) n_annotations else NULL,
     annotation_proportions = annotation_proportions,
     enrichment             = enrichment,
+    coverage               = coverage,
     n_regions              = n_regions,
     p_total                = p_total,
     regions                = region_df,
@@ -584,6 +617,47 @@ simulate_gwfm_data <- function(n,
     ))
   }
 
+  result
+}
+
+
+# =============================================================================
+# Internal: stratified subsampling of regions by chromosome
+# =============================================================================
+
+# For each chromosome, samples round(coverage * n_chr) regions without
+# replacement. Chromosomes where this rounds to zero are omitted entirely.
+# The resulting region set preserves genome-wide spread at all coverage levels.
+
+gwfm_subsample_regions <- function(region_df, coverage) {
+
+  chrs <- sort(unique(region_df$chrom))
+  sampled_list <- vector("list", length(chrs))
+
+  for (k in seq_along(chrs)) {
+    chr      <- chrs[k]
+    chr_df   <- region_df[region_df$chrom == chr, ]
+    n_chr    <- nrow(chr_df)
+    n_keep   <- round(coverage * n_chr)
+
+    if (n_keep == 0L) next
+
+    n_keep <- min(n_keep, n_chr)
+    sel    <- sort(sample(n_chr, n_keep))
+    sampled_list[[k]] <- chr_df[sel, ]
+  }
+
+  result <- do.call(rbind, sampled_list[!vapply(sampled_list, is.null, logical(1))])
+
+  if (is.null(result) || nrow(result) == 0) {
+    stop(
+      "coverage = ", coverage, " resulted in zero regions being selected. ",
+      "Increase coverage or use a region set with more regions per chromosome.",
+      call. = FALSE
+    )
+  }
+
+  rownames(result) <- NULL
   result
 }
 

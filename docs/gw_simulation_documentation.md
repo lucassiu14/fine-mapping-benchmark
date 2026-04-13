@@ -2,6 +2,8 @@
 
 This document describes in full mathematical detail how `simulate_gwfm_data()` simulates genome-wide fine-mapping data. It covers the origin of the genotype data, every step of the phenotype simulation, the parameter space, the annotation model, and the precise distributions sampled at each stage. All notation is defined in the table below.
 
+See also Section 14 for input data format requirements, genome coverage options, and instructions for downloading region sets and VCF files.
+
 ---
 
 ## 1. Notation
@@ -383,7 +385,8 @@ For each region $i$ in each scenario, the following ground truth quantities are 
 | `n_annotations` | integer | 3 | Number of annotation columns $m$ |
 | `annotation_proportions` | numeric vector or NULL | NULL | $q_k$ values for binary annotations; NULL = random from $U(0.01, 0.30)$ |
 | `enrichment` | numeric vector or NULL | NULL | $\gamma_k$ values; NULL = random from $U(2, 10)$ |
-| `regions` | character or data frame | `"representative"` | Region set: `"representative"`, `"<chr>"`, or custom data frame |
+| `regions` | character or data frame | `"representative"` | Region set: `"representative"`, `"<chr>"`, or custom data frame (see Section 14) |
+| `coverage` | numeric in $(0,1]$ | `1` | Fraction of the loaded region set to use; stratified by chromosome (see Section 14) |
 | `p` | integer | 200 | Target SNPs per region (after MAF filtering) |
 | `min_maf` | numeric | 0.01 | Minimum MAF filter applied to VCF variants |
 | `vcf_dir` | character | `"data/gwfm_vcf"` | Directory containing per-region VCF files |
@@ -392,3 +395,131 @@ For each region $i$ in each scenario, the following ground truth quantities are 
 | `save` | logical | FALSE | If TRUE, save result as `.rds` in `output_dir` |
 | `output_dir` | character | `"results"` | Directory for saved output |
 | `verbose` | logical | TRUE | Print progress messages |
+
+---
+
+## 14. Input Data Requirements, Coverage Options, and Download Instructions
+
+### 14.1 Required input: VCF files
+
+`simulate_gwfm_data()` requires one bgzipped, tabix-indexed VCF file per region. These are **not downloaded automatically** — they must be prepared in advance by running one of the preparation scripts below. The function will error clearly if any expected VCF file is missing.
+
+**Format requirements for each VCF file:**
+
+| Property | Requirement |
+|---|---|
+| Genome build | GRCh37 / hg19 (must match 1000G Phase 3 coordinates) |
+| Compression | bgzipped (`.vcf.gz`) — use `bgzip`, not `gzip` |
+| Index | tabix index (`.vcf.gz.tbi`) — produced by `tabix -p vcf file.vcf.gz` |
+| Naming | `<region_id>.vcf.gz`, where `region_id` matches the `region_id` column in the region CSV |
+| Location | All files in a single directory, passed as `vcf_dir` |
+| Content | Standard VCF v4.x with GT fields; multi-allelic sites are handled by sim1000G |
+
+A VCF file for a 300 kb region from 1000 Genomes Phase 3 is typically **2–5 MB** on disk.
+
+### 14.2 Required input: region CSV file
+
+The region set is specified by a CSV file with the following columns:
+
+| Column | Type | Description |
+|---|---|---|
+| `region_id` | character | Unique identifier; must match the VCF filename (e.g. `gw001` → `gw001.vcf.gz`) |
+| `chrom` | integer | Autosomal chromosome number (1–22); no `chr` prefix |
+| `start` | integer | Window start position (GRCh37, 0-based or 1-based — consistent with the VCF) |
+| `end` | integer | Window end position |
+| `notes` | character | Optional description; ignored by the function |
+
+Additional columns are permitted and ignored.
+
+### 14.3 Genome coverage options
+
+Three region sets are available, covering different fractions of the autosome:
+
+| Region set | Regions | LD blocks covered | SNPs (at p=200) | VCF download | Genotype sim. time\* |
+|---|---|---|---|---|---|
+| Bundled (`"representative"`) | 128 | ~7.5% of LDetect EUR | ~25,600 | ~400 MB | ~15 min |
+| LDetect EUR (full) | ~1,703 | ~100% | ~340,000 | ~5 GB | ~3 hr |
+| LDetect AFR (full) | ~1,445 | ~100% | ~290,000 | ~4.5 GB | ~2.5 hr |
+| LDetect ASN (full) | ~1,647 | ~100% | ~330,000 | ~5 GB | ~3 hr |
+
+\* Approximate, for $n = 1{,}000$ on a modern laptop. Time scales linearly with $n$.
+
+The `coverage` argument controls what fraction of the **loaded** region set is used:
+
+- `coverage = 1` (default): use all regions in the loaded set
+- `coverage = 0.5`: use approximately half, sampled proportionally within each chromosome
+- `coverage = 0.1`: use approximately 10%
+
+Subsampling is **stratified by chromosome**: for chromosome $c$ with $n_c$ regions, $\text{round}(\texttt{coverage} \times n_c)$ regions are sampled without replacement. Chromosomes where this rounds to zero are omitted. This preserves genome-wide spread at all coverage values.
+
+**Combining `regions` and `coverage`:** use `regions` to select the upper bound (which region set to load) and `coverage` to select the density within that set. For example, to use 20% of the full LDetect EUR partition:
+
+```r
+ldetect <- read.csv("data/gwfm_regions_ldetect_EUR.csv")
+sim <- simulate_gwfm_data(
+  n       = 2000,
+  regions = ldetect,
+  coverage = 0.20,          # ~340 of 1703 regions
+  vcf_dir = "data/gwfm_vcf_ldetect_EUR",
+  ...
+)
+```
+
+### 14.4 Downloading the bundled region set VCFs (128 regions, ~400 MB)
+
+Run once from the project root. Requires `tabix` and `bgzip` (install via `brew install htslib` on macOS or `conda install -c bioconda htslib`):
+
+```bash
+Rscript scripts/prepare_gwfm_vcfs.R
+```
+
+This streams 128 × 300 kb windows from the 1000 Genomes Phase 3 FTP server using tabix, compresses them with bgzip, and saves them to `data/gwfm_vcf/`. No full chromosome is downloaded.
+
+### 14.5 Downloading a full LDetect partition (~1,703 blocks, ~5 GB VCF)
+
+**LDetect** (Berisa & Pickrell, 2016, *Bioinformatics* 32:283–285; doi: [10.1093/bioinformatics/btv546](https://doi.org/10.1093/bioinformatics/btv546)) provides approximately independent LD block partitions for three ancestry groups, estimated from 1000 Genomes Phase 3 haplotypes using a Fourier approach.
+
+Data source: [https://bitbucket.org/nygcresearch/ldetect-data](https://bitbucket.org/nygcresearch/ldetect-data)
+
+Available partitions:
+
+| File (on Bitbucket) | Population | Blocks |
+|---|---|---|
+| `EUR/fourier_ls-all.bed` | European | ~1,703 |
+| `AFR/fourier_ls-all.bed` | African | ~1,445 |
+| `ASN/fourier_ls-all.bed` | East Asian | ~1,647 |
+
+**Step 1 — Download and convert the LDetect block coordinates** (fast, ~seconds, no large files):
+
+```bash
+# Edit POPULATION <- "EUR" (or "AFR"/"ASN") in the script first
+Rscript scripts/download_ldetect_regions.R
+```
+
+This produces `data/gwfm_regions_ldetect_EUR.csv` (same format as `data/gwfm_regions.csv`). Each block's central 300 kb window is extracted as the simulation region.
+
+**Step 2 — Download VCF files** (slow, ~5 GB, run only when needed):
+
+Either set `DOWNLOAD_VCFS <- TRUE` inside `download_ldetect_regions.R` and re-run, or adapt `prepare_gwfm_vcfs.R` to point at the LDetect CSV:
+
+```r
+# In scripts/prepare_gwfm_vcfs.R, change:
+REGIONS <- "data/gwfm_regions_ldetect_EUR.csv"
+VCF_DIR <- "data/gwfm_vcf_ldetect_EUR"
+```
+
+Then:
+
+```bash
+Rscript scripts/prepare_gwfm_vcfs.R
+```
+
+The VCF download can be interrupted and resumed — already-downloaded files are skipped unless `OVERWRITE <- TRUE`.
+
+### 14.6 Alternative region sources
+
+Users may supply any data frame of regions meeting the format in Section 14.2. Other published LD block resources that are compatible with this format include:
+
+- **GCTB LD blocks** — used by SBayesRC and the GWFM paper (Wu et al., 2026). Available alongside the GCTB software at [https://cnsgenomics.com/software/gctb](https://cnsgenomics.com/software/gctb). Coordinates must be converted from their format to our CSV format.
+- **1000 Genomes LD blocks** — any custom partition of the 1000G reference panel is valid, provided VCF data are available for each window.
+- **Custom loci** — for targeted simulation around specific GWAS loci, supply a hand-curated data frame with the relevant windows.
