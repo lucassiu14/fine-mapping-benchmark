@@ -202,14 +202,13 @@ cat(sprintf('                             vcf_dir = "%s", ...)\n', VCF_DIR))
 
 if (!DOWNLOAD_VCFS) {
   cat(sprintf(
-    "\nVCF download skipped (DOWNLOAD_VCFS = FALSE).\n",
-    "To download VCF files for these regions, set DOWNLOAD_VCFS <- TRUE and re-run,\n",
-    "or run scripts/prepare_gwfm_vcfs.R after pointing REGIONS at:\n  %s\n",
-    OUT_CSV
-  ))
-  cat(sprintf(
-    "Estimated disk space required: ~%.1f GB for all %d regions.\n",
-    nrow(region_df) * 3 / 1000, nrow(region_df)
+    paste0("\nVCF download skipped (DOWNLOAD_VCFS = FALSE).\n",
+           "To download VCF files for these regions:\n",
+           "  - Set DOWNLOAD_VCFS <- TRUE in this script and re-run, OR\n",
+           "  - Edit scripts/prepare_gwfm_vcfs.R: set REGIONS <- \"%s\"\n",
+           "    and VCF_DIR <- \"%s\", then run that script.\n",
+           "Estimated disk space required: ~%.1f GB for all %d regions.\n"),
+    OUT_CSV, VCF_DIR, nrow(region_df) * 3 / 1000, nrow(region_df)
   ))
   quit(save = "no")
 }

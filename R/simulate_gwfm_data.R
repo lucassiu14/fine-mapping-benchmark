@@ -275,7 +275,8 @@ simulate_gwfm_data <- function(n,
   # Load region specifications
   # ---------------------------------------------------------------------------
 
-  region_df <- gwfm_load_regions(regions)
+  region_df   <- gwfm_load_regions(regions)
+  n_available <- nrow(region_df)
 
   # Subsample regions if coverage < 1
   if (coverage < 1) {
@@ -283,8 +284,7 @@ simulate_gwfm_data <- function(n,
     if (verbose) {
       message(sprintf(
         "coverage = %.2f: using %d of %d available regions (stratified by chromosome).",
-        coverage, nrow(region_df),
-        nrow(gwfm_load_regions(regions))
+        coverage, nrow(region_df), n_available
       ))
     }
   }
