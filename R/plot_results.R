@@ -28,8 +28,9 @@
   carma     = "#D55E00",
   funmap    = "#E69F00",
   paintor   = "#CC79A7",
-  beatrice  = "#F0E442",
-  finemap   = "#999999"
+  beatrice              = "#F0E442",
+  functional_beatrice   = "#E76BF3",
+  finemap               = "#999999"
 )
 
 .method_color_scale <- function(methods) {

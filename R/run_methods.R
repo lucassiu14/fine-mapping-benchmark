@@ -37,8 +37,9 @@
   abf       = "run_abf_region",
   funmap    = "run_funmap_region",
   paintor   = "run_paintor_region",
-  beatrice  = "run_beatrice_region",
-  carma     = "run_carma_region"
+  beatrice              = "run_beatrice_region",
+  functional_beatrice   = "run_functional_beatrice_region",
+  carma                 = "run_carma_region"
 )
 
 
