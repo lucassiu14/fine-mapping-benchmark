@@ -28,8 +28,6 @@ BEATRICE_DIR  <- file.path(PROJECT_ROOT, "alt_methods", "Beatrice-Finemapping")
 
 PAINTOR_PATH  <- "PAINTOR"
 
-FUNMAP_DIR    <- file.path(PROJECT_ROOT, "alt_methods", "Funmap_main")
-
 VCF_DIR       <- file.path(PROJECT_ROOT, "data", "gwfm_vcf")
 
 # =============================================================================
@@ -75,7 +73,7 @@ method_args <- list(
   susie_inf           = list(L = 5L, coverage = 0.95),
   beatrice            = list(beatrice_dir = BEATRICE_DIR, python = PYTHON,
                              max_iter = 500L, n_caus = 5L, sparse_concrete = 20L),
-  funmap              = list(funmap_dir = FUNMAP_DIR, python = PYTHON),
+  funmap              = list(python = PYTHON),
   functional_beatrice = list(beatrice_dir = FB_DIR, python = PYTHON,
                              max_iter = 500L, n_caus = 5L, sparse_concrete = 20L),
   paintor             = list(paintor_path = PAINTOR_PATH, max_causal = 3L)
@@ -146,7 +144,7 @@ if (n_fail > 0) {
   cat("\nFix the failing methods before submitting the full benchmark.\n")
   cat("Common issues:\n")
   cat("  beatrice / functional_beatrice: wrong --python path or conda env not activated\n")
-  cat("  funmap  : check FUNMAP_DIR and Python dependencies\n")
+  cat("  funmap  : install with pip install git+https://github.com/LeeHITsz/Funmap.git, check PYTHON path\n")
   cat("  paintor : binary not on PATH — set PAINTOR_PATH to full path\n")
   quit(save = "no", status = 1)
 } else {
