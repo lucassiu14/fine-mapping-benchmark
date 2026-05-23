@@ -61,6 +61,7 @@ whole-chromosome downloads. Total download is ~150 MB. Files are saved to
 ## Quick start
 
 ```r
+source("R/utils.R")
 source("R/simulate_genotypes.R")
 source("R/simulate_phenotypes.R")
 source("R/run_simulation.R")
@@ -125,6 +126,7 @@ plot_results(eval_out, output_dir = "results/run1")
 | **PAINTOR** | C++ binary | `conda install -c bioconda paintor` |
 | **Funmap** | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | Python script | `conda env create -f environment.yml` + BEATRICE repo |
+| **Functional BEATRICE** | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
 
 Methods that fail (binary not found, Python error, etc.) are skipped gracefully
 and reported in the results summary. They do not crash the pipeline.
@@ -204,9 +206,11 @@ results <- run_methods(
 ```
 fine-mapping-benchmark/
 ├── R/
-│   ├── simulate_genotypes.R    # Genotype simulation (sim1000G + 1000G haplotypes)
-│   ├── simulate_phenotypes.R   # Phenotype simulation (sparse / infinitesimal)
-│   ├── run_simulation.R        # Orchestration: simulates over a parameter grid
+│   ├── utils.R                 # Shared helpers (sourced first)
+│   ├── simulate_genotypes.R    # Per-locus genotype simulation (sim1000G + 1000G haplotypes)
+│   ├── simulate_phenotypes.R   # Per-locus phenotype simulation (sparse / sparse+inf)
+│   ├── simulate_gwfm_data.R    # Genome-wide simulation (shared y across regions)
+│   ├── run_simulation.R        # Orchestrates per-locus simulations over a parameter grid
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
 │   ├── plot_results.R          # Generates multi-page PDF plots
@@ -218,22 +222,34 @@ fine-mapping-benchmark/
 │       ├── finemap.R
 │       ├── paintor.R
 │       ├── funmap.R
-│       └── beatrice.R
+│       ├── beatrice.R
+│       └── functional_beatrice.R
+├── BEATRICE_annot_sparse/      # Functional BEATRICE source (Python + training scripts)
 ├── data/
-│   ├── regions.csv             # 50 genomic regions used for genotype simulation
-│   ├── vcf/                    # Downloaded 1000G VCF files (prepare_vcfs.R)
-│   └── genetic_maps/           # Cached HapMap GRCh37 genetic maps (auto-downloaded)
+│   ├── regions.csv                  # 50 per-locus regions (prepare_vcfs.R)
+│   ├── gwfm_regions.csv             # 128 genome-wide regions (prepare_gwfm_vcfs.R)
+│   ├── gwfm_regions_ldetect_EUR.csv # ~1,703 LDetect EUR blocks (download_ldetect_regions.R)
+│   ├── vcf/                         # Downloaded 1000G VCF slices for per-locus regions
+│   └── genetic_maps/                # Cached HapMap GRCh37 maps (auto-downloaded)
 ├── scripts/
-│   ├── prepare_vcfs.R          # One-time download of 1000G reference VCFs
-│   ├── test_pipeline.R         # End-to-end pipeline test (all methods)
-│   ├── test_evaluate.R         # Unit tests for evaluation module (125 tests)
-│   └── test_comprehensive.R    # Argument-level tests for all functions (201 tests)
+│   ├── prepare_vcfs.R               # Download VCFs for the 50 per-locus regions
+│   ├── prepare_gwfm_vcfs.R          # Download VCFs for the 128 genome-wide regions
+│   ├── download_ldetect_regions.R   # (Optional) fetch LDetect block partition + VCFs
+│   ├── test_pipeline.R              # End-to-end pipeline test (all methods)
+│   ├── test_evaluate.R              # Unit tests for evaluation module
+│   ├── test_comprehensive.R         # Argument-level tests for all functions
+│   └── hpc/                         # SLURM job array for the benchmark
+│       ├── generate_params_grid.R   # Build params_grid.csv (40 jobs)
+│       ├── params_grid.csv          # One row per HPC array task
+│       ├── run_benchmark_job.R      # Worker script: runs one (model, p, annot) combination
+│       ├── collect_results.R        # Combines per-job outputs into one data frame
+│       ├── smoke_test.R             # Per-method smoke test before submitting
+│       └── submit_benchmark.sh      # Submits the SLURM array
 ├── docs/
-│   ├── methods.md              # Method descriptions and wrapper API
-│   ├── evaluation.md           # Evaluation metrics: formulas and implementation
-│   ├── testing_report.md       # Auto-generated argument-level test report
-│   ├── Benchmarking.pdf        # Benchmarking design document
-│   └── simulation_documentation.pdf  # Simulation methodology documentation
+│   ├── methods.md                       # Method descriptions and wrapper API
+│   ├── evaluation.md                    # Evaluation metrics: formulas and implementation
+│   ├── gw_simulation_documentation.md   # Technical spec of genome-wide simulation
+│   └── testing_report.md                # Auto-generated argument-level test report
 ├── environment.yml             # conda environment for Funmap + BEATRICE
 ├── renv.lock                   # R package lockfile (use renv::restore())
 └── README.md
@@ -594,3 +610,58 @@ which require external binaries unavailable on Apple Silicon without additional 
 
 A human-readable argument-level test report is generated automatically at
 [`docs/testing_report.md`](docs/testing_report.md).
+
+## Genome-wide simulation
+
+`simulate_gwfm_data()` replaces the locus-based `run_simulation()` with a
+genome-wide model: a single shared phenotype is generated across all regions
+(as in a real GWAS), causal variants are assigned genome-wide via Bernoulli(π),
+and per-region summary statistics are computed from the shared phenotype.
+
+```r
+source("R/utils.R")
+source("R/simulate_genotypes.R")
+source("R/simulate_phenotypes.R")
+source("R/simulate_gwfm_data.R")
+
+sim <- simulate_gwfm_data(
+  n        = 2000,
+  n_iter   = 3,
+  pi       = c(1e-4, 1e-3),
+  h2       = c(0.1, 0.3),
+  regions  = "representative",   # 128 bundled regions; or "1" for one chromosome
+  vcf_dir  = "data/gwfm_vcf",
+  seed     = 1
+)
+```
+
+The resulting object is compatible with `run_methods()` and `evaluate_methods()`.
+See [`docs/gw_simulation_documentation.md`](docs/gw_simulation_documentation.md)
+for the full statistical specification.
+
+**Memory:** the simulator holds one dense p×p LD matrix per region in memory.
+A warning is emitted when combined LD storage exceeds ~4 GB. For the full LDetect
+partition (~1,700 blocks), run on a high-memory node or reduce `coverage`.
+
+## Running on an HPC cluster
+
+The `scripts/hpc/` directory contains a self-contained SLURM job array that
+sweeps the benchmark across `(model, p, annotation)` combinations.
+
+```bash
+# 1. (Optional) regenerate the grid
+Rscript scripts/hpc/generate_params_grid.R
+
+# 2. Smoke-test all methods first
+Rscript scripts/hpc/smoke_test.R
+
+# 3. Submit the array (40 jobs)
+bash scripts/hpc/submit_benchmark.sh
+
+# 4. Combine results once jobs complete
+Rscript scripts/hpc/collect_results.R
+```
+
+Edit `submit_benchmark.sh` for your cluster's partition, account, and conda
+environment, and edit `run_benchmark_job.R` for the paths to BEATRICE / PAINTOR
+on your system.
