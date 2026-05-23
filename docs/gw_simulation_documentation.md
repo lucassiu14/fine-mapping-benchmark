@@ -95,6 +95,8 @@ The raw genotype matrix $\mathbf{G}_i \in \{0, 1, 2\}^{n \times p_i}$ contains d
 
 Any column of $\mathbf{G}_i$ that is monomorphic in the simulated sample (sample MAF = 0) is removed. This can occur even after VCF-level MAF filtering because the simulated sample is a random draw.
 
+**Realised vs requested $p_i$.** The requested per-region target `p` is treated as an upper bound: if the VCF window contains fewer variants than `p`, or if extra variants are lost to MAF filtering and monomorphic removal, then $p_i$ < requested. The realised $p_i$ for every region is recorded in `params$p_actual` (a length-$K$ integer vector); the requested values are kept in `params$p_requested`. Downstream evaluation always uses $p_i$ from `genotypes[[i]]$p`, but stratifying analyses by `p` should use `p_actual` rather than the requested value.
+
 ### 4.5 Standardisation
 
 Each column $j$ of $\mathbf{G}_i$ is standardised to mean 0 and variance 1:
@@ -166,6 +168,8 @@ and the weight is $w_{ij} = \exp(\log w_{ij} - \max_{j'} \log w_{ij'})$ (the sub
 $$\pi_{ij} = \pi \cdot \frac{w_{ij}}{\bar{w}_i}, \quad \text{where } \bar{w}_i = \frac{1}{p_i} \sum_{j=1}^{p_i} w_{ij}$$
 
 This normalisation ensures that $\frac{1}{p_i}\sum_j \pi_{ij} = \pi$ within each region, so the **expected number of causal variants per region is $\pi \cdot p_i$**, and the **expected total number of causal variants is $\pi \cdot p_{\text{total}}$**, regardless of annotation structure.
+
+**Numerical clamping caveat.** Before sampling, $\pi_{ij}$ is clamped to $[10^{-10}, 1-10^{-10}]$ for safety. When `enrichment` is large and an annotation is sparse, a small number of variants can have $\pi_{ij}$ that would exceed 1 under the rescaling; the clamp shaves off that excess and breaks the $\bar{\pi}_i = \pi$ guarantee. The realised expected number of causals can then fall slightly below $\pi \cdot p_{\text{total}}$. The realised total $S_{\text{total}}$ is always recorded in `scenarios[[s]]$S_total`, so downstream analysis should use that rather than $\pi \cdot p_{\text{total}}$ when comparing.
 
 When no annotations are present, $\pi_{ij} = \pi$ for all variants.
 

@@ -9,6 +9,7 @@
 #   Rscript scripts/test_pipeline.R
 # =============================================================================
 
+source("R/utils.R")
 source("R/simulate_genotypes.R")
 source("R/simulate_phenotypes.R")
 source("R/run_simulation.R")

@@ -409,4 +409,4 @@ run_paintor_region <- function(region_geno, region_pheno, ...) {
   )
 }
 
-`%||%` <- function(x, y) if (!is.null(x)) x else y
+# %||% is defined in R/utils.R.

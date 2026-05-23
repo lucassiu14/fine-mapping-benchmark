@@ -354,6 +354,19 @@ simulate_gwfm_data <- function(n,
   }
 
   # ---------------------------------------------------------------------------
+  # Memory guard for LD matrix storage. With n_regions in the thousands
+  # (full LDetect partition) the combined LD storage can exceed typical RAM.
+  # ---------------------------------------------------------------------------
+  ld_bytes <- 8 * sum(as.numeric(p_vec)^2)
+  ld_gb    <- ld_bytes / 1e9
+  if (ld_gb > 4) {
+    warning(sprintf(
+      "Combined LD matrices across %d region(s) will use ~%.1f GB. Reduce p, lower coverage, or run on a high-memory node.",
+      length(p_vec), ld_gb
+    ), call. = FALSE)
+  }
+
+  # ---------------------------------------------------------------------------
   # Simulate genotypes once (shared across all scenarios)
   # ---------------------------------------------------------------------------
 
@@ -559,6 +572,9 @@ simulate_gwfm_data <- function(n,
   # Package result
   # ---------------------------------------------------------------------------
 
+  # Realised per-region p (may differ from requested p_vec)
+  p_actual <- vapply(genotypes, function(g) g$p, integer(1))
+
   params <- list(
     n                      = n,
     n_iter                 = n_iter,
@@ -575,6 +591,8 @@ simulate_gwfm_data <- function(n,
     enrichment             = enrichment,
     coverage               = coverage,
     n_regions              = n_regions,
+    p_requested            = p_vec,
+    p_actual               = p_actual,
     p_total                = p_total,
     regions                = region_df,
     min_maf                = min_maf,
@@ -847,9 +865,10 @@ gwfm_assign_causal_variants <- function(genotypes,
       log_enrich  <- log(enrichment_used)
       log_weights <- as.numeric(A_i %*% log_enrich)
       weights     <- exp(log_weights - max(log_weights))
-      # Rescale pi so mean(pi_j) = pi
+      # Rescale so mean(pi_j) = pi. Clamping below breaks this guarantee when
+      # weights are very skewed (high enrichment * sparse annotation), so the
+      # realised expected number of causals can fall below pi * p_total.
       pi_vec <- pi * weights / mean(weights)
-      # Clamp to (0, 1) for safety
       pi_vec <- pmin(pmax(pi_vec, 1e-10), 1 - 1e-10)
     } else {
       pi_vec <- rep(pi, p_i)

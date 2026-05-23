@@ -69,3 +69,13 @@ data/genetic_maps/*.txt.gz
 
 # CARMA writes per-locus working files to the current directory
 post_locus_*
+
+# Python bytecode and BEATRICE scratch
+__pycache__/
+*.pyc
+BEATRICE_annot_sparse/temp/
+
+# Editor swap files
+*.swp
+*.swo
+*~

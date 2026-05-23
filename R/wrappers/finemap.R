@@ -427,7 +427,7 @@ run_finemap <- function(z,
   )
 
   k_posterior <- NULL
-  best_k      <- 1L
+  best_k      <- 0L   # default when config_df is missing/unparseable
 
   if (!is.null(config_df) && "config" %in% names(config_df) &&
       "prob" %in% names(config_df)) {

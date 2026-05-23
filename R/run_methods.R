@@ -333,5 +333,4 @@ run_methods <- function(simulation,
   )
 }
 
-# Null-coalescing operator (base R doesn't have one)
-`%||%` <- function(x, y) if (!is.null(x)) x else y
+# %||% is defined in R/utils.R.

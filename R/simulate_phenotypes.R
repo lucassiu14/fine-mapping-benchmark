@@ -614,6 +614,9 @@ generate_phenotype_sparse_inf <- function(X, beta_true, phi, p_causal,
   g_sparse <- as.numeric(X %*% beta_true)
   var_g_sparse <- var(g_sparse)
 
+  # Only retry with random signs when the user picked "equal" effects — for
+  # normal effects, zero variance means the draws cancelled exactly (vanishing
+  # probability) or S = 0, neither of which is fixed by reshuffling signs.
   if (effect_distribution == "equal" && var_g_sparse < .Machine$double.eps) {
     warning("Var(Xb) = 0 with equal effects. Trying random signs.", call. = FALSE)
     beta_true[causal_indices] <- sample(c(-1, 1), S, replace = TRUE)
@@ -702,30 +705,21 @@ generate_phenotype_sparse_inf <- function(X, beta_true, phi, p_causal,
 compute_summary_statistics <- function(X, y) {
 
   n <- nrow(X)
-  p <- ncol(X)
 
-  beta_hat <- numeric(p)
-  se <- numeric(p)
-
-  # Marginal OLS regression of y on each column of X (with implicit intercept)
-  # Since X is standardised (mean 0) and we centre y, the intercept is 0
-  # and beta_hat_j = (x_j^T y) / (x_j^T x_j)
+  # Marginal OLS of y on each column of X (with implicit intercept). Since X
+  # columns and y are centred the intercept drops out and
+  #   beta_hat_j = (x_j^T y_c) / (x_j^T x_j)
+  #   RSS_j      = ||y_c||^2 - beta_hat_j * (x_j^T y_c)
+  #   se_j       = sqrt(RSS_j / (n - 2) / (x_j^T x_j))
   y_centered <- y - mean(y)
 
-  for (j in seq_len(p)) {
-    xj <- X[, j]
-    xtx <- sum(xj^2)
-    xty <- sum(xj * y_centered)
-    beta_hat[j] <- xty / xtx
-
-    # Residuals and standard error (df = n - 2 for intercept + slope)
-    resid <- y_centered - xj * beta_hat[j]
-    sigma2_j <- sum(resid^2) / (n - 2)
-    se[j] <- sqrt(sigma2_j / xtx)
-  }
-
-  # z-scores
-  z <- beta_hat / se
+  xty       <- as.numeric(crossprod(X, y_centered))
+  xtx       <- colSums(X * X)
+  beta_hat  <- xty / xtx
+  rss       <- sum(y_centered * y_centered) - beta_hat * xty
+  sigma2    <- rss / (n - 2)
+  se        <- sqrt(sigma2 / xtx)
+  z         <- beta_hat / se
 
   list(
     beta_hat = beta_hat,

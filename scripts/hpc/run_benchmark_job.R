@@ -30,9 +30,6 @@ FB_DIR        <- file.path(PROJECT_ROOT, "BEATRICE_annot_sparse")
 # Path to PAINTOR binary
 PAINTOR_PATH  <- "PAINTOR"  # or full path, e.g. "/usr/local/bin/PAINTOR"
 
-# Path to FUNMAP binary / Python
-FUNMAP_DIR    <- file.path(PROJECT_ROOT, "alt_methods", "Funmap_main")
-
 # VCF directory (pre-downloaded by prepare_vcfs.R)
 VCF_DIR       <- file.path(PROJECT_ROOT, "data", "gwfm_vcf")
 
@@ -173,8 +170,7 @@ method_args <- list(
     sparse_concrete = min(50L, params$p)
   ),
   funmap = list(
-    funmap_dir = FUNMAP_DIR,
-    python     = PYTHON
+    python = PYTHON
   ),
   functional_beatrice = list(
     beatrice_dir         = FB_DIR,
@@ -216,7 +212,7 @@ cat(sprintf("\nMethods complete in %.1f s.\n\n", methods_elapsed))
 # =============================================================================
 
 cat("--- Evaluating ---\n")
-eval_out <- evaluate_methods(results, sim)
+eval_out <- evaluate_methods(sim, results, verbose = TRUE)
 
 # =============================================================================
 # Save outputs

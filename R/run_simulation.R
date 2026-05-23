@@ -262,6 +262,18 @@ run_simulation <- function(n_regions = 3,
     }
   }
 
+  # --- Memory guard for LD matrix storage -------------------------------------
+  # Each LD matrix is p_i x p_i doubles (8 bytes/element). Warn if the combined
+  # storage is likely to be uncomfortably large for typical machines.
+  ld_bytes <- 8 * sum(as.numeric(p)^2)
+  ld_gb    <- ld_bytes / 1e9
+  if (ld_gb > 4) {
+    warning(sprintf(
+      "Combined LD matrices will use ~%.1f GB. Reduce p, reduce n_regions, or run on a high-memory node.",
+      ld_gb
+    ), call. = FALSE)
+  }
+
   # --- Step 1: Simulate genotypes (once) --------------------------------------
 
   if (verbose) message("\n=== Simulating genotypes ===")
@@ -396,10 +408,16 @@ run_simulation <- function(n_regions = 3,
 
   # --- Store parameters for reproducibility -----------------------------------
 
+  # Realised per-region p may differ from the requested p when the underlying
+  # VCF contains fewer variants than requested (after MAF filter / subsetting).
+  # Record both so downstream analysis is unambiguous.
+  p_actual <- vapply(genotypes, function(g) g$p, integer(1))
+
   params <- list(
     n_regions = n_regions,
     n = n,
     p = p,
+    p_actual = p_actual,
     n_iter = n_iter,
     S_values = S,
     phi_values = phi,
