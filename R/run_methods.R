@@ -30,6 +30,12 @@
 # Maps a method name (lowercase) to the name of its region-level adapter
 # function. The adapter must have the signature:
 #   run_<method>_region(region_geno, region_pheno, ...)
+#
+# Methods may optionally define `run_<method>_scenario_setup(genotypes,
+# regions, user_args)` to compute scenario-wide state (e.g. pooled
+# per-annotation coefficients). When present, run_methods() calls it once
+# per scenario and merges the returned list into method_args for that
+# scenario's per-region calls.
 .FM_REGISTRY <- list(
   susie     = "run_susie_region",
   susie_inf = "run_susie_inf_region",
@@ -39,7 +45,11 @@
   paintor   = "run_paintor_region",
   beatrice              = "run_beatrice_region",
   functional_beatrice   = "run_functional_beatrice_region",
-  carma                 = "run_carma_region"
+  carma                 = "run_carma_region",
+  # Baselines and annotation-aware comparators added in Phase 1.
+  marginal_z            = "run_marginal_z_region",
+  polyfun_oracle        = "run_polyfun_oracle_region",
+  polyfun_est           = "run_polyfun_est_region"
 )
 
 
@@ -186,6 +196,22 @@ run_methods <- function(simulation,
       }
     }
 
+    # Optional scenario-level setup hook.
+    # If a method defines `run_<method>_scenario_setup(genotypes, regions,
+    # user_args)`, it is called once per scenario before that scenario's
+    # per-region calls. The hook returns a named list whose entries are
+    # merged into `user_args` for every region of that scenario. This lets
+    # methods compute shared state (e.g. pooled per-annotation coefficients
+    # in polyfun_est) without needing to see all regions inside the
+    # per-region wrapper.
+    #
+    # Methods that do not define this hook behave exactly as before.
+    scenario_setup_name <- paste0("run_", method, "_scenario_setup")
+    has_scenario_setup  <- exists(scenario_setup_name, mode = "function")
+    if (has_scenario_setup) {
+      scenario_setup_fn <- match.fun(scenario_setup_name)
+    }
+
     batch_start    <- proc.time()
     method_results <- vector("list", n_total)
     n_failed       <- 0L
@@ -193,6 +219,30 @@ run_methods <- function(simulation,
 
     for (sc in seq_len(n_scenarios)) {
       scenario <- simulation$scenarios[[sc]]
+
+      # Run the scenario-level setup hook (if any) to obtain extra args.
+      effective_args <- user_args
+      if (has_scenario_setup) {
+        extra_args <- tryCatch(
+          scenario_setup_fn(
+            genotypes = simulation$genotypes,
+            regions   = scenario$regions,
+            user_args = user_args
+          ),
+          error = function(e) {
+            if (verbose) {
+              message(sprintf(
+                "    WARNING: scenario_setup for %s failed (scenario %d): %s",
+                method, scenario$scenario_id, conditionMessage(e)
+              ))
+            }
+            list()
+          }
+        )
+        if (is.list(extra_args) && length(extra_args) > 0L) {
+          effective_args <- utils::modifyList(user_args, extra_args)
+        }
+      }
 
       for (rg in seq_len(n_regions)) {
         idx <- idx + 1L
@@ -211,14 +261,14 @@ run_methods <- function(simulation,
         fit <- tryCatch(
           do.call(run_fn, c(
             list(region_geno = region_geno, region_pheno = region_pheno),
-            user_args
+            effective_args
           )),
           error = function(e) list(
             pip             = rep(NA_real_, nrow(region_geno$LD)),
             credible_sets   = list(),
             method          = method,
             input_type      = NA_character_,
-            params          = user_args,
+            params          = effective_args,
             runtime_seconds = NA_real_,
             additional      = list(),
             error           = conditionMessage(e)
