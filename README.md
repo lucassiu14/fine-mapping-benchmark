@@ -1,7 +1,7 @@
 # Fine-Mapping Benchmarking Framework
 
 Benchmarking framework for evaluating statistical fine-mapping methods using
-simulated genetic data. Supports 9 methods, flexible simulation parameters,
+simulated genetic data. Supports 12 methods, flexible simulation parameters,
 automatic evaluation (AUPRC, credible set metrics, PIP calibration), and
 multi-page PDF plots with stratified results.
 
@@ -232,6 +232,9 @@ plot_results(eval_out, output_dir = "results/run1")
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
 | **Functional BEATRICE** | 3 | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
+| **marginal_z** | 1 | R (built-in) | None |
+| **polyfun_oracle** | 1 | R package | susieR (already in renv) |
+| **polyfun_est** | 1 | R package | susieR (already in renv) |
 
 See [Installation](#installation) for what each tier requires.
 
