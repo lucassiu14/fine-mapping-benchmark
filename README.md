@@ -1,7 +1,7 @@
 # Fine-Mapping Benchmarking Framework
 
 Benchmarking framework for evaluating statistical fine-mapping methods using
-simulated genetic data. Supports 8 methods, flexible simulation parameters,
+simulated genetic data. Supports 9 methods, flexible simulation parameters,
 automatic evaluation (AUPRC, credible set metrics, PIP calibration), and
 multi-page PDF plots with stratified results.
 
@@ -9,14 +9,24 @@ multi-page PDF plots with stratified results.
 
 - R >= 4.1.0
 - [renv](https://rstudio.github.io/renv/) (installed automatically with the project)
-- [htslib](https://github.com/samtools/htslib) for `tabix` and `bgzip` (required by `scripts/prepare_vcfs.R`)
+
+Some methods and the reference-data setup have additional system requirements
+(C++ binaries, Python, `htslib`) — see the relevant tier or section below.
 
 ## Installation
+
+Installation is tiered. **You only need to install what you actually want to
+use.** Most of the experiment — including 7 of the 9 methods, all evaluation,
+and all plotting — works at Tier 1 with just R packages.
+
+### Clone the repo
 
 ```bash
 git clone https://github.com/lucassiu14/fine-mapping-benchmark.git
 cd fine-mapping-benchmark
 ```
+
+### Tier 1 — Pure R (~15 min)
 
 Open R in the project directory and restore all R package dependencies:
 
@@ -38,25 +48,120 @@ renv::restore()
 > `sim1000G` and `hapsim` are archived from CRAN and are fetched directly
 > from the CRAN archive; this is handled automatically by the lockfile.
 
-This installs everything needed to run SuSiE, SuSiE-inf, ABF, and CARMA
-immediately. The other methods require additional steps described below.
+**Tier 1 unlocks:**
 
-## One-time reference data setup
+- Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**\*,
+  **polyfun_oracle**\*, **polyfun_est**\*
+- All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
+- All of `plot_results()` (multi-page PDF output)
+- All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
+  `run_simulation()`, `simulate_gwfm_data()`)
 
-The genotype simulator draws from real 1000 Genomes Phase 3 haplotypes.
-Download 50 diverse 300 kb regions (one per genomic window in `data/regions.csv`,
-covering all 22 autosomes):
+\*Added in Phase 1 of the development roadmap.
 
-```bash
-Rscript scripts/prepare_vcfs.R
+### Tier 2 — Adds C++ binary methods (~30 min more)
+
+#### FINEMAP
+
+The binary is downloaded automatically the first time you call
+`setup_finemap()`:
+
+```r
+source("R/wrappers/finemap.R")
+fp <- setup_finemap()   # downloads to R user cache dir; returns path
 ```
 
-This streams each window from the 1000 Genomes EBI FTP via tabix — no
-whole-chromosome downloads. Total download is ~150 MB. Files are saved to
-`data/vcf/` and `data/genetic_maps/` (both gitignored).
+To disable auto-download and install manually, download the binary for your OS
+from [http://www.christianbenner.com](http://www.christianbenner.com) and put
+it on your PATH. Note: there is no official Windows binary — use WSL on
+Windows.
 
-> **Requires:** `tabix` and `bgzip` from htslib.
-> Install with `brew install htslib` (macOS) or `conda install -c bioconda htslib`.
+#### PAINTOR
+
+```bash
+conda install -c bioconda paintor
+```
+
+Then in R:
+
+```r
+source("R/wrappers/paintor.R")
+pp <- setup_paintor()   # finds PAINTOR on PATH
+```
+
+### Tier 3 — Adds Python methods (~1 hour more)
+
+Funmap, BEATRICE, and Functional BEATRICE all require Python. A single conda
+environment covers all three; an `environment.yml` is included in the repo:
+
+```bash
+conda env create -f environment.yml
+conda activate finemapping-python
+```
+
+> **Apple Silicon:** remove the `cpuonly` line from `environment.yml` before
+> creating the environment — PyTorch has native arm64 support.
+
+> **GPU:** also remove `cpuonly` if you have a CUDA-capable GPU.
+
+BEATRICE additionally requires its own repository (a Python script, not a
+package):
+
+```bash
+git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
+```
+
+**Functional BEATRICE** is bundled in this repo (`BEATRICE_annot_sparse/`) and
+needs no separate clone — it uses the same conda env.
+
+Then get the Python path for use in R:
+
+```bash
+conda run -n finemapping-python which python   # copy this path
+```
+
+Pass it via `method_args` in `run_methods()`:
+
+```r
+PYTHON <- "/path/to/envs/finemapping-python/bin/python"   # from above
+
+results <- run_methods(
+  simulation  = sim,
+  methods     = c("funmap", "beatrice", "functional_beatrice"),
+  method_args = list(
+    funmap              = list(python = PYTHON, L = 10),
+    beatrice            = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping"),
+    functional_beatrice = list(python = PYTHON, beatrice_dir = "BEATRICE_annot_sparse")
+  )
+)
+```
+
+## Reference data (optional)
+
+The default genotype simulator can draw from the bundled `sim1000G` example
+VCF (one chr4 region, ~500 SNPs) with no extra setup — useful for quick
+tests. For realistic LD across multiple regions, download the per-locus or
+genome-wide reference VCFs.
+
+**Requires:** `tabix` and `bgzip` from
+[htslib](https://github.com/samtools/htslib).
+
+Install with `brew install htslib` (macOS) or
+`conda install -c bioconda htslib`.
+
+Then either:
+
+```bash
+# 50 diverse 300 kb regions (per-locus benchmark; ~150 MB)
+Rscript scripts/prepare_vcfs.R
+
+# OR 128 genome-wide regions (genome-wide benchmark; ~400 MB)
+Rscript scripts/prepare_gwfm_vcfs.R
+```
+
+Each script streams the requested windows from the 1000 Genomes EBI FTP via
+tabix — no whole-chromosome downloads. Files are saved to `data/vcf/` (or
+`data/gwfm_vcf/`) and `data/genetic_maps/` (all gitignored).
 
 ## Quick start
 
@@ -116,90 +221,22 @@ plot_results(eval_out, output_dir = "results/run1")
 
 ## Supported methods
 
-| Method | Type | Dependencies |
-|---|---|---|
-| **SuSiE** | R package | None (installed via renv) |
-| **SuSiE-inf** | R package | None (installed via renv) |
-| **ABF** | R (built-in) | None |
-| **CARMA** | R package | None (installed via renv) |
-| **FINEMAP** | C++ binary | Auto-downloaded by `setup_finemap()` |
-| **PAINTOR** | C++ binary | `conda install -c bioconda paintor` |
-| **Funmap** | Python package | `conda env create -f environment.yml` |
-| **BEATRICE** | Python script | `conda env create -f environment.yml` + BEATRICE repo |
-| **Functional BEATRICE** | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
+| Method | Tier | Type | Dependencies |
+|---|---|---|---|
+| **SuSiE** | 1 | R package | None (installed via renv) |
+| **SuSiE-inf** | 1 | R package | None (installed via renv) |
+| **ABF** | 1 | R (built-in) | None |
+| **CARMA** | 1 | R package | None (installed via renv) |
+| **FINEMAP** | 2 | C++ binary | Auto-downloaded by `setup_finemap()` |
+| **PAINTOR** | 2 | C++ binary | `conda install -c bioconda paintor` |
+| **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
+| **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
+| **Functional BEATRICE** | 3 | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
+
+See [Installation](#installation) for what each tier requires.
 
 Methods that fail (binary not found, Python error, etc.) are skipped gracefully
 and reported in the results summary. They do not crash the pipeline.
-
-## Method-specific setup
-
-### FINEMAP
-
-The binary is downloaded automatically the first time you call `setup_finemap()`:
-
-```r
-source("R/wrappers/finemap.R")
-fp <- setup_finemap()   # downloads to R user cache dir; returns path
-```
-
-To disable auto-download and install manually, download the binary for your OS
-from [http://www.christianbenner.com](http://www.christianbenner.com) and put it on your PATH.
-Note: there is no official Windows binary — use WSL on Windows.
-
-### PAINTOR
-
-```bash
-conda install -c bioconda paintor
-```
-
-Then in R:
-
-```r
-source("R/wrappers/paintor.R")
-pp <- setup_paintor()   # finds PAINTOR on PATH
-```
-
-### Funmap and BEATRICE (shared Python environment)
-
-Both Funmap and BEATRICE require Python. A single conda environment covers both.
-An `environment.yml` is included in the repo:
-
-```bash
-conda env create -f environment.yml
-conda activate finemapping-python
-```
-
-> **Apple Silicon:** remove the `cpuonly` line from `environment.yml` before
-> creating the environment — PyTorch has native arm64 support.
-
-> **GPU:** also remove `cpuonly` if you have a CUDA-capable GPU.
-
-BEATRICE additionally requires its own repository (a Python script, not a package):
-
-```bash
-git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
-```
-
-Then get the Python path for use in R:
-
-```bash
-conda run -n finemapping-python which python   # copy this path
-```
-
-Pass it via `method_args` in `run_methods()`:
-
-```r
-PYTHON <- "/path/to/envs/finemapping-python/bin/python"   # from above
-
-results <- run_methods(
-  simulation  = sim,
-  methods     = c("funmap", "beatrice"),
-  method_args = list(
-    funmap   = list(python = PYTHON, L = 10),
-    beatrice = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping")
-  )
-)
-```
 
 ## Project structure
 
