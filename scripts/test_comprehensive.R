@@ -34,6 +34,9 @@ suppressPackageStartupMessages({
   source("R/wrappers/paintor.R")
   source("R/wrappers/beatrice.R")
   source("R/wrappers/carma.R")
+  source("R/wrappers/marginal_z.R")
+  source("R/wrappers/polyfun_oracle.R")
+  source("R/wrappers/polyfun_est.R")
 })
 
 # =============================================================================
@@ -125,6 +128,18 @@ SIM_MINI <- run_simulation(
   n_regions = 2, n = 100, p = 50,
   n_iter = 2, S = c(1, 2), phi = c(0.2, 0.4),
   model = "sparse", annotations = "none",
+  genetic_map_dir = "data/genetic_maps",
+  seed = 42, verbose = FALSE
+)
+
+# Annotated variant for polyfun_oracle / polyfun_est tests, which need
+# either a known per-SNP prior (oracle) or an annotation matrix to fit
+# tau on (est). Mirrors SIM_MINI but with three binary annotations.
+SIM_MINI_ANNOT <- run_simulation(
+  n_regions = 2, n = 100, p = 50,
+  n_iter = 2, S = c(1, 2), phi = c(0.2, 0.4),
+  model = "sparse", annotations = "binary", n_annotations = 3,
+  enrichment = 5.0,
   genetic_map_dir = "data/genetic_maps",
   seed = 42, verbose = FALSE
 )
@@ -1795,6 +1810,165 @@ run_test("funmap: python arg forwarded (graceful error if absent)", function() {
     error = function(e) list(error = conditionMessage(e))
   )
   stopifnot(!is.null(fit))
+})
+
+
+# =============================================================================
+# SECTION 12: run_marginal_z / run_marginal_z_region
+# =============================================================================
+
+set_section("run_marginal_z / run_marginal_z_region — baseline behaviour")
+
+# Reuse the same region accessor as the other sections. SIM_MINI is fine —
+# marginal_z does not need annotations.
+.rg_mz <- SIM_MINI$genotypes[[1]]
+.rp_mz <- SIM_MINI$scenarios[[1]]$regions[[1]]
+
+run_test("marginal_z output has all standard fields", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(all(c("pip", "credible_sets", "method", "input_type",
+                  "params", "runtime_seconds", "additional") %in% names(fit)))
+  stopifnot(fit$method == "marginal_z")
+  stopifnot(fit$input_type == "summary")
+})
+
+run_test("marginal_z pip length equals p", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(length(fit$pip) == .rg_mz$p)
+})
+
+run_test("marginal_z pip values lie in [0, 1]", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(all(fit$pip >= 0), all(fit$pip <= 1))
+})
+
+run_test("marginal_z pip sums to ~1 (|z| / sum|z| normalisation)", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(abs(sum(fit$pip) - 1) < 1e-8)
+})
+
+run_test("marginal_z default coverage = 0.95 accepted", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(fit$params$coverage == 0.95)
+})
+
+run_test("marginal_z lower coverage produces smaller or equal CS", function() {
+  fit95 <- run_marginal_z_region(.rg_mz, .rp_mz, coverage = 0.95)
+  fit50 <- run_marginal_z_region(.rg_mz, .rp_mz, coverage = 0.50)
+  size95 <- length(fit95$credible_sets[[1]])
+  size50 <- length(fit50$credible_sets[[1]])
+  stopifnot(size50 <= size95)
+})
+
+run_test("marginal_z returns exactly one credible set", function() {
+  fit <- run_marginal_z_region(.rg_mz, .rp_mz)
+  stopifnot(is.list(fit$credible_sets), length(fit$credible_sets) == 1L)
+})
+
+
+# =============================================================================
+# SECTION 13: run_polyfun_oracle / run_polyfun_oracle_region
+# =============================================================================
+
+set_section("run_polyfun_oracle / run_polyfun_oracle_region — oracle priors")
+
+.rg_po <- SIM_MINI_ANNOT$genotypes[[1]]
+.rp_po <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
+
+run_test("polyfun_oracle output has all standard fields (annotated fixture)", function() {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  stopifnot(all(c("pip", "credible_sets", "method", "input_type",
+                  "params", "runtime_seconds", "additional") %in% names(fit)))
+  stopifnot(fit$method == "polyfun_oracle")
+})
+
+run_test("polyfun_oracle pip valid (length p, in [0,1]) on annotated fixture", function() {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  stopifnot(length(fit$pip) == .rg_po$p)
+  stopifnot(all(fit$pip >= 0, na.rm = TRUE), all(fit$pip <= 1, na.rm = TRUE))
+})
+
+run_test("polyfun_oracle reports prior_weights of length p", function() {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  pw <- fit$additional$prior_weights
+  stopifnot(!is.null(pw), length(pw) == .rg_po$p)
+  stopifnot(all(pw >= 0, na.rm = TRUE))
+})
+
+run_test("polyfun_oracle falls back to uniform prior when annotations absent", function() {
+  # SIM_MINI has annotations="none", so $annotations_matrix is NULL and
+  # truth$enrichment is also absent. The wrapper is documented to
+  # gracefully fall back to uniform priors in that case (degenerating
+  # to plain SuSiE) rather than erroring.
+  rg <- SIM_MINI$genotypes[[1]]
+  rp <- SIM_MINI$scenarios[[1]]$regions[[1]]
+  fit <- run_polyfun_oracle_region(rg, rp)
+  stopifnot(is.null(fit$error))
+  stopifnot(length(fit$pip) == rg$p)
+  stopifnot(all(fit$pip >= 0, na.rm = TRUE), all(fit$pip <= 1, na.rm = TRUE))
+  stopifnot(identical(fit$params$prior_source, "uniform_fallback"))
+})
+
+
+# =============================================================================
+# SECTION 14: run_polyfun_est / run_polyfun_est_region / scenario_setup
+# =============================================================================
+
+set_section("run_polyfun_est — estimated priors and scenario-setup hook")
+
+.rg_pe <- SIM_MINI_ANNOT$genotypes[[1]]
+.rp_pe <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
+
+run_test("polyfun_est output has all standard fields (annotated fixture)", function() {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  stopifnot(all(c("pip", "credible_sets", "method", "input_type",
+                  "params", "runtime_seconds", "additional") %in% names(fit)))
+  stopifnot(fit$method == "polyfun_est")
+})
+
+run_test("polyfun_est pip valid (length p, in [0,1]) on annotated fixture", function() {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  stopifnot(length(fit$pip) == .rg_pe$p)
+  stopifnot(all(fit$pip >= 0, na.rm = TRUE), all(fit$pip <= 1, na.rm = TRUE))
+})
+
+run_test("polyfun_est reports non-negative tau of length m + 1", function() {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  tau <- fit$additional$tau
+  m   <- ncol(.rg_pe$annotations_matrix)
+  stopifnot(!is.null(tau), length(tau) == m + 1L)
+  stopifnot(all(tau >= 0, na.rm = TRUE))
+})
+
+run_test("polyfun_est runs without scenario hook (per-region tau fallback)", function() {
+  # Direct per-region call, no pooled_tau supplied; wrapper should
+  # fall back to per-region estimation rather than erroring.
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe, pooled_tau = NULL)
+  stopifnot(length(fit$pip) == .rg_pe$p)
+  stopifnot(!is.null(fit$additional$tau))
+})
+
+run_test("polyfun_est scenario-setup hook returns pooled_tau when annotations consistent", function() {
+  scen <- SIM_MINI_ANNOT$scenarios[[1]]
+  extra <- run_polyfun_est_scenario_setup(
+    genotypes = SIM_MINI_ANNOT$genotypes,
+    regions   = scen$regions,
+    user_args = list()
+  )
+  m <- ncol(SIM_MINI_ANNOT$genotypes[[1]]$annotations_matrix)
+  stopifnot("pooled_tau" %in% names(extra))
+  stopifnot(length(extra$pooled_tau) == m + 1L)
+  stopifnot(all(extra$pooled_tau >= 0))
+})
+
+run_test("polyfun_est fails gracefully on no-annotation fixture", function() {
+  rg <- SIM_MINI$genotypes[[1]]
+  rp <- SIM_MINI$scenarios[[1]]$regions[[1]]
+  fit <- run_polyfun_est_region(rg, rp)
+  # Either falls back to uniform priors (succeeds) or returns an error
+  # result. Both are acceptable; we just need not to crash.
+  stopifnot(!is.null(fit))
+  stopifnot(length(fit$pip) == rg$p)
 })
 
 

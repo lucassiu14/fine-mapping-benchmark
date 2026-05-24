@@ -17,6 +17,9 @@ this benchmark, how to run them, and the arguments available for each.
 | PAINTOR | `"paintor"` | External binary (conda or source) | Optional | Multiple causal variants + annotation enrichment |
 | BEATRICE | `"beatrice"` | Python + PyTorch (GitHub) | No | Variational Bayes with neural network PIP inference |
 | CARMA | `"carma"` | `CARMA` R package (GitHub) | No | Spike-slab EM with LD-discrepancy outlier detection |
+| marginal_z | `"marginal_z"` | Nothing | No | Model-free baseline (pip = \|z\| / sum\|z\|) |
+| polyfun_oracle | `"polyfun_oracle"` | `susieR` (CRAN) | **Reads truth** | PolyFun-style with true per-SNP priors (upper bound) |
+| polyfun_est | `"polyfun_est"` | `susieR` (CRAN) | **Required** | PolyFun-style with priors estimated via LDSC-lite |
 
 ---
 
@@ -279,6 +282,102 @@ No setup or installation needed.
 | Field | Description |
 |---|---|
 | `log10_abf` | Log10 approximate Bayes factor per variant |
+
+### marginal_z
+
+Model-free baseline. Computes PIPs by normalising the absolute marginal
+z-scores: `pip_j = |z_j| / sum_k |z_k|`. A single credible set is derived
+greedily by sorting variants in descending PIP order and accumulating until
+the cumulative PIP reaches `coverage` — the same CS construction used by
+ABF and PAINTOR.
+
+No setup, installation, or external dependencies. Runs in microseconds.
+
+> **Purpose:** the "are you better than the raw z-scores?" floor for any
+> real fine-mapping method. No method should be appreciably worse than
+> marginal_z on any setting; if it is, the method is mis-tuned or
+> actively harmful. The gap between marginal_z and ABF measures what
+> single-causal shrinkage adds.
+
+**Arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `coverage` | `0.95` | Credible set coverage |
+
+**Additional outputs (`$additional`):** none (pure baseline; no learned state
+to inspect).
+
+### polyfun_oracle
+
+PolyFun-style fine-mapping with the **true** per-SNP causal probabilities
+recovered from the simulator. Reconstructs
+`pi_j ∝ exp(A_j' log gamma)` from `region_geno$annotations_matrix` and
+`region_pheno$truth$enrichment`, then feeds those probabilities to
+`susieR::susie_rss(prior_weights = pi_vec, ...)`.
+
+Requires `susieR` (already installed via renv). Reads ground truth from
+the simulation object — this is **not a fair comparator**, it is the
+methodological ceiling.
+
+> **Purpose:** upper bound for any annotation-aware method. If a
+> realistic annotation-aware method (Funmap, PAINTOR, polyfun_est,
+> Functional BEATRICE) approaches polyfun_oracle on a given setting,
+> there is little room left for improvement. The gap between them is
+> the cost of estimating the prior rather than knowing it.
+>
+> **Limitation:** because it reads truth, polyfun_oracle cannot be run
+> on real data. It exists only as a benchmark ceiling. Excluded from
+> any "fair comparison" plot.
+
+**Arguments:** all standard `susie_rss` arguments are forwarded — see
+SuSiE section above. The wrapper itself takes no extra parameters.
+
+**Additional outputs (`$additional`):**
+
+| Field | Description |
+|---|---|
+| `prior_weights` | The per-SNP prior probabilities reconstructed from truth |
+| `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the underlying SuSiE fit (same as `susie`) |
+
+### polyfun_est
+
+PolyFun-style fine-mapping with **estimated** per-SNP priors. The fair,
+"no-cheating" annotation-aware comparator.
+
+Estimates per-annotation contributions `tau_k` by non-negative regression
+of the observed chi-squared statistics on the annotation matrix
+("LDSC-lite"). The regression is fit **once per scenario, pooled across
+all regions** via the scenario-setup hook — per-region estimation would be
+data-starved at typical region sizes (p ≈ 200–800). Once `tau` is
+estimated, per-SNP prior weights are computed as
+`w_j ∝ max(sum_k tau_k * A_{j,k}, eps)`, normalised, and fed to
+`susie_rss(prior_weights = w, ...)`.
+
+Requires `susieR` (already installed via renv). Uses the same annotation
+matrix that the simulator generated — apples-to-apples with Funmap,
+PAINTOR, and Functional BEATRICE.
+
+> **Purpose:** the head-to-head benchmark for any annotation-aware
+> method. Should beat plain SuSiE when annotations are informative and
+> roughly match plain SuSiE when annotations are null.
+>
+> **Limitation:** "LDSC-lite" is much simpler than canonical stratified
+> LDSC. Canonical PolyFun cannot be used on simulated data because its
+> reference LD scores and pretrained annotation priors are calibrated
+> on UK Biobank — they assume real human SNP coordinates and large-scale
+> S-LDSC infrastructure that does not apply to per-region simulation.
+
+**Arguments:** all standard `susie_rss` arguments are forwarded — see
+SuSiE section above. The wrapper itself takes no extra parameters.
+
+**Additional outputs (`$additional`):**
+
+| Field | Description |
+|---|---|
+| `prior_weights` | Per-SNP prior weights derived from the estimated `tau` |
+| `tau` | Estimated per-annotation contributions (intercept + one entry per annotation column) |
+| `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the underlying SuSiE fit |
 
 ### Funmap
 
