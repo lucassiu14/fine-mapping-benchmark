@@ -1973,6 +1973,53 @@ run_test("polyfun_est fails gracefully on no-annotation fixture", function() {
 
 
 # =============================================================================
+# SECTION 15: MAF-stratified evaluation (by_causal_maf)
+# =============================================================================
+
+set_section("evaluate_methods — by_causal_maf stratification")
+
+# RESULTS_MINI was computed against the pre-MAF-axis evaluator; recompute
+# here so the eval object has the new $by_causal_maf field.
+EVAL_MAF <- evaluate_methods(
+  SIM_MINI, RESULTS_MINI,
+  save = FALSE, verbose = FALSE
+)
+
+run_test("evaluate_methods returns a by_causal_maf list per method", function() {
+  stopifnot("by_causal_maf" %in% names(EVAL_MAF$susie))
+  stopifnot("by_causal_maf" %in% names(EVAL_MAF$abf))
+})
+
+run_test("by_causal_maf entries are non-empty when MAFs are available", function() {
+  # SIM_MINI was simulated from real VCFs, so genotypes carry MAFs and
+  # the bins should be populated.
+  bm <- EVAL_MAF$susie$by_causal_maf
+  stopifnot(!is.null(bm))
+  stopifnot(length(bm) >= 1L)
+})
+
+run_test("by_causal_maf bin names are a subset of {rare, low, common}", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  stopifnot(all(names(bm) %in% c("rare", "low", "common")))
+})
+
+run_test("by_causal_maf bins appear in canonical order rare -> low -> common", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  canonical <- c("rare", "low", "common")
+  present   <- canonical[canonical %in% names(bm)]
+  stopifnot(identical(names(bm), present))
+})
+
+run_test("by_causal_maf bins contain a numeric auprc field (possibly NA)", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  for (b in names(bm)) {
+    stopifnot("auprc" %in% names(bm[[b]]))
+    stopifnot(is.numeric(bm[[b]]$auprc))
+  }
+})
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 

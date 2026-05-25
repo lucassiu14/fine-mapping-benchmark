@@ -12,6 +12,10 @@
 #   eval_out$<method>$by_S            — named list, one entry per S value
 #   eval_out$<method>$by_phi          — named list, one entry per phi value
 #   eval_out$<method>$by_p_causal     — named list (sparse_inf only); NULL otherwise
+#   eval_out$<method>$by_causal_maf   — named list, keys "rare" / "low" / "common"
+#                                       (bins on the minimum causal-variant MAF
+#                                       per region; NULL if no fits have causal
+#                                       MAFs available)
 #
 # Each stratum contains:
 #   fdr_power_curve  — data.frame: threshold, tp, fp, fn, fdr, power, precision, recall
@@ -80,9 +84,10 @@ evaluate_methods <- function(simulation,
 
     output[[method]] <- list(
       global      = .metrics_with_se(fits, pip_thresholds, n_pip_cal_bins),
-      by_S        = .stratify_metrics(fits, "S",        pip_thresholds, n_pip_cal_bins),
-      by_phi      = .stratify_metrics(fits, "phi",      pip_thresholds, n_pip_cal_bins),
-      by_p_causal = .stratify_metrics(fits, "p_causal", pip_thresholds, n_pip_cal_bins)
+      by_S          = .stratify_metrics(fits, "S",        pip_thresholds, n_pip_cal_bins),
+      by_phi        = .stratify_metrics(fits, "phi",      pip_thresholds, n_pip_cal_bins),
+      by_p_causal   = .stratify_metrics(fits, "p_causal", pip_thresholds, n_pip_cal_bins),
+      by_causal_maf = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins)
     )
   }
 
@@ -150,8 +155,38 @@ evaluate_methods <- function(simulation,
     truth <- sc$regions[[f$region_id]]$truth
     f$causal_indices <- truth$causal_indices
     f$n_variants     <- length(f$pip)
+
+    # Attach causal-variant MAFs and a coarse stratification bin so the
+    # evaluator can stratify performance by how rare the rarest causal
+    # variant is in the region (the rarest causal is the bottleneck for
+    # fine-mapping). MAFs live on genotypes (shared across scenarios
+    # for the same region).
+    geno_maf <- simulation$genotypes[[f$region_id]]$maf
+    if (!is.null(geno_maf) && length(truth$causal_indices) > 0L) {
+      f$causal_maf     <- geno_maf[truth$causal_indices]
+      f$min_causal_maf <- min(f$causal_maf)
+    } else {
+      f$causal_maf     <- numeric(0)
+      f$min_causal_maf <- NA_real_
+    }
+    f$causal_maf_bin <- .maf_bin(f$min_causal_maf)
     f
   })
+}
+
+
+# =============================================================================
+# Internal: bin a MAF value into "rare" / "low" / "common"
+# =============================================================================
+
+# Bins follow the standard human-genetics partition. `NA_real_` input
+# (e.g. no causal variants in a region) maps to NA_character_ so the
+# fit is excluded from MAF stratification rather than counted in any bin.
+.maf_bin <- function(maf) {
+  if (is.null(maf) || length(maf) == 0L || is.na(maf)) return(NA_character_)
+  if (maf <= 0.01)  return("rare")
+  if (maf <= 0.05)  return("low")
+  "common"
 }
 
 
@@ -176,6 +211,43 @@ evaluate_methods <- function(simulation,
     .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
   })
   names(result) <- as.character(values)
+  result
+}
+
+
+# =============================================================================
+# Internal: stratify fits by causal-variant MAF bin
+#
+# Groups fits by `causal_maf_bin` (attached in .annotate_fits_with_truth) and
+# computes metrics per bin. Bins are kept in the canonical order
+# "rare" -> "low" -> "common" rather than alphabetical, so downstream plots
+# read left-to-right by increasing MAF.
+#
+# Returns NULL when no fit has a valid bin assignment (e.g. simulation with
+# no causal variants assigned to any region, or genotypes without an attached
+# `maf` field).
+# =============================================================================
+
+.stratify_metrics_by_maf <- function(fits, pip_thresholds, n_pip_cal_bins) {
+  bin_order <- c("rare", "low", "common")
+
+  present <- unique(vapply(fits, function(f) {
+    b <- f$causal_maf_bin
+    if (is.null(b) || length(b) == 0L) NA_character_ else as.character(b[[1L]])
+  }, character(1L)))
+  present <- present[!is.na(present)]
+  present <- bin_order[bin_order %in% present]
+
+  if (length(present) == 0L) return(NULL)
+
+  result <- lapply(present, function(b) {
+    subset <- Filter(function(f) {
+      bv <- f$causal_maf_bin
+      !is.null(bv) && !is.na(bv) && bv == b
+    }, fits)
+    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
+  })
+  names(result) <- present
   result
 }
 
