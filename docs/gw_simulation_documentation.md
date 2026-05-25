@@ -117,6 +117,46 @@ Since $\mathbf{X}_i$ is already column-standardised, this is equivalent to `cor(
 
 LD matrices are pre-computed once after genotype simulation and reused across all $(\pi, h^2, \text{iter})$ scenarios.
 
+### 4.7 Optional reference-panel LD (sample-size mismatch)
+
+To simulate the practical case in which fine-mapping methods receive an
+LD matrix computed from a **smaller, independent reference panel** rather
+than the GWAS sample itself (e.g. 1000 Genomes EUR with $n \approx 2{,}500$
+used to fine-map a $n = 500{,}000$ UK Biobank GWAS), the `n_ref` argument
+to `simulate_genotypes()`, `run_simulation()`, and `simulate_gwfm_data()`
+triggers an additional independent draw of size $n_{\text{ref}}$ from the
+same VCF, in the same sim1000G session.
+
+When `n_ref` is set:
+
+- A second sample $\mathbf{G}_i^{\text{ref}} \in \{0, 1, 2\}^{n_{\text{ref}} \times p_i}$
+  is drawn alongside the GWAS sample. Both draws use the same VCF load,
+  the same genetic map, and the same MAF-filtered variant set.
+- The polymorphic filter (§4.4) is applied to the **intersection** of
+  variants polymorphic in both samples — variants monomorphic in either
+  the GWAS or the reference are dropped from both, mirroring how a real
+  reference-panel workflow handles missing or absent variants.
+- $\mathbf{X}_i^{\text{ref}}$ is standardised by its **own** column means
+  and SDs, not the GWAS sample's. This mirrors how a real reference panel
+  produces an LD matrix on its own scale.
+- The reference-panel LD is
+  $\boldsymbol{\Sigma}_i^{\text{ref}} = \mathrm{cor}(\mathbf{X}_i^{\text{ref}})$
+  and is stored as `genotypes[[i]]$LD`. The in-sample LD
+  $\boldsymbol{\Sigma}_i^{\text{true}} = \mathrm{cor}(\mathbf{X}_i)$ is
+  also stored as `genotypes[[i]]$LD_true` for diagnostics.
+- Fine-mapping methods receive `LD` (ref-panel-derived). `LD_true` lets
+  evaluation compute mismatch diagnostics — e.g.
+  $\frac{1}{p_i^2}\|\boldsymbol{\Sigma}_i^{\text{ref}} - \boldsymbol{\Sigma}_i^{\text{true}}\|_F^2$
+  — without re-simulating.
+
+When `n_ref = NULL` (the default), no second sample is drawn. `LD == LD_true`
+exactly, and `LD_true` is the only correlation matrix stored. This keeps
+the behaviour backwards-compatible with pre-LD-mismatch simulations.
+
+`params$n_ref` records the chosen reference-panel size (or `NULL`) for
+reproducibility. The two LD matrices roughly double the per-region memory
+footprint when `n_ref` is set; the LD memory guard accounts for this.
+
 ---
 
 ## 5. Functional Annotation Simulation
