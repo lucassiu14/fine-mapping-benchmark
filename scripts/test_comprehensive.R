@@ -1973,6 +1973,187 @@ run_test("polyfun_est fails gracefully on no-annotation fixture", function() {
 
 
 # =============================================================================
+# SECTION 15: MAF-stratified evaluation (by_causal_maf)
+# =============================================================================
+
+set_section("evaluate_methods — by_causal_maf stratification")
+
+# RESULTS_MINI was computed against the pre-MAF-axis evaluator; recompute
+# here so the eval object has the new $by_causal_maf field.
+EVAL_MAF <- evaluate_methods(
+  SIM_MINI, RESULTS_MINI,
+  save = FALSE, verbose = FALSE
+)
+
+run_test("evaluate_methods returns a by_causal_maf list per method", function() {
+  stopifnot("by_causal_maf" %in% names(EVAL_MAF$susie))
+  stopifnot("by_causal_maf" %in% names(EVAL_MAF$abf))
+})
+
+run_test("by_causal_maf entries are non-empty when MAFs are available", function() {
+  # SIM_MINI was simulated from real VCFs, so genotypes carry MAFs and
+  # the bins should be populated.
+  bm <- EVAL_MAF$susie$by_causal_maf
+  stopifnot(!is.null(bm))
+  stopifnot(length(bm) >= 1L)
+})
+
+run_test("by_causal_maf bin names are a subset of {rare, low, common}", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  stopifnot(all(names(bm) %in% c("rare", "low", "common")))
+})
+
+run_test("by_causal_maf bins appear in canonical order rare -> low -> common", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  canonical <- c("rare", "low", "common")
+  present   <- canonical[canonical %in% names(bm)]
+  stopifnot(identical(names(bm), present))
+})
+
+run_test("by_causal_maf bins contain a numeric auprc field (possibly NA)", function() {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  for (b in names(bm)) {
+    stopifnot("auprc" %in% names(bm[[b]]))
+    stopifnot(is.numeric(bm[[b]]$auprc))
+  }
+})
+
+
+# =============================================================================
+# SECTION 16: Misspecification stratification (by_true_annotation_type)
+# =============================================================================
+
+set_section("evaluate_methods — by_true_annotation_type stratification")
+
+# EVAL_MAF was built against SIM_MINI (annotations = "none"). Re-use it
+# for the no-annotation case; spin up a quick evaluation against
+# SIM_MINI_ANNOT (binary annotations) for the binary case.
+
+RESULTS_MINI_ANNOT_FOR_AT <- run_methods(
+  SIM_MINI_ANNOT,
+  methods     = c("susie", "abf"),
+  method_args = list(susie = list(L = 5L, coverage = 0.95)),
+  save = FALSE, verbose = FALSE
+)
+EVAL_ANNOT <- evaluate_methods(
+  SIM_MINI_ANNOT, RESULTS_MINI_ANNOT_FOR_AT,
+  save = FALSE, verbose = FALSE
+)
+
+run_test("evaluate_methods returns by_true_annotation_type per method", function() {
+  stopifnot("by_true_annotation_type" %in% names(EVAL_MAF$susie))
+  stopifnot("by_true_annotation_type" %in% names(EVAL_ANNOT$susie))
+})
+
+run_test("by_true_annotation_type uses 'none' on the no-annotation fixture", function() {
+  bt <- EVAL_MAF$susie$by_true_annotation_type
+  stopifnot(!is.null(bt))
+  stopifnot(identical(names(bt), "none"))
+})
+
+run_test("by_true_annotation_type uses 'binary' on the annotated fixture", function() {
+  bt <- EVAL_ANNOT$susie$by_true_annotation_type
+  stopifnot(!is.null(bt))
+  stopifnot(identical(names(bt), "binary"))
+})
+
+run_test("by_true_annotation_type bins carry a numeric auprc field", function() {
+  for (eo in list(EVAL_MAF$susie, EVAL_ANNOT$susie)) {
+    bt <- eo$by_true_annotation_type
+    for (t in names(bt)) {
+      stopifnot("auprc" %in% names(bt[[t]]))
+      stopifnot(is.numeric(bt[[t]]$auprc))
+    }
+  }
+})
+
+
+# =============================================================================
+# SECTION 17: LD mismatch (n_ref independent reference panel)
+# =============================================================================
+
+set_section("LD mismatch — n_ref reference-panel draw")
+
+# Baseline (no ref panel) should be exactly the pre-n_ref behaviour.
+GENO_NOREF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE
+)
+
+# With a small ref panel, expect ref-panel LD to differ from in-sample LD.
+GENO_REF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 50L
+)
+
+# With ref panel matching n, the ref panel is still an independent draw,
+# so its LD will differ from in-sample LD by a smaller amount.
+GENO_REF_FULL <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 200L
+)
+
+run_test("n_ref = NULL: no X_ref / n_ref fields attached (backwards compatible)", function() {
+  r <- GENO_NOREF[[1L]]
+  stopifnot(is.null(r$X_ref))
+  stopifnot(is.null(r$n_ref))
+})
+
+run_test("n_ref = 50: X_ref has 50 rows and same p as X", function() {
+  r <- GENO_REF[[1L]]
+  stopifnot(!is.null(r$X_ref))
+  stopifnot(nrow(r$X_ref) == 50L)
+  stopifnot(ncol(r$X_ref) == ncol(r$X))
+  stopifnot(identical(r$n_ref, 50L))
+})
+
+run_test("run_simulation: LD_true and LD are both populated", function() {
+  sim_ref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "data/genetic_maps",
+    seed = 99L, verbose = FALSE, n_ref = 50L
+  )
+  r <- sim_ref$genotypes[[1L]]
+  stopifnot(!is.null(r$LD))
+  stopifnot(!is.null(r$LD_true))
+  stopifnot(identical(dim(r$LD), dim(r$LD_true)))
+  stopifnot(identical(sim_ref$params$n_ref, 50L))
+})
+
+run_test("run_simulation: n_ref = NULL gives LD identical to LD_true", function() {
+  sim_noref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "data/genetic_maps",
+    seed = 99L, verbose = FALSE
+  )
+  r <- sim_noref$genotypes[[1L]]
+  stopifnot(!is.null(r$LD_true))
+  stopifnot(identical(r$LD, r$LD_true))
+  stopifnot(is.null(sim_noref$params$n_ref))
+})
+
+run_test("LD mismatch shrinks as n_ref grows (rough monotonicity)", function() {
+  # Both ref draws use the same seed for the main sample, so LD_true is
+  # the same. The ref panel at n_ref = 200 should be closer to LD_true
+  # than the ref panel at n_ref = 50 because larger samples produce more
+  # precise correlation estimates.
+  r_small <- GENO_REF[[1L]]
+  r_large <- GENO_REF_FULL[[1L]]
+  LD_true <- cor(r_small$X)   # main sample is identical across the two
+  d_small <- mean((cor(r_small$X_ref) - LD_true)^2, na.rm = TRUE)
+  d_large <- mean((cor(r_large$X_ref) - LD_true)^2, na.rm = TRUE)
+  stopifnot(d_large < d_small)
+})
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 

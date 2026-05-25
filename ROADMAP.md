@@ -275,6 +275,14 @@ Five annotation-aware methods with distinct prior-estimation strategies.
   catalogue.
 - **DAP-G deferred** — eQTL-specific; reconsider for benchmark-paper
   framing if eQTL fine-mapping is in scope.
+- **SBayesRC deferred** (Zheng 2024) — Bayesian fine-mapping with
+  functional annotation categories via a BayesR-family prior plus
+  per-annotation effect-size shrinkage. Distributed as part of GCTB
+  (`gctb --sbayes-rc`); native binary, no R interface. A wrapper would
+  follow the FINEMAP / PAINTOR pattern (system2 call to the binary).
+  Worth adding once SparsePro is in, as another modern
+  annotation-aware comparator distinct from the PolyFun / Funmap
+  family.
 - **MsCAVIAR / SuSiEx deferred** — couples with #3 multi-ancestry, also
   deferred.
 - **eCAVIAR deferred** — colocalisation, not pure fine-mapping; out of
