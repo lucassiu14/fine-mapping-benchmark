@@ -2069,6 +2069,91 @@ run_test("by_true_annotation_type bins carry a numeric auprc field", function() 
 
 
 # =============================================================================
+# SECTION 17: LD mismatch (n_ref independent reference panel)
+# =============================================================================
+
+set_section("LD mismatch — n_ref reference-panel draw")
+
+# Baseline (no ref panel) should be exactly the pre-n_ref behaviour.
+GENO_NOREF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE
+)
+
+# With a small ref panel, expect ref-panel LD to differ from in-sample LD.
+GENO_REF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 50L
+)
+
+# With ref panel matching n, the ref panel is still an independent draw,
+# so its LD will differ from in-sample LD by a smaller amount.
+GENO_REF_FULL <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 200L
+)
+
+run_test("n_ref = NULL: no X_ref / n_ref fields attached (backwards compatible)", function() {
+  r <- GENO_NOREF[[1L]]
+  stopifnot(is.null(r$X_ref))
+  stopifnot(is.null(r$n_ref))
+})
+
+run_test("n_ref = 50: X_ref has 50 rows and same p as X", function() {
+  r <- GENO_REF[[1L]]
+  stopifnot(!is.null(r$X_ref))
+  stopifnot(nrow(r$X_ref) == 50L)
+  stopifnot(ncol(r$X_ref) == ncol(r$X))
+  stopifnot(identical(r$n_ref, 50L))
+})
+
+run_test("run_simulation: LD_true and LD are both populated", function() {
+  sim_ref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "data/genetic_maps",
+    seed = 99L, verbose = FALSE, n_ref = 50L
+  )
+  r <- sim_ref$genotypes[[1L]]
+  stopifnot(!is.null(r$LD))
+  stopifnot(!is.null(r$LD_true))
+  stopifnot(identical(dim(r$LD), dim(r$LD_true)))
+  stopifnot(identical(sim_ref$params$n_ref, 50L))
+})
+
+run_test("run_simulation: n_ref = NULL gives LD identical to LD_true", function() {
+  sim_noref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "data/genetic_maps",
+    seed = 99L, verbose = FALSE
+  )
+  r <- sim_noref$genotypes[[1L]]
+  stopifnot(!is.null(r$LD_true))
+  stopifnot(identical(r$LD, r$LD_true))
+  stopifnot(is.null(sim_noref$params$n_ref))
+})
+
+run_test("LD mismatch shrinks as n_ref grows (rough monotonicity)", function() {
+  # Both ref draws use the same seed for the main sample, so LD_true is
+  # the same. The ref panel at n_ref = 200 should be closer to LD_true
+  # than the ref panel at n_ref = 50 because larger samples produce more
+  # precise correlation estimates.
+  r_small <- GENO_REF[[1L]]
+  r_large <- GENO_REF_FULL[[1L]]
+  LD_true <- cor(r_small$X)   # main sample is identical across the two
+  d_small <- mean((cor(r_small$X_ref) - LD_true)^2, na.rm = TRUE)
+  d_large <- mean((cor(r_large$X_ref) - LD_true)^2, na.rm = TRUE)
+  stopifnot(d_large < d_small)
+})
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 

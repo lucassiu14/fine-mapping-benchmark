@@ -106,7 +106,8 @@ simulate_genotypes <- function(n_regions = 3,
                                seed = NULL,
                                save = FALSE,
                                output_dir = "results",
-                               verbose = TRUE) {
+                               verbose = TRUE,
+                               n_ref = NULL) {
 
   # --- Input validation -------------------------------------------------------
 
@@ -133,6 +134,18 @@ simulate_genotypes <- function(n_regions = 3,
       n == floor(n) && n >= 1
   )
   n <- as.integer(n)
+
+  # n_ref (optional): NULL = no reference panel (in-sample LD only).
+  # Integer >= 1 = additionally draw a reference panel of this size from the
+  # same VCF, in the same sim1000G session. The two samples are independent.
+  if (!is.null(n_ref)) {
+    stopifnot(
+      "n_ref must be a positive integer when not NULL" =
+        is.numeric(n_ref) && length(n_ref) == 1 &&
+        n_ref == floor(n_ref) && n_ref >= 1
+    )
+    n_ref <- as.integer(n_ref)
+  }
 
   # p: scalar or vector of length n_regions
   stopifnot(
@@ -245,7 +258,8 @@ simulate_genotypes <- function(n_regions = 3,
       standardise = standardise,
       genetic_map_dir = genetic_map_dir,
       region_id = i,
-      verbose = verbose
+      verbose = verbose,
+      n_ref = n_ref
     )
   }
 
@@ -297,7 +311,8 @@ simulate_single_region <- function(vcf_file,
                                    standardise,
                                    genetic_map_dir,
                                    region_id,
-                                   verbose) {
+                                   verbose,
+                                   n_ref = NULL) {
 
   # --- Read VCF ---------------------------------------------------------------
   # We read more variants than requested, because the MAF filter and
@@ -383,52 +398,97 @@ simulate_single_region <- function(vcf_file,
   }
 
   # --- Initialise simulation and generate individuals -------------------------
+  #
+  # Both the GWAS sample (size n) and, when requested, the reference panel
+  # (size n_ref) are drawn from the same sim1000G simulation session, so they
+  # see the same variant set, the same VCF load, and the same genetic map.
+  # The two samples are independent because generateUnrelatedIndividuals()
+  # consumes fresh RNG state on each call.
 
-  # totalNumberOfIndividuals must be >= n; give some headroom
-  total_capacity <- as.integer(n * 1.2) + 10
+  total_capacity <- as.integer((n + (if (is.null(n_ref)) 0L else as.integer(n_ref))) * 1.2) + 10L
 
-  # sim1000G uses cat() and global state; capture output to keep things tidy
+  generate_samples <- function() {
+    sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
+    ids_main <- sim1000G::generateUnrelatedIndividuals(n)
+    G_main   <- sim1000G::retrieveGenotypes(ids_main)
+    G_ref    <- NULL
+    if (!is.null(n_ref)) {
+      ids_ref <- sim1000G::generateUnrelatedIndividuals(as.integer(n_ref))
+      G_ref   <- sim1000G::retrieveGenotypes(ids_ref)
+    }
+    list(G_main = G_main, G_ref = G_ref)
+  }
+
   if (!verbose) {
+    samples <- NULL
     suppressMessages(invisible(utils::capture.output({
-      sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
-      ids <- sim1000G::generateUnrelatedIndividuals(n)
-      genotype_raw <- sim1000G::retrieveGenotypes(ids)
+      samples <- generate_samples()
     })))
   } else {
-    sim1000G::startSimulation(vcf_obj, totalNumberOfIndividuals = total_capacity)
-    ids <- sim1000G::generateUnrelatedIndividuals(n)
-    genotype_raw <- sim1000G::retrieveGenotypes(ids)
+    samples <- generate_samples()
   }
+
+  genotype_raw     <- samples$G_main
+  genotype_ref_raw <- samples$G_ref
 
   # genotype_raw is n x p_actual (0/1/2 coding)
   # Rows = individuals, columns = variants
 
   # --- Post-processing: remove monomorphic SNPs in simulated data -------------
+  #
+  # When a reference panel is also drawn, we take the intersection of
+  # polymorphic columns from BOTH samples. A variant kept in both means it
+  # has at least one minor allele in each — i.e. cor(X_ref) won't produce
+  # NaN entries for that column. This mirrors what a real reference-panel
+  # workflow does (variants are dropped if absent / monomorphic in either
+  # the GWAS or the reference).
 
   col_means <- colMeans(genotype_raw)
-  sim_maf <- pmin(col_means / 2, 1 - col_means / 2)
-  polymorphic <- sim_maf > 0
+  sim_maf   <- pmin(col_means / 2, 1 - col_means / 2)
+  poly_main <- sim_maf > 0
+
+  if (!is.null(genotype_ref_raw)) {
+    ref_means <- colMeans(genotype_ref_raw)
+    ref_maf   <- pmin(ref_means / 2, 1 - ref_means / 2)
+    poly_ref  <- ref_maf > 0
+    polymorphic <- poly_main & poly_ref
+  } else {
+    polymorphic <- poly_main
+  }
+
   if (sum(polymorphic) < ncol(genotype_raw)) {
     n_removed <- sum(!polymorphic)
     if (verbose) {
-      message(
-        sprintf(
-          "  Removed %d monomorphic SNP(s) in simulated data.", n_removed
-        )
-      )
+      msg <- if (!is.null(genotype_ref_raw)) {
+        sprintf("  Removed %d SNP(s) monomorphic in the GWAS or reference sample.",
+                n_removed)
+      } else {
+        sprintf("  Removed %d monomorphic SNP(s) in simulated data.", n_removed)
+      }
+      message(msg)
     }
     genotype_raw <- genotype_raw[, polymorphic, drop = FALSE]
+    if (!is.null(genotype_ref_raw)) {
+      genotype_ref_raw <- genotype_ref_raw[, polymorphic, drop = FALSE]
+    }
     sim_maf <- sim_maf[polymorphic]
   }
 
   p_actual <- ncol(genotype_raw)
 
   # --- Standardise if requested -----------------------------------------------
+  #
+  # X_ref is standardised by its OWN column means/SDs (not the GWAS sample's),
+  # mirroring how a real reference panel produces an LD matrix on its own
+  # scale. cor(X_ref) is then the LD a method would see if it had only the
+  # reference panel available.
 
   if (standardise) {
     X <- scale_genotypes(genotype_raw)
+    X_ref <- if (!is.null(genotype_ref_raw)) scale_genotypes(genotype_ref_raw) else NULL
   } else {
     X <- genotype_raw
+    X_ref <- genotype_ref_raw
   }
 
   # --- Collect variant metadata -----------------------------------------------
@@ -447,7 +507,7 @@ simulate_single_region <- function(vcf_file,
 
   # --- Return -----------------------------------------------------------------
 
-  list(
+  out <- list(
     X = X,
     X_raw = genotype_raw,
     n = nrow(X),
@@ -457,6 +517,12 @@ simulate_single_region <- function(vcf_file,
     region_id = region_id,
     vcf_source = vcf_file
   )
+  if (!is.null(X_ref)) {
+    out$X_ref     <- X_ref
+    out$X_ref_raw <- genotype_ref_raw
+    out$n_ref     <- nrow(X_ref)
+  }
+  out
 }
 
 

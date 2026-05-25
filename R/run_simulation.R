@@ -145,7 +145,8 @@ run_simulation <- function(n_regions = 3,
                            seed = NULL,
                            save = FALSE,
                            output_dir = "results",
-                           verbose = TRUE) {
+                           verbose = TRUE,
+                           n_ref = NULL) {
 
   # --- Input validation -------------------------------------------------------
 
@@ -263,14 +264,17 @@ run_simulation <- function(n_regions = 3,
   }
 
   # --- Memory guard for LD matrix storage -------------------------------------
-  # Each LD matrix is p_i x p_i doubles (8 bytes/element). Warn if the combined
-  # storage is likely to be uncomfortably large for typical machines.
-  ld_bytes <- 8 * sum(as.numeric(p)^2)
-  ld_gb    <- ld_bytes / 1e9
+  # Each LD matrix is p_i x p_i doubles (8 bytes/element). When n_ref is set
+  # we keep BOTH the in-sample LD (LD_true) and the ref-panel-derived LD per
+  # region, doubling the LD-side memory footprint.
+  ld_factor <- if (is.null(n_ref)) 1 else 2
+  ld_bytes  <- 8 * ld_factor * sum(as.numeric(p)^2)
+  ld_gb     <- ld_bytes / 1e9
   if (ld_gb > 4) {
     warning(sprintf(
-      "Combined LD matrices will use ~%.1f GB. Reduce p, reduce n_regions, or run on a high-memory node.",
-      ld_gb
+      "Combined LD matrices will use ~%.1f GB%s. Reduce p, reduce n_regions, or run on a high-memory node.",
+      ld_gb,
+      if (!is.null(n_ref)) " (n_ref doubles the LD footprint)" else ""
     ), call. = FALSE)
   }
 
@@ -292,13 +296,26 @@ run_simulation <- function(n_regions = 3,
     standardise = standardise,
     genetic_map_dir = genetic_map_dir,
     seed = NULL,  # seed already set above
-    verbose = verbose
+    verbose = verbose,
+    n_ref = n_ref
   )
 
-  # Pre-compute LD matrices (shared across all scenarios)
+  # Pre-compute LD matrices (shared across all scenarios).
+  #
+  # - LD_true is always the in-sample correlation matrix: cor(X). Used for
+  #   diagnostics (e.g. mean((LD - LD_true)^2)) and as the "perfect" LD a
+  #   method would receive if it had the GWAS genotypes themselves.
+  # - LD is what methods actually receive. When n_ref is set we use the
+  #   reference panel: cor(X_ref). Otherwise LD == LD_true exactly,
+  #   preserving the pre-n_ref behaviour.
   if (verbose) message("\nPre-computing LD matrices...")
   for (i in seq_len(n_regions)) {
-    genotypes[[i]]$LD <- cor(genotypes[[i]]$X)
+    genotypes[[i]]$LD_true <- cor(genotypes[[i]]$X)
+    if (!is.null(genotypes[[i]]$X_ref)) {
+      genotypes[[i]]$LD <- cor(genotypes[[i]]$X_ref)
+    } else {
+      genotypes[[i]]$LD <- genotypes[[i]]$LD_true
+    }
   }
 
   # Pre-generate annotation matrices (once per region, shared across all scenarios)
@@ -433,7 +450,8 @@ run_simulation <- function(n_regions = 3,
     min_maf = min_maf,
     vcf_files_used = vcf_files,
     seed = seed,
-    n_scenarios = n_scenarios
+    n_scenarios = n_scenarios,
+    n_ref = n_ref
   )
 
   # --- Assemble result --------------------------------------------------------

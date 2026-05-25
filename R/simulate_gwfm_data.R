@@ -183,7 +183,8 @@ simulate_gwfm_data <- function(n,
                                 seed                = NULL,
                                 save                = FALSE,
                                 output_dir          = "results",
-                                verbose             = TRUE) {
+                                verbose             = TRUE,
+                                n_ref               = NULL) {
 
   # ---------------------------------------------------------------------------
   # Input validation
@@ -201,6 +202,18 @@ simulate_gwfm_data <- function(n,
   )
   n      <- as.integer(n)
   n_iter <- as.integer(n_iter)
+
+  # n_ref: NULL = no reference panel (in-sample LD only). Integer >= 1 =
+  # additionally draw an independent reference panel of this size per
+  # region for LD-mismatch experiments.
+  if (!is.null(n_ref)) {
+    stopifnot(
+      "n_ref must be a positive integer when not NULL" =
+        is.numeric(n_ref) && length(n_ref) == 1 &&
+        n_ref == floor(n_ref) && n_ref >= 1
+    )
+    n_ref <- as.integer(n_ref)
+  }
 
   stopifnot(
     "pi must be a numeric vector with values in (0, 1)" =
@@ -357,12 +370,16 @@ simulate_gwfm_data <- function(n,
   # Memory guard for LD matrix storage. With n_regions in the thousands
   # (full LDetect partition) the combined LD storage can exceed typical RAM.
   # ---------------------------------------------------------------------------
-  ld_bytes <- 8 * sum(as.numeric(p_vec)^2)
-  ld_gb    <- ld_bytes / 1e9
+  # When n_ref is set we keep both LD (ref-panel-derived) and LD_true
+  # (in-sample), doubling the per-region LD footprint.
+  ld_factor <- if (is.null(n_ref)) 1 else 2
+  ld_bytes  <- 8 * ld_factor * sum(as.numeric(p_vec)^2)
+  ld_gb     <- ld_bytes / 1e9
   if (ld_gb > 4) {
     warning(sprintf(
-      "Combined LD matrices across %d region(s) will use ~%.1f GB. Reduce p, lower coverage, or run on a high-memory node.",
-      length(p_vec), ld_gb
+      "Combined LD matrices across %d region(s) will use ~%.1f GB%s. Reduce p, lower coverage, or run on a high-memory node.",
+      length(p_vec), ld_gb,
+      if (!is.null(n_ref)) " (n_ref doubles the LD footprint)" else ""
     ), call. = FALSE)
   }
 
@@ -392,7 +409,8 @@ simulate_gwfm_data <- function(n,
       standardise     = TRUE,
       genetic_map_dir = genetic_map_dir,
       region_id       = i,
-      verbose         = verbose
+      verbose         = verbose,
+      n_ref           = n_ref
     )
 
     # Attach region metadata
@@ -405,7 +423,18 @@ simulate_gwfm_data <- function(n,
   # Pre-compute LD matrices (shared across all scenarios)
   if (verbose) message("\n  Pre-computing LD matrices...")
   for (i in seq_len(n_regions)) {
-    genotypes[[i]]$LD <- cor(genotypes[[i]]$X)
+    # LD_true is always the in-sample correlation matrix: cor(X). Used for
+    # diagnostics and as the "perfect" LD a method would see if it had the
+    # GWAS genotypes themselves.
+    # LD is what methods actually receive. When n_ref is set we use the
+    # reference panel: cor(X_ref). Otherwise LD == LD_true exactly,
+    # preserving the pre-n_ref behaviour.
+    genotypes[[i]]$LD_true <- cor(genotypes[[i]]$X)
+    if (!is.null(genotypes[[i]]$X_ref)) {
+      genotypes[[i]]$LD <- cor(genotypes[[i]]$X_ref)
+    } else {
+      genotypes[[i]]$LD <- genotypes[[i]]$LD_true
+    }
   }
 
   # Genome-wide variant count
@@ -598,6 +627,7 @@ simulate_gwfm_data <- function(n,
     min_maf                = min_maf,
     vcf_dir                = vcf_dir,
     seed                   = seed,
+    n_ref                  = n_ref,
     simulation_type        = "gwfm"
   )
 
