@@ -2020,6 +2020,55 @@ run_test("by_causal_maf bins contain a numeric auprc field (possibly NA)", funct
 
 
 # =============================================================================
+# SECTION 16: Misspecification stratification (by_true_annotation_type)
+# =============================================================================
+
+set_section("evaluate_methods — by_true_annotation_type stratification")
+
+# EVAL_MAF was built against SIM_MINI (annotations = "none"). Re-use it
+# for the no-annotation case; spin up a quick evaluation against
+# SIM_MINI_ANNOT (binary annotations) for the binary case.
+
+RESULTS_MINI_ANNOT_FOR_AT <- run_methods(
+  SIM_MINI_ANNOT,
+  methods     = c("susie", "abf"),
+  method_args = list(susie = list(L = 5L, coverage = 0.95)),
+  save = FALSE, verbose = FALSE
+)
+EVAL_ANNOT <- evaluate_methods(
+  SIM_MINI_ANNOT, RESULTS_MINI_ANNOT_FOR_AT,
+  save = FALSE, verbose = FALSE
+)
+
+run_test("evaluate_methods returns by_true_annotation_type per method", function() {
+  stopifnot("by_true_annotation_type" %in% names(EVAL_MAF$susie))
+  stopifnot("by_true_annotation_type" %in% names(EVAL_ANNOT$susie))
+})
+
+run_test("by_true_annotation_type uses 'none' on the no-annotation fixture", function() {
+  bt <- EVAL_MAF$susie$by_true_annotation_type
+  stopifnot(!is.null(bt))
+  stopifnot(identical(names(bt), "none"))
+})
+
+run_test("by_true_annotation_type uses 'binary' on the annotated fixture", function() {
+  bt <- EVAL_ANNOT$susie$by_true_annotation_type
+  stopifnot(!is.null(bt))
+  stopifnot(identical(names(bt), "binary"))
+})
+
+run_test("by_true_annotation_type bins carry a numeric auprc field", function() {
+  for (eo in list(EVAL_MAF$susie, EVAL_ANNOT$susie)) {
+    bt <- eo$by_true_annotation_type
+    for (t in names(bt)) {
+      stopifnot("auprc" %in% names(bt[[t]]))
+      stopifnot(is.numeric(bt[[t]]$auprc))
+    }
+  }
+})
+
+
+# =============================================================================
 # Summary
 # =============================================================================
 

@@ -16,6 +16,14 @@
 #                                       (bins on the minimum causal-variant MAF
 #                                       per region; NULL if no fits have causal
 #                                       MAFs available)
+#   eval_out$<method>$by_true_annotation_type — named list, keys "none" /
+#                                       "binary" / "continuous" / "user_supplied"
+#                                       (true annotation regime used in
+#                                       simulation; scenario-level, so typically
+#                                       single-bin per evaluate_methods() call
+#                                       and becomes meaningful only when eval
+#                                       objects from differently-annotated sims
+#                                       are merged)
 #
 # Each stratum contains:
 #   fdr_power_curve  — data.frame: threshold, tp, fp, fn, fdr, power, precision, recall
@@ -84,10 +92,11 @@ evaluate_methods <- function(simulation,
 
     output[[method]] <- list(
       global      = .metrics_with_se(fits, pip_thresholds, n_pip_cal_bins),
-      by_S          = .stratify_metrics(fits, "S",        pip_thresholds, n_pip_cal_bins),
-      by_phi        = .stratify_metrics(fits, "phi",      pip_thresholds, n_pip_cal_bins),
-      by_p_causal   = .stratify_metrics(fits, "p_causal", pip_thresholds, n_pip_cal_bins),
-      by_causal_maf = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins)
+      by_S                    = .stratify_metrics(fits, "S",        pip_thresholds, n_pip_cal_bins),
+      by_phi                  = .stratify_metrics(fits, "phi",      pip_thresholds, n_pip_cal_bins),
+      by_p_causal             = .stratify_metrics(fits, "p_causal", pip_thresholds, n_pip_cal_bins),
+      by_causal_maf           = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins),
+      by_true_annotation_type = .stratify_metrics_by_annotation_type(fits, pip_thresholds, n_pip_cal_bins)
     )
   }
 
@@ -170,6 +179,16 @@ evaluate_methods <- function(simulation,
       f$min_causal_maf <- NA_real_
     }
     f$causal_maf_bin <- .maf_bin(f$min_causal_maf)
+
+    # True annotation type used by the simulation. Scenario-level (the
+    # whole sim was generated with one annotation regime), but attached
+    # to each fit so the evaluator can stratify across simulations that
+    # have been merged into one results object.
+    f$true_annotation_type <- if (!is.null(simulation$params$annotation_type)) {
+      as.character(simulation$params$annotation_type)
+    } else {
+      NA_character_
+    }
     f
   })
 }
@@ -244,6 +263,48 @@ evaluate_methods <- function(simulation,
     subset <- Filter(function(f) {
       bv <- f$causal_maf_bin
       !is.null(bv) && !is.na(bv) && bv == b
+    }, fits)
+    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
+  })
+  names(result) <- present
+  result
+}
+
+
+# =============================================================================
+# Internal: stratify fits by the true annotation type used in simulation
+#
+# Groups fits by `true_annotation_type` (attached in
+# .annotate_fits_with_truth from simulation$params$annotation_type) and
+# computes metrics per type. Kept in canonical order
+# "none" -> "binary" -> "continuous" -> "user_supplied" so plots read from
+# the misspecified annotation-null case through to richer annotation
+# regimes.
+#
+# Within a single evaluate_methods() call this typically produces a
+# single bin, because annotation_type is scenario-level. The axis
+# becomes meaningful when evaluation objects from differently-annotated
+# simulations are merged.
+# =============================================================================
+
+.stratify_metrics_by_annotation_type <- function(fits, pip_thresholds,
+                                                  n_pip_cal_bins) {
+  type_order <- c("none", "binary", "continuous", "user_supplied")
+
+  present <- unique(vapply(fits, function(f) {
+    v <- f$true_annotation_type
+    if (is.null(v) || length(v) == 0L) NA_character_ else as.character(v[[1L]])
+  }, character(1L)))
+  present <- present[!is.na(present)]
+  present <- c(type_order[type_order %in% present],
+               setdiff(present, type_order))  # tolerate unknown labels
+
+  if (length(present) == 0L) return(NULL)
+
+  result <- lapply(present, function(t) {
+    subset <- Filter(function(f) {
+      tv <- f$true_annotation_type
+      !is.null(tv) && !is.na(tv) && tv == t
     }, fits)
     .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
   })
