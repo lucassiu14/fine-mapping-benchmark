@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this benchmarking framework in your research, please cite it as below."
+title: "fine-mapping-benchmark: A framework for benchmarking statistical fine-mapping methods"
+authors:
+  - family-names: "Siu"
+    given-names: "Lucas"
+    affiliation: "Imperial College London"
+    email: "ls1020@ic.ac.uk"
+type: software
+repository-code: "https://github.com/lucassiu14/fine-mapping-benchmark"
+url: "https://github.com/lucassiu14/fine-mapping-benchmark"
+license: MIT
+version: "0.1.0"
+date-released: "2026-04-03"
+keywords:
+  - fine-mapping
+  - GWAS
+  - benchmarking
+  - statistical-genetics
+  - simulation
+  - susieR
+  - PolyFun
+abstract: >-
+  An R framework for benchmarking statistical fine-mapping methods using
+  simulated genetic data. Supports a catalogue of fine-mapping methods
+  (SuSiE, SuSiE-inf, FINEMAP, CARMA, PAINTOR, Funmap, BEATRICE, and others)
+  with simulated genotypes derived from 1000 Genomes Phase 3 haplotypes,
+  flexible per-locus and genome-wide simulation pipelines, and automated
+  evaluation (AUPRC, credible-set metrics, PIP calibration) stratified by
+  causal-variant count, heritability, MAF, annotation regime, and reference-
+  panel size.
