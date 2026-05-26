@@ -1,5 +1,8 @@
 # Fine-Mapping Benchmarking Framework
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Cite this repository](https://img.shields.io/badge/Cite-CITATION.cff-blue.svg)](CITATION.cff)
+
 Benchmarking framework for evaluating statistical fine-mapping methods using
 simulated genetic data. Supports 12 methods, flexible simulation parameters,
 automatic evaluation (AUPRC, credible set metrics, PIP calibration), and
@@ -705,3 +708,21 @@ Rscript scripts/hpc/collect_results.R
 Edit `submit_benchmark.sh` for your cluster's partition, account, and conda
 environment, and edit `run_benchmark_job.R` for the paths to BEATRICE / PAINTOR
 on your system.
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE)
+file for the full text. In short: you can use, copy, modify, and redistribute
+the code commercially or non-commercially, as long as you preserve the
+copyright notice.
+
+## Citation
+
+If you use this benchmarking framework in your research, please cite it
+using the metadata in [`CITATION.cff`](CITATION.cff). GitHub renders this
+file as a **"Cite this repository"** button on the repository page, which
+exports BibTeX, APA, and other formats with one click.
+
+A Zenodo DOI will be assigned to the first tagged release (`v0.1.0`); the
+DOI will be added to `CITATION.cff` at that point. Once the framework is
+formally published, the citation will be updated to point at the paper.
