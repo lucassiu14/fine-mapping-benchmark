@@ -222,6 +222,12 @@ plot_results(eval_out, output_dir = "results/run1")
 > **Without `prepare_vcfs.R`:** omit `vcf_dir` and the simulator falls back to
 > the small bundled VCF (one chr4 region, ~500 SNPs). Useful for quick tests.
 
+For a longer, commentary-rich walk-through that inspects the simulation,
+methods, and evaluation objects at each stage, see the getting-started
+vignette: [`vignettes/getting-started.Rmd`](vignettes/getting-started.Rmd).
+Knit it with `rmarkdown::render("vignettes/getting-started.Rmd")` from the
+project root.
+
 ## Supported methods
 
 | Method | Tier | Type | Dependencies |

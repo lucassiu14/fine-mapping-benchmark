@@ -1,0 +1,408 @@
+---
+title: "Getting Started with fine-mapping-benchmark"
+author: "Lucas Siu"
+date: "`r format(Sys.Date(), '%B %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    df_print: paged
+vignette: >
+  %\VignetteIndexEntry{Getting Started}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+# Run every chunk from the project root, not from vignettes/. This means
+# (a) `source("R/...")` paths work without ../ prefix, (b) the renv
+# autoloader activates because it walks up from the cwd looking for
+# renv/, and (c) `data/`-relative paths inside simulator helpers resolve
+# correctly.
+knitr::opts_knit$set(root.dir = "..")
+
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  message    = FALSE,
+  warning    = FALSE,
+  cache      = TRUE,
+  fig.align  = "center",
+  fig.width  = 6,
+  fig.height = 4
+)
+```
+
+# 1. Introduction
+
+**Fine-mapping** is the task of identifying which variant(s) within a
+GWAS-significant locus are *causally* associated with a trait, as opposed to
+merely correlated with the causal variant through linkage disequilibrium (LD).
+Several methods have been developed for this — they take summary statistics
+(z-scores or β̂ / SE) plus an LD matrix and return a *posterior inclusion
+probability* (PIP) and one or more *credible sets* of candidate causal
+variants.
+
+This package provides a unified framework for **benchmarking** those methods
+on simulated data with known ground truth. It supports:
+
+- **Simulation** of genotypes from real 1000 Genomes haplotypes and phenotypes
+  under sparse or sparse+infinitesimal genetic architectures, optionally with
+  functional annotations.
+- **A catalogue of methods** with a standardised input/output interface —
+  SuSiE, SuSiE-inf, FINEMAP, CARMA, ABF, PAINTOR, Funmap, BEATRICE, Functional
+  BEATRICE, plus baselines (`marginal_z`) and PolyFun-style comparators
+  (`polyfun_oracle`, `polyfun_est`).
+- **Evaluation** via AUPRC, credible-set coverage/power/size, PIP calibration,
+  with stratification by S (causal count), φ (heritability), p_causal,
+  causal-variant MAF, and the simulation's annotation regime.
+- **Plotting** of stratified results to a multi-page PDF.
+
+This vignette walks you through a small end-to-end run that uses only Tier 1
+(pure R) methods and the sim1000G example VCF bundled with the
+`sim1000G` package — so you don't need to download anything beyond R packages.
+
+If you want to use the external methods (FINEMAP, PAINTOR, Funmap, BEATRICE),
+see the
+[`README` installation tiers](../README.md#installation).
+
+---
+
+# 2. Setup
+
+Source the project files. The Tier 1 set is enough for SuSiE, ABF, CARMA, the
+baselines, and PolyFun-style methods.
+
+```{r sources}
+source("R/utils.R")
+source("R/simulate_genotypes.R")
+source("R/simulate_phenotypes.R")
+source("R/run_simulation.R")
+source("R/run_methods.R")
+source("R/evaluate.R")
+source("R/plot_results.R")
+source("R/wrappers/susie.R")
+source("R/wrappers/abf.R")
+source("R/wrappers/marginal_z.R")
+```
+
+> **Note on paths.** All chunks in this vignette run from the **project
+> root** — set in the setup chunk via
+> `knitr::opts_knit$set(root.dir = "..")`. The renv autoloader needs this
+> to find the project's R library. If you copy the chunks into a script,
+> run R from the project root and the paths above work as-is.
+
+The Tier 1 dependencies (`susieR`, `sim1000G`, `ggplot2`, `gridExtra`,
+`CARMA`) install via `renv::restore()` from the project root. See
+[README §Installation](../README.md#installation) if you have not done this
+yet.
+
+---
+
+# 3. Simulate a small dataset
+
+`run_simulation()` orchestrates everything: it simulates genotypes from
+1000 Genomes haplotypes (just once), then iterates over a grid of
+parameter combinations to produce one phenotype + summary-statistic set per
+combination.
+
+We use small parameters so this knits in under a minute:
+
+```{r simulate}
+sim <- run_simulation(
+  n_regions = 2,        # 2 independent genomic regions
+  n         = 200,      # 200 simulated individuals
+  p         = 80,       # ~80 SNPs per region
+  n_iter    = 2,        # 2 phenotype replicates per parameter combination
+  S         = c(1, 2),  # sweep over 1 and 2 causal variants per region
+  phi       = c(0.2, 0.4),  # sweep over 20% and 40% PVE
+  model     = "sparse",
+  annotations = "none",
+  vcf_files = NULL,     # use the bundled sim1000G example VCF
+  seed      = 42,
+  verbose   = FALSE
+)
+```
+
+Total scenarios: `length(S) × length(phi) × n_iter = 2 × 2 × 2 = 8`,
+each containing `n_regions = 2` per-region datasets — so 16 fits per method.
+
+---
+
+# 4. Inspect the simulation object
+
+The result has three top-level pieces:
+
+```{r sim-toplevel}
+names(sim)
+```
+
+### `sim$genotypes`
+
+A list of length `n_regions`, one per region. Each element holds the genotype
+matrix, MAFs, LD matrix, etc.
+
+```{r sim-genotypes}
+length(sim$genotypes)
+str(sim$genotypes[[1]], max.level = 1)
+```
+
+The LD matrix is the same across all scenarios for a given region (genotypes
+are simulated once and reused):
+
+```{r sim-ld}
+dim(sim$genotypes[[1]]$LD)
+sim$genotypes[[1]]$LD[1:4, 1:4]
+```
+
+### `sim$scenarios`
+
+A list of length `n_scenarios`, one per (S, φ, iter) combination. Each
+scenario has the per-region phenotype + summary statistics + truth.
+
+```{r sim-scenarios}
+length(sim$scenarios)
+str(sim$scenarios[[1]], max.level = 1)
+```
+
+The ground truth for one (scenario × region) sits in `truth`:
+
+```{r sim-truth}
+truth <- sim$scenarios[[1]]$regions[[1]]$truth
+truth$causal_indices    # which variants are causal
+truth$causal_effects    # their true effect sizes
+truth$pve               # realised proportion of variance explained
+```
+
+### `sim$params`
+
+All the parameters used, recorded for reproducibility — useful when loading a
+saved `.rds` later:
+
+```{r sim-params}
+str(sim$params, max.level = 1)
+```
+
+---
+
+# 5. Run fine-mapping methods
+
+`run_methods()` applies one or more methods to every (scenario × region)
+combination. We run three Tier 1 methods here: SuSiE, ABF, and `marginal_z`
+(the model-free baseline).
+
+```{r run-methods}
+out <- run_methods(
+  simulation  = sim,
+  methods     = c("susie", "abf", "marginal_z"),
+  method_args = list(
+    susie      = list(L = 5, coverage = 0.95),
+    abf        = list(prior_variance = 0.04),
+    marginal_z = list(coverage = 0.95)
+  ),
+  save        = FALSE,
+  verbose     = FALSE
+)
+```
+
+The structure mirrors the methods you asked for:
+
+```{r out-toplevel}
+names(out)
+out$methods_run
+```
+
+Each method's results live under its key:
+
+```{r out-method-summary}
+cat(sprintf("SuSiE     : %d/%d fits OK, %.2fs total\n",
+            out$susie$n_total - out$susie$n_failed,
+            out$susie$n_total, out$susie$total_runtime_seconds))
+cat(sprintf("ABF       : %d/%d fits OK, %.2fs total\n",
+            out$abf$n_total - out$abf$n_failed,
+            out$abf$n_total, out$abf$total_runtime_seconds))
+cat(sprintf("marginal_z: %d/%d fits OK, %.2fs total\n",
+            out$marginal_z$n_total - out$marginal_z$n_failed,
+            out$marginal_z$n_total, out$marginal_z$total_runtime_seconds))
+```
+
+---
+
+# 6. Inspect a fit
+
+Each per-fit result follows a standard format. Pulling one SuSiE fit:
+
+```{r out-one-fit}
+fit <- out$susie$results[[1]]
+str(fit, max.level = 1)
+```
+
+### The PIP vector
+
+`fit$pip` is a numeric vector of length `p` (the number of SNPs in that
+region) — posterior inclusion probability for each variant.
+
+```{r out-pip}
+length(fit$pip)
+range(fit$pip)
+head(sort(fit$pip, decreasing = TRUE), 5)   # top-5 variants
+```
+
+### Credible sets
+
+`fit$credible_sets` is a list of integer vectors. Each vector contains the
+1-based indices of variants in one credible set. SuSiE can return multiple
+credible sets (one per "single-effect component"); ABF and `marginal_z` return
+just one per region.
+
+```{r out-cs}
+fit$credible_sets
+```
+
+Compare against the truth (causal indices we recorded earlier):
+
+```{r out-cs-vs-truth}
+truth$causal_indices   # the true causal variant index/indices
+fit$credible_sets[[1]] %in% truth$causal_indices
+```
+
+### Method-specific outputs
+
+`fit$additional` holds method-specific extras. For SuSiE this includes the
+per-component posterior matrix, convergence diagnostics, and the ELBO trace:
+
+```{r out-additional}
+names(fit$additional)
+fit$additional$converged
+fit$additional$n_iter_run
+```
+
+---
+
+# 7. Evaluate
+
+`evaluate_methods()` computes AUPRC, credible-set coverage/power/size, PIP
+calibration, and runtime — pooled globally and stratified along several
+axes.
+
+```{r evaluate}
+eval <- evaluate_methods(
+  simulation = sim,
+  results    = out,
+  save       = FALSE,
+  verbose    = FALSE
+)
+```
+
+### Global metrics
+
+Each method has a `$global` entry with the pooled-across-everything numbers:
+
+```{r eval-global}
+str(eval$susie$global, max.level = 1)
+```
+
+A compact one-row-per-method summary:
+
+```{r eval-summary-table}
+fmt <- function(x, d = 3) ifelse(is.na(x), "NA", formatC(x, format = "f", digits = d))
+do.call(rbind, lapply(eval$methods_evaluated, function(m) {
+  g <- eval[[m]]$global
+  data.frame(
+    method        = m,
+    auprc         = fmt(g$auprc),
+    cs_coverage   = fmt(g$cs_coverage),
+    cs_power      = fmt(g$cs_power),
+    cs_size_med   = fmt(g$cs_size_median, 1),
+    runtime_s     = fmt(g$runtime_mean, 2),
+    stringsAsFactors = FALSE
+  )
+}))
+```
+
+You should see SuSiE and ABF appreciably above `marginal_z` — that's the
+expected ordering, since `marginal_z` does no modelling at all.
+
+### Stratified metrics
+
+Several axes are computed automatically. By number of causal variants:
+
+```{r eval-by-S}
+names(eval$susie$by_S)
+cat("\nAUPRC by S, SuSiE:\n")
+sapply(eval$susie$by_S, function(x) round(x$auprc, 3))
+```
+
+By minimum causal MAF (added in Phase 2):
+
+```{r eval-by-maf}
+names(eval$susie$by_causal_maf)
+cat("\nAUPRC by causal MAF bin, SuSiE:\n")
+sapply(eval$susie$by_causal_maf, function(x) round(x$auprc, 3))
+```
+
+> **Why only one bin here?** The bundled `sim1000G` VCF contains only common
+> variants (MAF > 0.05), so all causals fall in the `"common"` bin. With the
+> real 1000G windows downloaded by `scripts/prepare_vcfs.R` (or your own
+> VCFs), the `"rare"` and `"low"` bins start to appear.
+
+Other axes available: `by_phi`, `by_p_causal` (sparse_inf simulations only),
+`by_true_annotation_type` (when comparing across annotation regimes).
+
+---
+
+# 8. Plot
+
+`plot_results()` writes a multi-page PDF with PR curves, PIP calibration
+plots, summary tables, and stratified-metric panels.
+
+```{r plot, eval = FALSE}
+plot_results(eval, output_file = "getting-started-results.pdf",
+             save = TRUE, verbose = FALSE)
+```
+
+The PDF has, in order:
+
+1. **Global PR curves** for all methods on one panel
+2. **Global PIP calibration** faceted by method
+3. **Global summary table** with means ± SE across replicates
+4. **By-S grids** — PR curves, calibration, and metric line plots vs S
+5. **By-φ grids** — same structure
+6. **By-p_causal grids** (if `model = "sparse_inf"`)
+
+See [`docs/evaluation.md`](../docs/evaluation.md) for the precise formula for
+every metric and the structure of every plot.
+
+---
+
+# 9. Where to go next
+
+You now have a working end-to-end pipeline. Common next steps:
+
+- **Larger simulations.** Use `prepare_vcfs.R` to download 50 real 1000G
+  regions, then pass `vcf_dir = "data/vcf"` to `run_simulation()`. See
+  [README §Reference data](../README.md#reference-data-optional).
+- **More methods.** Tier 2 adds FINEMAP and PAINTOR (C++ binaries); Tier 3
+  adds the Python-based methods (Funmap, BEATRICE, Functional BEATRICE).
+  See [README §Installation](../README.md#installation).
+- **Annotation-aware methods.** Re-run with `annotations = "binary"` and
+  add `polyfun_oracle`, `polyfun_est`, `funmap`, or `paintor` to the methods
+  list. See [`docs/methods.md`](../docs/methods.md) for per-method details.
+- **Genome-wide simulation.** For a more realistic experiment (single shared
+  phenotype across many regions, polygenic causal assignment), use
+  `simulate_gwfm_data()` instead of `run_simulation()`. See
+  [`docs/gw_simulation_documentation.md`](../docs/gw_simulation_documentation.md).
+- **HPC runs.** For large parameter sweeps, the `scripts/hpc/` directory has
+  a SLURM job array template. See
+  [README §Running on an HPC cluster](../README.md#running-on-an-hpc-cluster).
+- **Evaluation internals.** For the precise definition of every metric and
+  the SE-across-replicates machinery, see
+  [`docs/evaluation.md`](../docs/evaluation.md).
+
+---
+
+# Session info
+
+```{r session-info}
+sessionInfo()
+```

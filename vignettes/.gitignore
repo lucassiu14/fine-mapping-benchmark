@@ -1,0 +1,11 @@
+# knit artefacts (regenerate when you knit the .Rmd locally)
+*.html
+*.pdf
+*_files/
+*_cache/
+
+# Knitr cache directory
+.cache/
+
+# Vignette PDF output from plot_results() examples
+getting-started-results.pdf
