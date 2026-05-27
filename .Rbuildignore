@@ -1,0 +1,64 @@
+# Files / directories to exclude from `R CMD build` (the package tarball).
+# Patterns are Perl-style regex on paths relative to the package root.
+#
+# Keep this list in lockstep with .gitignore where it makes sense, but the
+# two have different purposes: .gitignore controls what enters git;
+# .Rbuildignore controls what enters the built .tar.gz.
+
+# --- Project-local R environment ---------------------------------------------
+^renv$
+^renv\.lock$
+^\.Rprofile$
+^\.Rhistory$
+^\.Rproj\.user$
+^.+\.Rproj$
+^environment\.yml$
+
+# --- macOS / editor cruft ----------------------------------------------------
+^\.DS_Store$
+.*\.DS_Store$
+^.*\.swp$
+^.*\.swo$
+^.*~$
+
+# --- Git / forge tooling -----------------------------------------------------
+^\.git$
+^\.gitignore$
+^\.github$
+
+# --- Claude Code / IDE config ------------------------------------------------
+^\.claude$
+
+# --- Reference data, downloads, working files --------------------------------
+# Our data/ holds VCFs, genetic maps, and curated region CSVs — too large
+# to bundle in the package, and clashes with R's `data/` convention
+# (reserved for .rda lazy-loaded package data). Phase 3b-iii will move the
+# small curated region CSVs to inst/extdata/.
+^data$
+
+# CARMA writes per-locus scratch files to the working directory.
+^post_locus_.*
+
+# --- Non-R-package documentation ---------------------------------------------
+# Repo-level docs and the GitHub Citation File Format file are kept at
+# the repo root for GitHub but should not enter the package tarball.
+# Man pages (man/) and the vignette (vignettes/getting-started.Rmd) stay
+# part of the package.
+^docs$
+^CITATION\.cff$
+^ROADMAP\.md$
+
+# --- External methods bundled as repo subdirectories -------------------------
+# Functional BEATRICE's Python implementation is shipped here for
+# convenience but is not part of the R package surface.
+^BEATRICE_annot_sparse$
+
+# --- Orchestration scripts (Phase 3b-iii will relocate as appropriate) -------
+# Until 3b-iii, scripts/ stays at the repo root and is excluded from the
+# package build. Tests will move to tests/testthat/ in 3b-ii.
+^scripts$
+
+# --- Test / build artefacts --------------------------------------------------
+^.+\.tar\.gz$
+^\.Rcheck$
+^.+\.Rcheck$

@@ -1,0 +1,25 @@
+# R-package CITATION file. Mirrors CITATION.cff at the repo root.
+#
+# Once the package is installed, users see this via:
+#
+#   citation("fmbenchmark")
+#
+# which returns the entries below plus a BibTeX-formatted version. The
+# Zenodo DOI will be added here in lockstep with CITATION.cff when the
+# first GitHub release (v0.1.0) is tagged.
+
+bibentry(
+  bibtype  = "Manual",
+  title    = "fmbenchmark: Benchmarking Framework for Statistical Fine-Mapping Methods",
+  author   = person(given = "Lucas",
+                    family = "Siu",
+                    email = "ls1020@ic.ac.uk"),
+  year     = "2026",
+  note     = paste("R package version", meta$Version),
+  url      = "https://github.com/lucassiu14/fine-mapping-benchmark",
+  textVersion = paste0(
+    "Siu, L. (2026). fmbenchmark: Benchmarking Framework for Statistical ",
+    "Fine-Mapping Methods. R package version ", meta$Version,
+    ". https://github.com/lucassiu14/fine-mapping-benchmark"
+  )
+)
