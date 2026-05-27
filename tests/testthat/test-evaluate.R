@@ -330,3 +330,247 @@ test_that("[E] eval_E: by_p_causal stratification populated for sparse_inf", {
   # Global: 2 * 2 * 2 * 2 * 2 = 32 fits
   expect_equal(eval_E$susie_inf$global$n_fits, 32L)
 })
+
+
+# =============================================================================
+# [F] Alternative simulation arguments
+# =============================================================================
+
+# Equal-magnitude effect distribution.
+sim_F1 <- run_simulation(
+  n_regions           = 2,
+  n                   = 200,
+  p                   = 60,
+  n_iter              = 1,
+  S                   = 2,
+  phi                 = 0.3,
+  model               = "sparse",
+  effect_distribution = "equal",
+  seed                = 6,
+  verbose             = FALSE
+)
+
+res_F1  <- run_methods(sim_F1, methods = "susie",
+                       method_args = list(susie = list(L = 3)),
+                       verbose = FALSE)
+eval_F1 <- evaluate_methods(sim_F1, res_F1, verbose = FALSE)
+
+# Varying p per region via a length-n_regions vector.
+sim_F2 <- run_simulation(
+  n_regions = 3,
+  n         = 200,
+  p         = c(50, 80, 100),
+  n_iter    = 1,
+  S         = 1,
+  phi       = 0.3,
+  model     = "sparse",
+  seed      = 7,
+  verbose   = FALSE
+)
+
+res_F2  <- run_methods(sim_F2, methods = "abf", verbose = FALSE)
+eval_F2 <- evaluate_methods(sim_F2, res_F2, verbose = FALSE)
+
+
+test_that("[F1] equal effect distribution: |effects| constant within a region", {
+  eff <- abs(sim_F1$scenarios[[1]]$regions[[1]]$truth$causal_effects)
+  expect_length(eff, 2L)
+  expect_lt(diff(range(eff)), 1e-10)
+  expect_false(is.null(eval_F1$susie$global$auprc))
+})
+
+
+test_that("[F2] per-region p vector produces matching region sizes", {
+  expect_length(sim_F2$genotypes, 3L)
+  expect_equal(sim_F2$genotypes[[1]]$p,  50L)
+  expect_equal(sim_F2$genotypes[[2]]$p,  80L)
+  expect_equal(sim_F2$genotypes[[3]]$p, 100L)
+
+  expect_true(in_range_or_na(eval_F2$abf$global$auprc))
+})
+
+
+test_that("[F3] ABF non-default prior_variance and coverage are honoured", {
+  res_F3 <- run_methods(
+    sim_F1,
+    methods     = "abf",
+    method_args = list(abf = list(prior_variance = 0.01, coverage = 0.90)),
+    verbose     = FALSE
+  )
+  expect_equal(res_F3$abf$results[[1]]$params$prior_variance, 0.01)
+
+  eval_F3 <- evaluate_methods(sim_F1, res_F3, verbose = FALSE)
+  expect_true(is.numeric(eval_F3$abf$global$cs_coverage))
+})
+
+
+test_that("[F4] SuSiE individual-level mode (X + y) reports input_type='individual'", {
+  res_F4 <- run_methods(
+    sim_F1,
+    methods     = "susie",
+    method_args = list(susie = list(L = 3, use_individual = TRUE)),
+    verbose     = FALSE
+  )
+  ok_fits <- Filter(function(f) is.null(f$error), res_F4$susie$results)
+  expect_true(length(ok_fits) > 0L)
+  expect_true(all(sapply(ok_fits, function(f) f$input_type == "individual")))
+})
+
+
+# =============================================================================
+# [G] External methods - graceful failure when binary / Python not found
+# =============================================================================
+
+# Tiny sim to keep this fast (1 region, 1 scenario => 1 fit per method).
+sim_G <- run_simulation(
+  n_regions = 1,
+  n         = 150,
+  p         = 50,
+  n_iter    = 1,
+  S         = 1,
+  phi       = 0.3,
+  model     = "sparse",
+  seed      = 8,
+  verbose   = FALSE
+)
+
+
+test_that("[G-finemap] missing finemap binary: graceful per-fit failure", {
+  res <- run_methods(
+    sim_G,
+    methods     = "finemap",
+    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
+    verbose     = FALSE
+  )
+  expect_equal(res$finemap$n_failed, 1L)
+  expect_true(all(is.na(res$finemap$results[[1]]$pip)))
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(is.na(ev$finemap$global$auprc))
+  expect_true(is.na(ev$finemap$global$cs_coverage))
+})
+
+
+test_that("[G-paintor] missing PAINTOR binary: graceful per-fit failure", {
+  res <- run_methods(
+    sim_G,
+    methods     = "paintor",
+    method_args = list(paintor = list(paintor_path = "/nonexistent/PAINTOR")),
+    verbose     = FALSE
+  )
+  expect_equal(res$paintor$n_failed, 1L)
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(is.na(ev$paintor$global$auprc))
+})
+
+
+test_that("[G-beatrice] missing BEATRICE dir / python: graceful per-fit failure", {
+  res <- run_methods(
+    sim_G,
+    methods     = "beatrice",
+    method_args = list(beatrice = list(
+      beatrice_dir = "/nonexistent/Beatrice",
+      python       = "/nonexistent/python3"
+    )),
+    verbose = FALSE
+  )
+  expect_equal(res$beatrice$n_failed, 1L)
+})
+
+
+test_that("[G-funmap] missing python: graceful per-fit failure", {
+  res <- run_methods(
+    sim_G,
+    methods     = "funmap",
+    method_args = list(funmap = list(python = "/nonexistent/python3")),
+    verbose     = FALSE
+  )
+  expect_equal(res$funmap$n_failed, 1L)
+})
+
+
+# Real-binary checks for external methods. These skip cleanly when the
+# binary / Python env is not available on the current machine. They are
+# the same checks the original script ran via tryCatch + setup_*().
+
+test_that("[G-finemap-real] real FINEMAP binary: pip length, AUPRC in [0,1]", {
+  fp <- tryCatch(setup_finemap(download = FALSE),
+                 error = function(e) NULL)
+  skip_if(is.null(fp), "FINEMAP binary not available on this machine")
+
+  res <- run_methods(
+    sim_G,
+    methods     = "finemap",
+    method_args = list(finemap = list(finemap_path = fp, n_causal = 2)),
+    verbose     = FALSE
+  )
+  expect_length(res$finemap$results[[1]]$pip, 50L)
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(in_range_or_na(ev$finemap$global$auprc))
+})
+
+
+test_that("[G-paintor-real] real PAINTOR binary: pip length, AUPRC in [0,1]", {
+  pp <- tryCatch(setup_paintor(), error = function(e) NULL)
+  skip_if(is.null(pp), "PAINTOR binary not available on this machine")
+
+  res <- run_methods(
+    sim_G,
+    methods     = "paintor",
+    method_args = list(paintor = list(paintor_path = pp, max_causal = 2)),
+    verbose     = FALSE
+  )
+  expect_length(res$paintor$results[[1]]$pip, 50L)
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(in_range_or_na(ev$paintor$global$auprc))
+})
+
+
+test_that("[G-beatrice-real] real BEATRICE: pip length, AUPRC in [0,1]", {
+  ok <- tryCatch(
+    setup_beatrice(
+      beatrice_dir = "~/Beatrice-Finemapping",
+      python       = "/opt/anaconda3/bin/python3"
+    ),
+    error = function(e) NULL
+  )
+  skip_if(is.null(ok),
+          "BEATRICE_dir or compatible python not available on this machine")
+
+  res <- run_methods(
+    sim_G,
+    methods     = "beatrice",
+    method_args = list(beatrice = list(
+      beatrice_dir = "~/Beatrice-Finemapping",
+      python       = "/opt/anaconda3/bin/python3",
+      max_iter     = 200
+    )),
+    verbose = FALSE
+  )
+  expect_length(res$beatrice$results[[1]]$pip, 50L)
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(in_range_or_na(ev$beatrice$global$auprc))
+})
+
+
+test_that("[G-funmap-real] real Funmap: pip length, AUPRC in [0,1]", {
+  funmap_python <- "/opt/anaconda3/bin/python3"
+  ok <- isTRUE(tryCatch(setup_funmap(python = funmap_python),
+                         error = function(e) FALSE))
+  skip_if(!ok, "funmap Python package not available on this machine")
+
+  res <- run_methods(
+    sim_G,
+    methods     = "funmap",
+    method_args = list(funmap = list(python = funmap_python, L = 5)),
+    verbose     = FALSE
+  )
+  expect_length(res$funmap$results[[1]]$pip, 50L)
+
+  ev <- evaluate_methods(sim_G, res, verbose = FALSE)
+  expect_true(in_range_or_na(ev$funmap$global$auprc))
+})
