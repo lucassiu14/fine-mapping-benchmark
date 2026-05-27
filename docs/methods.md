@@ -20,6 +20,7 @@ this benchmark, how to run them, and the arguments available for each.
 | marginal_z | `"marginal_z"` | Nothing | No | Model-free baseline (pip = \|z\| / sum\|z\|) |
 | polyfun_oracle | `"polyfun_oracle"` | `susieR` (CRAN) | **Reads truth** | PolyFun-style with true per-SNP priors (upper bound) |
 | polyfun_est | `"polyfun_est"` | `susieR` (CRAN) | **Required** | PolyFun-style with priors estimated via LDSC-lite |
+| SparsePro | `"sparsepro"` | Python + cloned SparsePro repo | No (not used here) | Variational fine-mapping with a sparse-projection prior on effect groups |
 
 ---
 
@@ -593,6 +594,65 @@ run_methods(sim, methods = "beatrice",
 | Field | Description |
 |---|---|
 | `cs_pip` | List of numeric vectors. Conditional inclusion probability of each variant within its credible set, as output by BEATRICE. NULL if the file was not produced. |
+
+---
+
+### SparsePro
+
+Variational fine-mapping with a sparse-projection prior on effect groups
+(Zhang et al. 2023, PLoS Genetics). A modern alternative to SuSiE that uses
+a different variational family — useful in the benchmark as a fast modern
+comparator that doesn't depend on annotations.
+
+SparsePro is distributed as a Python script (`sparsepro_zld.py`) in its
+upstream GitHub repository rather than as an importable Python package, so
+this wrapper follows the same pattern as the BEATRICE / FINEMAP / PAINTOR
+wrappers: write input files to a temp directory, invoke the script via
+`system2()`, parse the output files, and return the standardised result list.
+
+**Setup:** `setup_sparsepro(sparsepro_dir, python)` — verifies that
+`sparsepro_zld.py` is present in `sparsepro_dir` and that the Python env has
+`numpy`, `scipy`, and `pandas`. The SparsePro repo must be cloned manually
+(no auto-clone):
+
+```bash
+git clone https://github.com/zhwm/SparsePro
+cd SparsePro
+pip install -r requirements.txt
+```
+
+Then pass the path via `method_args`:
+
+```r
+run_methods(sim, methods = "sparsepro",
+            method_args = list(sparsepro = list(
+              sparsepro_dir = "~/SparsePro",
+              python        = "~/anaconda3/envs/beatrice/bin/python"
+            )))
+```
+
+> **Limitation:** the wrapper currently does not pass functional annotations
+> to SparsePro (it supports them upstream via the `--anno` flag). The
+> annotation-aware comparators in this benchmark are Funmap, PAINTOR,
+> Functional BEATRICE, polyfun_oracle, and polyfun_est; SparsePro's role
+> here is the "modern variational baseline without annotations" slot.
+
+**Arguments:**
+
+| Argument | Default | Description |
+|---|---|---|
+| `sparsepro_dir` | (required) | Path to the cloned SparsePro repo containing `sparsepro_zld.py` |
+| `python` | `"python"` | Python executable (full path if not on PATH) |
+| `K` | `5` | Maximum number of effect groups (causal signals) SparsePro will consider |
+| `cthres` | `0.95` | Coverage level for credible sets |
+
+**Additional outputs (`$additional`):**
+
+| Field | Description |
+|---|---|
+| `cs_pip` | List of numeric vectors. Per-variant inclusion probabilities within each credible set (the `pip` column of `.cs`). NULL if not parseable. |
+| `cs_effect_size` | List of numeric vectors. Posterior effect sizes per variant per credible set (the `effect_size` column of `.cs`). NULL if not parseable. |
+| `run_log` | Character vector. Captured stdout/stderr from the SparsePro invocation; useful for debugging unexpected failures. |
 
 ---
 
