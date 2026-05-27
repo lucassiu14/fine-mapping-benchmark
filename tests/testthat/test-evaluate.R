@@ -574,3 +574,181 @@ test_that("[G-funmap-real] real Funmap: pip length, AUPRC in [0,1]", {
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
   expect_true(in_range_or_na(ev$funmap$global$auprc))
 })
+
+
+# =============================================================================
+# [H] Evaluation output structure and metric range validation
+# =============================================================================
+
+# Reuses sim_A / res_A / eval_A from section [A].
+
+test_that("[H] top-level eval object carries simulation_params and thresholds", {
+  expect_false(is.null(eval_A$simulation_params))
+  expect_false(is.null(eval_A$pip_thresholds_used))
+})
+
+
+test_that("[H] PIP calibration bin sums match pooled fit pip count", {
+  cal      <- eval_A$susie$global$pip_calibration
+  valid    <- Filter(function(f) is.null(f$error), res_A$susie$results)
+  expected <- sum(sapply(valid, function(f) length(f$pip)))
+  expect_equal(sum(cal$n), expected)
+
+  # frac_causal entries are in [0,1] or NA
+  expect_true(all(sapply(cal$frac_causal,
+                         function(x) is.na(x) || (x >= 0 && x <= 1))))
+})
+
+
+test_that("[H] PR curve has consistent shape and edge-case totals", {
+  df <- eval_A$susie$global$fdr_power_curve
+
+  # Recall is non-decreasing as threshold decreases.
+  df_sorted <- df[order(df$threshold, decreasing = TRUE), ]
+  expect_true(all(diff(df_sorted$recall) >= -1e-10))
+
+  # At threshold = 0 all variants are selected, so tp + fn = total causal.
+  total_causal <- sum(sapply(
+    Filter(function(f) is.null(f$error), res_A$susie$results),
+    function(f) length(sim_A$scenarios[[f$scenario_id]]$regions[[f$region_id]]$truth$causal_indices)
+  ))
+  row_t0 <- df[df$threshold == 0, ]
+  expect_equal(nrow(row_t0), 1L)
+  expect_equal(row_t0$tp + row_t0$fn, total_causal)
+
+  # At threshold = 1 no variant has pip > 1, so fp = 0.
+  row_t1 <- df[df$threshold == 1, ]
+  expect_equal(nrow(row_t1), 1L)
+  expect_equal(row_t1$fp, 0L)
+})
+
+
+test_that("[H] cs_size_mean >= cs_size_median (right-skewed CS distribution)", {
+  g <- eval_A$susie$global
+  expect_true(
+    is.na(g$cs_size_mean) || is.na(g$cs_size_median) ||
+      g$cs_size_mean >= g$cs_size_median - 1e-10
+  )
+
+  # n_cs_reported and runtime_sd are non-negative or NA
+  expect_true(is.numeric(g$n_cs_reported) && g$n_cs_reported >= 0L)
+  expect_true(is.na(g$runtime_sd) || g$runtime_sd >= 0)
+})
+
+
+test_that("[H] n_pip_cal_bins and pip_thresholds args are honoured", {
+  eval_20 <- evaluate_methods(sim_A, res_A,
+                              n_pip_cal_bins = 20L, verbose = FALSE)
+  expect_equal(nrow(eval_20$susie$global$pip_calibration), 20L)
+
+  eval_coarse <- evaluate_methods(
+    sim_A, res_A,
+    pip_thresholds = seq(0, 1, by = 0.1),
+    verbose = FALSE
+  )
+  expect_equal(nrow(eval_coarse$susie$global$fdr_power_curve), 11L)
+})
+
+
+# =============================================================================
+# [I] Edge cases
+# =============================================================================
+
+# I1: S = 1 with high PVE - susie CS coverage should be reasonable; ABF
+# always reports exactly one CS.
+sim_I1 <- run_simulation(
+  n_regions = 2,
+  n         = 300,
+  p         = 80,
+  n_iter    = 3,
+  S         = 1,
+  phi       = 0.5,
+  model     = "sparse",
+  seed      = 10,
+  verbose   = FALSE
+)
+res_I1  <- run_methods(sim_I1,
+                        methods     = c("susie", "abf"),
+                        method_args = list(susie = list(L = 3)),
+                        verbose     = FALSE)
+eval_I1 <- evaluate_methods(sim_I1, res_I1, verbose = FALSE)
+
+test_that("[I1] S=1, high phi: susie CS coverage >= 0.5; ABF returns 1 CS per fit", {
+  cov <- eval_I1$susie$global$cs_coverage
+  expect_true(is.na(cov) || cov >= 0.5)
+
+  ok_fits <- Filter(function(f) is.null(f$error), res_I1$abf$results)
+  expect_true(all(sapply(ok_fits, function(f) length(f$credible_sets) == 1L)))
+})
+
+
+# I2: Low PVE - SuSiE may report no credible sets; cs_* metrics should be NA
+# in that case but evaluate must not error.
+sim_I2 <- run_simulation(
+  n_regions = 1,
+  n         = 100,
+  p         = 50,
+  n_iter    = 1,
+  S         = 1,
+  phi       = 0.05,
+  model     = "sparse",
+  seed      = 11,
+  verbose   = FALSE
+)
+res_I2 <- run_methods(sim_I2,
+                       methods     = "susie",
+                       method_args = list(susie = list(L = 1, coverage = 0.99)),
+                       verbose     = FALSE)
+eval_I2 <- evaluate_methods(sim_I2, res_I2, verbose = FALSE)
+
+test_that("[I2] low-signal SuSiE: evaluate completes; CS metrics NA-safe", {
+  expect_false(is.null(eval_I2$susie$global))
+  g <- eval_I2$susie$global
+  expect_true(g$n_cs_reported == 0L || !is.na(g$cs_coverage))
+})
+
+
+test_that("[I3] all-fits-failed method: NA AUPRC, n_failed correct, others unaffected", {
+  # Inject a fake fully-failed method into res_A and register it so
+  # evaluate_methods will descend into it. Restore .FM_REGISTRY on exit.
+  old_registry <- .FM_REGISTRY
+  on.exit(assign(".FM_REGISTRY", old_registry, envir = globalenv()), add = TRUE)
+
+  .FM_REGISTRY[["badmeth"]] <<- "run_susie_region"  # placeholder, never invoked
+
+  res_with_bad <- res_A
+  res_with_bad$badmeth <- list(
+    results = lapply(res_A$susie$results, function(f) list(
+      pip             = rep(NA_real_, 80L),
+      credible_sets   = list(),
+      method          = "badmeth",
+      input_type      = NA_character_,
+      params          = list(),
+      runtime_seconds = NA_real_,
+      additional      = list(),
+      error           = "forced error",
+      scenario_id     = f$scenario_id,
+      region_id       = f$region_id,
+      S               = f$S,
+      phi             = f$phi,
+      p_causal        = f$p_causal,
+      iter            = f$iter,
+      causal_indices  = f$causal_indices,
+      n_variants      = f$n_variants
+    )),
+    n_total               = 16L,
+    n_failed              = 16L,
+    method_args           = list(),
+    total_runtime_seconds = 0
+  )
+  res_with_bad$methods_run <- c(res_A$methods_run, "badmeth")
+
+  ev <- evaluate_methods(sim_A, res_with_bad, verbose = FALSE)
+
+  expect_true(is.na(ev$badmeth$global$auprc))
+  expect_equal(ev$badmeth$global$n_failed, 16L)
+  expect_null(ev$badmeth$global$fdr_power_curve)
+
+  # Other methods unaffected by the failed one
+  expect_false(is.na(ev$susie$global$auprc))
+})
