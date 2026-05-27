@@ -225,3 +225,108 @@ test_that("[C] continuous annotations: simulation + evaluation", {
   expect_equal(ncol(sim_C$genotypes[[1]]$annotations_matrix), 2L)
   expect_false(is.null(eval_C$abf$global$auprc))
 })
+
+
+# =============================================================================
+# [D] Multiple S and phi - stratified metric validation
+# =============================================================================
+
+sim_D <- run_simulation(
+  n_regions = 2,
+  n         = 250,
+  p         = 100,
+  n_iter    = 2,
+  S         = c(1, 2, 3),
+  phi       = c(0.1, 0.3, 0.5),
+  model     = "sparse",
+  seed      = 4,
+  verbose   = FALSE
+)
+
+res_D <- run_methods(
+  sim_D,
+  methods     = c("susie", "abf"),
+  method_args = list(susie = list(L = 5)),
+  verbose     = FALSE
+)
+
+eval_D <- evaluate_methods(sim_D, res_D, verbose = FALSE)
+
+
+test_that("[D] sim_D: full S * phi * iter grid", {
+  # 3 S * 3 phi * 2 iter = 18 scenarios
+  expect_length(sim_D$scenarios, 18L)
+})
+
+
+test_that("[D] eval_D: stratified by_S and by_phi populated", {
+  expect_setequal(names(eval_D$susie$by_S),   c("1", "2", "3"))
+  expect_setequal(names(eval_D$susie$by_phi), c("0.1", "0.3", "0.5"))
+
+  # Each S stratum: 3 phi * 2 iter * 2 regions = 12 fits
+  expect_true(all(sapply(eval_D$susie$by_S, function(s) s$n_fits == 12L)))
+  # Each phi stratum: 3 S * 2 iter * 2 regions = 12 fits
+  expect_true(all(sapply(eval_D$susie$by_phi, function(s) s$n_fits == 12L)))
+
+  # Global: 3 S * 3 phi * 2 iter * 2 regions = 36
+  expect_equal(eval_D$susie$global$n_fits, 36L)
+
+  # ABF AUPRC in [0,1] across phi strata.
+  expect_true(all(sapply(eval_D$abf$by_phi,
+                         function(s) in_range_or_na(s$auprc))))
+})
+
+
+# =============================================================================
+# [E] sparse_inf model - p_causal stratification
+# =============================================================================
+
+sim_E <- run_simulation(
+  n_regions = 2,
+  n         = 250,
+  p         = 80,
+  n_iter    = 2,
+  S         = c(1, 2),
+  phi       = c(0.2, 0.4),
+  model     = "sparse_inf",
+  p_causal  = c(0.2, 0.6),
+  inf_model = "susie_inf",
+  seed      = 5,
+  verbose   = FALSE
+)
+
+res_E <- run_methods(
+  simulation  = sim_E,
+  methods     = c("susie", "susie_inf"),
+  method_args = list(
+    susie     = list(L = 5),
+    susie_inf = list(L = 5)
+  ),
+  verbose = FALSE
+)
+
+eval_E <- evaluate_methods(sim_E, res_E, verbose = FALSE)
+
+
+test_that("[E] sim_E: sparse_inf grid with p_causal axis", {
+  # 2 S * 2 phi * 2 p_causal * 2 iter = 16 scenarios
+  expect_length(sim_E$scenarios, 16L)
+  expect_true(all(sapply(sim_E$scenarios,
+                         function(sc) !is.null(sc$p_causal))))
+})
+
+
+test_that("[E] eval_E: by_p_causal stratification populated for sparse_inf", {
+  expect_false(is.null(eval_E$susie$by_p_causal))
+  expect_setequal(names(eval_E$susie$by_p_causal), c("0.2", "0.6"))
+
+  # Each p_causal stratum: 2 S * 2 phi * 2 iter * 2 regions = 16 fits
+  expect_true(all(sapply(eval_E$susie$by_p_causal,
+                         function(s) s$n_fits == 16L)))
+
+  expect_true(all(sapply(eval_E$susie_inf$by_p_causal,
+                         function(s) in_range_or_na(s$auprc))))
+
+  # Global: 2 * 2 * 2 * 2 * 2 = 32 fits
+  expect_equal(eval_E$susie_inf$global$n_fits, 32L)
+})
