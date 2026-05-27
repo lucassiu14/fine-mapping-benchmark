@@ -37,6 +37,7 @@ suppressPackageStartupMessages({
   source("R/wrappers/marginal_z.R")
   source("R/wrappers/polyfun_oracle.R")
   source("R/wrappers/polyfun_est.R")
+  source("R/wrappers/sparsepro.R")
 })
 
 # =============================================================================
@@ -2151,6 +2152,117 @@ run_test("LD mismatch shrinks as n_ref grows (rough monotonicity)", function() {
   d_large <- mean((cor(r_large$X_ref) - LD_true)^2, na.rm = TRUE)
   stopifnot(d_large < d_small)
 })
+
+
+# =============================================================================
+# SECTION 16: run_sparsepro / run_sparsepro_region (external Python script)
+# =============================================================================
+
+set_section("run_sparsepro / run_sparsepro_region — wrapper plumbing")
+
+# SparsePro is shipped as a Python CLI script (sparsepro_zld.py) in the
+# upstream GitHub repo. We don't bundle or auto-install it, so most happy-path
+# tests need the user to have cloned the repo and (optionally) created a
+# conda env with pandas. To detect availability we honour a couple of
+# environment variables (SPARSEPRO_DIR / SPARSEPRO_PYTHON); when absent the
+# happy-path tests are SKIPped with a clear reason, while wrapper-plumbing
+# tests (graceful failure, output shape on error path, argument
+# forwarding) run unconditionally.
+
+sparsepro_dir    <- Sys.getenv("SPARSEPRO_DIR",    unset = "")
+sparsepro_python <- Sys.getenv("SPARSEPRO_PYTHON", unset = "python")
+sparsepro_available <- nzchar(sparsepro_dir) &&
+  file.exists(file.path(sparsepro_dir, "sparsepro_zld.py"))
+
+.rg_sp <- SIM_MINI$genotypes[[1]]
+.rp_sp <- SIM_MINI$scenarios[[1]]$regions[[1]]
+
+run_test("sparsepro returns standard-shape error result on missing dir", function() {
+  fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                              sparsepro_dir = "/definitely/not/a/path")
+  fields <- c("pip", "credible_sets", "method", "input_type",
+              "params", "runtime_seconds", "additional")
+  stopifnot(all(fields %in% names(fit)))
+  stopifnot(fit$method == "sparsepro", fit$input_type == "summary")
+  stopifnot(!is.null(fit$error))
+  stopifnot(length(fit$pip) == .rg_sp$p)
+  stopifnot(all(is.na(fit$pip)))
+  stopifnot(length(fit$credible_sets) == 0L)
+})
+
+run_test("sparsepro records sparsepro_dir / python / K / cthres in params", function() {
+  fit <- run_sparsepro_region(
+    .rg_sp, .rp_sp,
+    sparsepro_dir = "/tmp/SparsePro-test",
+    python        = "python",
+    K             = 7,
+    cthres        = 0.9
+  )
+  stopifnot(identical(fit$params$sparsepro_dir, "/tmp/SparsePro-test"))
+  stopifnot(identical(fit$params$python, "python"))
+  stopifnot(fit$params$K == 7)
+  stopifnot(abs(fit$params$cthres - 0.9) < 1e-12)
+  stopifnot(fit$params$n == .rg_sp$n)
+})
+
+run_test("sparsepro validates K (must be >= 1)", function() {
+  e <- tryCatch(
+    run_sparsepro(z = .rp_sp$z, LD = .rg_sp$LD, n = .rg_sp$n,
+                  sparsepro_dir = "/tmp/x", K = 0),
+    error = function(e) conditionMessage(e)
+  )
+  stopifnot(is.character(e), grepl("K must be", e))
+})
+
+run_test("sparsepro validates cthres (must be in (0, 1))", function() {
+  e <- tryCatch(
+    run_sparsepro(z = .rp_sp$z, LD = .rg_sp$LD, n = .rg_sp$n,
+                  sparsepro_dir = "/tmp/x", cthres = 1.5),
+    error = function(e) conditionMessage(e)
+  )
+  stopifnot(is.character(e), grepl("cthres must be", e))
+})
+
+run_test("setup_sparsepro errors clearly when sparsepro_dir missing", function() {
+  e <- tryCatch(
+    setup_sparsepro(sparsepro_dir = "/definitely/not/a/path"),
+    error = function(e) conditionMessage(e)
+  )
+  stopifnot(is.character(e), grepl("sparsepro_zld.py not found", e))
+})
+
+# Happy-path tests — only meaningful when an actual SparsePro install is
+# available via SPARSEPRO_DIR (+ optionally SPARSEPRO_PYTHON).
+
+run_test("sparsepro produces valid PIPs on the small fixture",
+         function() {
+           fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                                       sparsepro_dir = sparsepro_dir,
+                                       python        = sparsepro_python,
+                                       K             = 3)
+           stopifnot(is.null(fit$error))
+           stopifnot(length(fit$pip) == .rg_sp$p)
+           stopifnot(all(fit$pip >= 0, na.rm = TRUE),
+                     all(fit$pip <= 1, na.rm = TRUE))
+         },
+         skip_reason = if (!sparsepro_available)
+           "SparsePro not installed (set $SPARSEPRO_DIR to enable)" else NULL)
+
+run_test("sparsepro credible_sets are integer index vectors when present",
+         function() {
+           fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                                       sparsepro_dir = sparsepro_dir,
+                                       python        = sparsepro_python,
+                                       K             = 3)
+           stopifnot(is.list(fit$credible_sets))
+           if (length(fit$credible_sets) > 0L) {
+             for (cs in fit$credible_sets) {
+               stopifnot(is.numeric(cs), all(cs >= 1L), all(cs <= .rg_sp$p))
+             }
+           }
+         },
+         skip_reason = if (!sparsepro_available)
+           "SparsePro not installed (set $SPARSEPRO_DIR to enable)" else NULL)
 
 
 # =============================================================================

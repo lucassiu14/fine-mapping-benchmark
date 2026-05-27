@@ -269,10 +269,13 @@ Five annotation-aware methods with distinct prior-estimation strategies.
 **Scoped decision (May 2026):**
 
 - **SparsePro added in Phase 4.** Tier 3 (Python) wrapper mirroring
-  `R/wrappers/funmap.R`. Pure Python (numpy + scipy, no PyTorch), so the
-  install adds little on top of the existing BEATRICE/Funmap Python env.
-  Adds a modern variational method to the comparator set, rounding out the
-  catalogue.
+  `R/wrappers/beatrice.R` — SparsePro is **CLI-only** (the upstream repo
+  ships `sparsepro_zld.py` as a script, not a pip-installable module), so
+  the wrapper uses `system2()` to invoke the script rather than
+  `reticulate::import()`. Pure Python (numpy + scipy + pandas, no
+  PyTorch), so the dependency footprint adds little on top of the
+  existing BEATRICE/Funmap Python env. Adds a modern variational method
+  to the comparator set, rounding out the catalogue.
 - **DAP-G deferred** — eQTL-specific; reconsider for benchmark-paper
   framing if eQTL fine-mapping is in scope.
 - **SBayesRC deferred** (Zheng 2024) — Bayesian fine-mapping with
@@ -291,10 +294,17 @@ Five annotation-aware methods with distinct prior-estimation strategies.
 **SparsePro implementation:**
 
 - `R/wrappers/sparsepro.R` with `setup_sparsepro()`, `run_sparsepro()`,
-  `run_sparsepro_region()`. Pattern matches `R/wrappers/funmap.R`.
-- `reticulate::import("sparsepro")` to load the module.
-- Setup: `pip install sparsepro` into the existing conda env. Reuses the
-  BEATRICE / Funmap Python environment — no new conda env required.
+  `run_sparsepro_region()`. Pattern matches `R/wrappers/beatrice.R`
+  (CLI invocation via `system2()`).
+- Setup: user clones `https://github.com/zhwm/SparsePro`,
+  `pip install -r requirements.txt` into the existing conda env, then
+  passes `sparsepro_dir = "/path/to/SparsePro"` (and optionally
+  `python = ...`) via `method_args`. No auto-clone, mirrors the
+  BEATRICE pattern.
+- Per-region call writes three temp files (zscore table, LD matrix,
+  --zld summary file), invokes `python sparsepro_zld.py ...`, then
+  parses the `.pip` (variant-level PIPs) and `.cs` (credible sets)
+  output files.
 - Register in `.FM_REGISTRY`, add to `.FM_COLORS`, etc.
 - Effort: ~1 day.
 

@@ -4,7 +4,7 @@
 [![Cite this repository](https://img.shields.io/badge/Cite-CITATION.cff-blue.svg)](CITATION.cff)
 
 Benchmarking framework for evaluating statistical fine-mapping methods using
-simulated genetic data. Supports 12 methods, flexible simulation parameters,
+simulated genetic data. Supports 13 methods, flexible simulation parameters,
 automatic evaluation (AUPRC, credible set metrics, PIP calibration), and
 multi-page PDF plots with stratified results.
 
@@ -244,6 +244,7 @@ project root.
 | **marginal_z** | 1 | R (built-in) | None |
 | **polyfun_oracle** | 1 | R package | susieR (already in renv) |
 | **polyfun_est** | 1 | R package | susieR (already in renv) |
+| **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.
 

@@ -49,7 +49,9 @@
   # Baselines and annotation-aware comparators added in Phase 1.
   marginal_z            = "run_marginal_z_region",
   polyfun_oracle        = "run_polyfun_oracle_region",
-  polyfun_est           = "run_polyfun_est_region"
+  polyfun_est           = "run_polyfun_est_region",
+  # Phase 4: modern variational comparator (without annotations).
+  sparsepro             = "run_sparsepro_region"
 )
 
 
