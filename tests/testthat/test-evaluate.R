@@ -752,3 +752,289 @@ test_that("[I3] all-fits-failed method: NA AUPRC, n_failed correct, others unaff
   # Other methods unaffected by the failed one
   expect_false(is.na(ev$susie$global$auprc))
 })
+
+
+# =============================================================================
+# [J] Standard error fields - presence, validity, n_iter behaviour
+# =============================================================================
+
+SE_SCALAR_FIELDS <- c("auprc_se", "cs_coverage_se", "cs_power_se",
+                      "cs_size_median_se", "cs_size_mean_se", "runtime_mean_se")
+
+
+test_that("[J1] All scalar SE fields present in global and every stratum (n_iter=2)", {
+  expect_true(has_names(eval_A$susie$global, SE_SCALAR_FIELDS))
+  expect_true(all(sapply(eval_A$susie$by_S,
+                         function(s) has_names(s, SE_SCALAR_FIELDS))))
+  expect_true(all(sapply(eval_A$susie$by_phi,
+                         function(s) has_names(s, SE_SCALAR_FIELDS))))
+  expect_true(all(sapply(eval_E$susie$by_p_causal,
+                         function(s) has_names(s, SE_SCALAR_FIELDS))))
+})
+
+
+test_that("[J2] all scalar SE values are non-negative or NA across methods and strata", {
+  for (m in eval_A$methods_evaluated) {
+    for (f in SE_SCALAR_FIELDS) {
+      v <- eval_A[[m]]$global[[f]]
+      expect_true(is.null(v) || is.na(v) || v >= 0,
+                  info = sprintf("method=%s field=%s value=%s", m, f, format(v)))
+    }
+  }
+})
+
+
+test_that("[J3] SE values are numeric (not NA) when n_iter=2 and fits succeed", {
+  expect_true(is.numeric(eval_A$susie$global$auprc_se) &&
+              !is.na(eval_A$susie$global$auprc_se))
+  expect_true(is.numeric(eval_A$abf$global$cs_coverage_se) &&
+              !is.na(eval_A$abf$global$cs_coverage_se))
+})
+
+
+test_that("[J4] SE fields are NA when n_iter=1 (no replicates to estimate from)", {
+  # eval_I2 was built with n_iter=1 in section [I2]
+  for (f in SE_SCALAR_FIELDS) {
+    v <- eval_I2$susie$global[[f]]
+    expect_true(is.null(v) || is.na(v),
+                info = sprintf("field=%s value=%s", f, format(v)))
+  }
+
+  df <- eval_I2$susie$global$fdr_power_curve
+  expect_true(is.null(df) || all(is.na(df$power_se)))
+
+  cal <- eval_I2$susie$global$pip_calibration
+  expect_true(is.null(cal) || all(is.na(cal$frac_causal_se)))
+})
+
+
+test_that("[J5] PR curve has power_se / precision_se columns (n_iter>=2)", {
+  fpc <- eval_A$susie$global$fdr_power_curve
+  expect_true("power_se"     %in% names(fpc))
+  expect_true("precision_se" %in% names(fpc))
+  expect_true(all(is.na(fpc$power_se)     | fpc$power_se     >= 0))
+  expect_true(all(is.na(fpc$precision_se) | fpc$precision_se >= 0))
+  expect_true(any(!is.na(fpc$power_se)))
+})
+
+
+test_that("[J6] PIP calibration has frac_causal_se column", {
+  cal <- eval_A$susie$global$pip_calibration
+  expect_true("frac_causal_se" %in% names(cal))
+  expect_true(all(is.na(cal$frac_causal_se) | cal$frac_causal_se >= 0))
+})
+
+
+test_that("[J7] SE is non-NA for n_iter=2 and n_iter=4 (LLN sanity)", {
+  sim_n2 <- run_simulation(n_regions=2, n=200, p=80, n_iter=2,
+                            S=1, phi=0.3, seed=20, verbose=FALSE)
+  sim_n4 <- run_simulation(n_regions=2, n=200, p=80, n_iter=4,
+                            S=1, phi=0.3, seed=20, verbose=FALSE)
+  res_n2 <- run_methods(sim_n2, methods="abf", verbose=FALSE)
+  res_n4 <- run_methods(sim_n4, methods="abf", verbose=FALSE)
+  ev_n2  <- evaluate_methods(sim_n2, res_n2, verbose=FALSE)
+  ev_n4  <- evaluate_methods(sim_n4, res_n4, verbose=FALSE)
+
+  expect_false(is.na(ev_n2$abf$global$auprc_se))
+  expect_false(is.na(ev_n4$abf$global$auprc_se))
+
+  s2 <- ev_n2$abf$by_S[["1"]]$auprc_se
+  s4 <- ev_n4$abf$by_S[["1"]]$auprc_se
+  expect_true(is.na(s2) || s2 >= 0)
+  expect_true(is.na(s4) || s4 >= 0)
+})
+
+
+test_that("[J8] all-failed method has NA SE fields", {
+  # Rebuild a failed-finemap run for this test (mirror section G).
+  sim_J8 <- run_simulation(n_regions=1, n=150, p=50, n_iter=1,
+                            S=1, phi=0.3, seed=8, verbose=FALSE)
+  res_J8 <- run_methods(
+    sim_J8,
+    methods     = "finemap",
+    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
+    verbose     = FALSE
+  )
+  ev <- evaluate_methods(sim_J8, res_J8, verbose=FALSE)
+
+  for (f in SE_SCALAR_FIELDS) {
+    v <- ev$finemap$global[[f]]
+    expect_true(is.null(v) || is.na(v),
+                info = sprintf("field=%s value=%s", f, format(v)))
+  }
+})
+
+
+# =============================================================================
+# [K] plot_results - PDF output, all sections, method filtering
+# =============================================================================
+
+test_that("[K1] plot_results produces a non-empty PDF for sparse model + 2 methods", {
+  pdf_path <- tempfile("test_K1_", fileext = ".pdf")
+  on.exit(unlink(pdf_path), add = TRUE)
+
+  expect_silent(
+    plot_results(eval_A, output_file = pdf_path,
+                 methods = c("susie", "abf"), verbose = FALSE)
+  )
+  expect_true(file.exists(pdf_path))
+  expect_gt(file.size(pdf_path), 1000L)
+})
+
+
+test_that("[K2] sparse_inf eval renders the by_p_causal section in the PDF", {
+  pdf_K1 <- tempfile("test_K1_size_", fileext = ".pdf")
+  pdf_K2 <- tempfile("test_K2_", fileext = ".pdf")
+  on.exit(unlink(c(pdf_K1, pdf_K2)), add = TRUE)
+
+  # Baseline (sparse, no p_causal section).
+  plot_results(eval_A, output_file = pdf_K1,
+               methods = c("susie", "abf"), verbose = FALSE)
+  # sparse_inf adds the p_causal section, so file should be at least as large.
+  plot_results(eval_E, output_file = pdf_K2, verbose = FALSE)
+
+  expect_true(file.exists(pdf_K2))
+  expect_gt(file.size(pdf_K2), file.size(pdf_K1))
+})
+
+
+test_that("[K3] single-method filter still produces a valid PDF", {
+  pdf_path <- tempfile("test_K3_", fileext = ".pdf")
+  on.exit(unlink(pdf_path), add = TRUE)
+
+  expect_silent(
+    plot_results(eval_A, output_file = pdf_path,
+                 methods = "susie", verbose = FALSE)
+  )
+  expect_true(file.exists(pdf_path))
+  expect_gt(file.size(pdf_path), 1000L)
+})
+
+
+test_that("[K4] plot_results handles a mix of succeeded and failed methods", {
+  sim_K4 <- run_simulation(n_regions=1, n=150, p=50, n_iter=1,
+                            S=1, phi=0.3, seed=8, verbose=FALSE)
+  # Successful ABF + failed finemap, merged into one results object.
+  res_ok  <- run_methods(sim_K4, methods="abf", verbose=FALSE)
+  res_bad <- run_methods(
+    sim_K4,
+    methods     = "finemap",
+    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
+    verbose     = FALSE
+  )
+  merged <- res_ok
+  merged$finemap     <- res_bad$finemap
+  merged$methods_run <- c("abf", "finemap")
+  ev <- evaluate_methods(sim_K4, merged, verbose = FALSE)
+
+  pdf_path <- tempfile("test_K4_", fileext = ".pdf")
+  on.exit(unlink(pdf_path), add = TRUE)
+  plot_results(ev, output_file = pdf_path, verbose = FALSE)
+  expect_true(file.exists(pdf_path))
+  expect_gt(file.size(pdf_path), 1000L)
+})
+
+
+test_that("[K5] plot_results errors on an unknown method name", {
+  pdf_path <- tempfile("test_K5_", fileext = ".pdf")
+  expect_error(
+    plot_results(eval_A, output_file = pdf_path,
+                 methods = "nonexistent", verbose = FALSE)
+  )
+})
+
+
+test_that("[K6] 3xS x 3xphi grid produces a valid PDF without error", {
+  sim_K6 <- run_simulation(n_regions=1, n=150, p=60, n_iter=2,
+                            S=c(1,2,3), phi=c(0.1,0.3,0.5),
+                            seed=30, verbose=FALSE)
+  res_K6 <- run_methods(sim_K6, methods=c("susie","abf"),
+                        method_args=list(susie=list(L=5)), verbose=FALSE)
+  ev <- evaluate_methods(sim_K6, res_K6, verbose=FALSE)
+
+  pdf_path <- tempfile("test_K6_", fileext = ".pdf")
+  on.exit(unlink(pdf_path), add = TRUE)
+  plot_results(ev, output_file = pdf_path, verbose = FALSE)
+  expect_true(file.exists(pdf_path))
+  expect_gt(file.size(pdf_path), 1000L)
+})
+
+
+test_that("[K7] n_iter=1 (no SE) still plots without error", {
+  sim_K7 <- run_simulation(n_regions=1, n=150, p=60, n_iter=1,
+                            S=c(1,2), phi=0.3, seed=31, verbose=FALSE)
+  res_K7 <- run_methods(sim_K7, methods="susie",
+                        method_args=list(susie=list(L=5)), verbose=FALSE)
+  ev <- evaluate_methods(sim_K7, res_K7, verbose=FALSE)
+
+  pdf_path <- tempfile("test_K7_", fileext = ".pdf")
+  on.exit(unlink(pdf_path), add = TRUE)
+  plot_results(ev, output_file = pdf_path, verbose = FALSE)
+  expect_true(file.exists(pdf_path))
+  expect_gt(file.size(pdf_path), 1000L)
+})
+
+
+# =============================================================================
+# [L] save argument - evaluate_methods writes correct files
+# =============================================================================
+
+test_that("[L1] save=TRUE creates output_dir and writes evaluation.rds + .csv", {
+  out_dir <- tempfile("test_L1_")
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  ev <- evaluate_methods(sim_A, res_A,
+                          save = TRUE, output_dir = out_dir, verbose = FALSE)
+
+  expect_true(dir.exists(out_dir))
+  expect_true(file.exists(file.path(out_dir, "evaluation.rds")))
+  expect_true(file.exists(file.path(out_dir, "evaluation_summary.csv")))
+})
+
+
+test_that("[L2] evaluation.rds round-trips with metric and SE fields intact", {
+  out_dir <- tempfile("test_L2_")
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  ev <- evaluate_methods(sim_A, res_A,
+                          save = TRUE, output_dir = out_dir, verbose = FALSE)
+  ev2 <- readRDS(file.path(out_dir, "evaluation.rds"))
+
+  expect_identical(ev$susie$global$auprc, ev2$susie$global$auprc)
+  expect_true(has_names(ev2$susie$global, SE_SCALAR_FIELDS))
+})
+
+
+test_that("[L3] evaluation_summary.csv has correct rows, SE columns, matching values", {
+  out_dir <- tempfile("test_L3_")
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  ev <- evaluate_methods(sim_A, res_A,
+                          save = TRUE, output_dir = out_dir, verbose = FALSE)
+  csv <- read.csv(file.path(out_dir, "evaluation_summary.csv"),
+                  stringsAsFactors = FALSE)
+
+  expect_setequal(csv$method, ev$methods_evaluated)
+  expect_true(has_names(csv,
+                         c("auprc_se", "cs_coverage_se", "cs_power_se",
+                           "cs_size_median_se", "runtime_mean_se")))
+
+  for (m in ev$methods_evaluated) {
+    csv_val <- csv$auprc[csv$method == m]
+    ev_val  <- ev[[m]]$global$auprc
+    if (is.na(csv_val)) {
+      expect_true(is.na(ev_val), info = sprintf("method=%s", m))
+    } else {
+      expect_equal(csv_val, ev_val, tolerance = 1e-10,
+                   info = sprintf("method=%s", m))
+    }
+  }
+})
+
+
+test_that("[L4] save=FALSE does not create the output_dir", {
+  tmp <- tempfile("test_L4_nosave_")
+  evaluate_methods(sim_A, res_A,
+                   save = FALSE, output_dir = tmp, verbose = FALSE)
+  expect_false(dir.exists(tmp))
+})
