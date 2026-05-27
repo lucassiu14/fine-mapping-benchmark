@@ -1,0 +1,48 @@
+Package: fmbenchmark
+Type: Package
+Title: Benchmarking Framework for Statistical Fine-Mapping Methods
+Version: 0.1.0
+Authors@R:
+    person(given = "Lucas",
+           family = "Siu",
+           email = "ls1020@ic.ac.uk",
+           role = c("aut", "cre"))
+Description: A framework for benchmarking statistical fine-mapping methods
+    using simulated genetic data. Simulates genotypes from 1000 Genomes
+    Phase 3 haplotypes (via sim1000G), generates phenotypes under sparse
+    or sparse+infinitesimal genetic architectures with optional functional
+    annotations, applies a catalogue of fine-mapping methods (SuSiE,
+    SuSiE-inf, FINEMAP, ABF, CARMA, PAINTOR, Funmap, BEATRICE, Functional
+    BEATRICE, SparsePro, marginal-z baseline, and PolyFun-style oracle and
+    estimated-prior variants), and evaluates them via AUPRC, credible-set
+    coverage / power / size, PIP calibration, and runtime — stratified by
+    causal-variant count, heritability, p_causal, causal-variant MAF, and
+    annotation regime. Supports both per-locus and genome-wide simulation
+    and an LD-mismatch experiment via an independent reference panel.
+License: MIT + file LICENSE
+URL: https://github.com/lucassiu14/fine-mapping-benchmark
+BugReports: https://github.com/lucassiu14/fine-mapping-benchmark/issues
+Encoding: UTF-8
+Depends:
+    R (>= 4.1.0)
+Imports:
+    ggplot2,
+    grid,
+    gridExtra,
+    sim1000G,
+    stats,
+    susieR,
+    utils
+Suggests:
+    CARMA,
+    knitr,
+    reticulate,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    yaml
+SystemRequirements: htslib (>= 1.0) for tabix and bgzip; required by the
+    scripts that download 1000 Genomes Phase 3 VCF windows.
+RoxygenNote: 7.3.0
+Roxygen: list(markdown = TRUE)
+Config/testthat/edition: 3
+VignetteBuilder: knitr
