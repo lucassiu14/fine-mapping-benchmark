@@ -1885,3 +1885,294 @@ test_that("[14] polyfun_est: graceful behaviour on no-annotation fixture", {
   expect_false(is.null(fit))
   expect_equal(length(fit$pip), .rg$p)
 })
+
+
+# =============================================================================
+# SECTION 15: MAF-stratified evaluation (by_causal_maf)
+# =============================================================================
+
+# RESULTS_MINI predates the MAF axis; rebuild eval here to get the field.
+EVAL_MAF <- evaluate_methods(
+  SIM_MINI, RESULTS_MINI,
+  save = FALSE, verbose = FALSE
+)
+
+
+test_that("[15] evaluate_methods returns a by_causal_maf list per method", {
+  expect_true("by_causal_maf" %in% names(EVAL_MAF$susie))
+  expect_true("by_causal_maf" %in% names(EVAL_MAF$abf))
+})
+
+test_that("[15] by_causal_maf entries are populated when MAFs available", {
+  # SIM_MINI uses real VCFs => genotypes carry MAFs => bins populate.
+  bm <- EVAL_MAF$susie$by_causal_maf
+  expect_false(is.null(bm))
+  expect_gte(length(bm), 1L)
+})
+
+test_that("[15] by_causal_maf bin names are a subset of {rare, low, common}", {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  expect_true(all(names(bm) %in% c("rare", "low", "common")))
+})
+
+test_that("[15] by_causal_maf bins appear in canonical order rare->low->common", {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  canonical <- c("rare", "low", "common")
+  present   <- canonical[canonical %in% names(bm)]
+  expect_identical(names(bm), present)
+})
+
+test_that("[15] by_causal_maf bins each carry a numeric auprc field", {
+  bm <- EVAL_MAF$susie$by_causal_maf
+  for (b in names(bm)) {
+    expect_true("auprc" %in% names(bm[[b]]),
+                info = sprintf("bin=%s", b))
+    expect_true(is.numeric(bm[[b]]$auprc),
+                info = sprintf("bin=%s", b))
+  }
+})
+
+
+# =============================================================================
+# SECTION 16: Misspecification stratification (by_true_annotation_type)
+# =============================================================================
+
+# Build an eval against SIM_MINI_ANNOT so the annotated-fixture case is
+# covered alongside the no-annotation case from EVAL_MAF.
+
+RESULTS_MINI_ANNOT_FOR_AT <- run_methods(
+  SIM_MINI_ANNOT,
+  methods     = c("susie", "abf"),
+  method_args = list(susie = list(L = 5L, coverage = 0.95)),
+  save = FALSE, verbose = FALSE
+)
+EVAL_ANNOT <- evaluate_methods(
+  SIM_MINI_ANNOT, RESULTS_MINI_ANNOT_FOR_AT,
+  save = FALSE, verbose = FALSE
+)
+
+
+test_that("[16] by_true_annotation_type present per method", {
+  expect_true("by_true_annotation_type" %in% names(EVAL_MAF$susie))
+  expect_true("by_true_annotation_type" %in% names(EVAL_ANNOT$susie))
+})
+
+test_that("[16] no-annotation fixture: by_true_annotation_type has 'none'", {
+  bt <- EVAL_MAF$susie$by_true_annotation_type
+  expect_false(is.null(bt))
+  expect_identical(names(bt), "none")
+})
+
+test_that("[16] binary-annotation fixture: by_true_annotation_type has 'binary'", {
+  bt <- EVAL_ANNOT$susie$by_true_annotation_type
+  expect_false(is.null(bt))
+  expect_identical(names(bt), "binary")
+})
+
+test_that("[16] by_true_annotation_type bins carry a numeric auprc field", {
+  for (eo in list(EVAL_MAF$susie, EVAL_ANNOT$susie)) {
+    bt <- eo$by_true_annotation_type
+    for (t in names(bt)) {
+      expect_true("auprc" %in% names(bt[[t]]),
+                  info = sprintf("type=%s", t))
+      expect_true(is.numeric(bt[[t]]$auprc),
+                  info = sprintf("type=%s", t))
+    }
+  }
+})
+
+
+# =============================================================================
+# SECTION 17: LD mismatch - n_ref independent reference panel
+# =============================================================================
+
+# Baseline (no ref panel) - mirrors pre-n_ref behaviour exactly.
+GENO_NOREF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "../../data/genetic_maps",
+  seed = 99L, verbose = FALSE
+)
+
+# Small ref panel - LD will differ noticeably from in-sample LD.
+GENO_REF <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "../../data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 50L
+)
+
+# Ref panel matching n - independent draw but larger, so LD closer to truth.
+GENO_REF_FULL <- simulate_genotypes(
+  n_regions = 1L, n = 200L, p = 60L,
+  genetic_map_dir = "../../data/genetic_maps",
+  seed = 99L, verbose = FALSE,
+  n_ref = 200L
+)
+
+
+test_that("[17] n_ref = NULL: no X_ref / n_ref fields (backwards compatible)", {
+  r <- GENO_NOREF[[1L]]
+  expect_null(r$X_ref)
+  expect_null(r$n_ref)
+})
+
+test_that("[17] n_ref = 50: X_ref has 50 rows and same p as X", {
+  r <- GENO_REF[[1L]]
+  expect_false(is.null(r$X_ref))
+  expect_equal(nrow(r$X_ref), 50L)
+  expect_equal(ncol(r$X_ref), ncol(r$X))
+  expect_identical(r$n_ref, 50L)
+})
+
+test_that("[17] run_simulation: LD_true and LD both populated when n_ref set", {
+  sim_ref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "../../data/genetic_maps",
+    seed = 99L, verbose = FALSE, n_ref = 50L
+  )
+  r <- sim_ref$genotypes[[1L]]
+  expect_false(is.null(r$LD))
+  expect_false(is.null(r$LD_true))
+  expect_identical(dim(r$LD), dim(r$LD_true))
+  expect_identical(sim_ref$params$n_ref, 50L)
+})
+
+test_that("[17] run_simulation: n_ref = NULL gives LD identical to LD_true", {
+  sim_noref <- run_simulation(
+    n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
+    S = 1L, phi = 0.2, model = "sparse", annotations = "none",
+    genetic_map_dir = "../../data/genetic_maps",
+    seed = 99L, verbose = FALSE
+  )
+  r <- sim_noref$genotypes[[1L]]
+  expect_false(is.null(r$LD_true))
+  expect_identical(r$LD, r$LD_true)
+  expect_null(sim_noref$params$n_ref)
+})
+
+test_that("[17] LD mismatch shrinks as n_ref grows (rough monotonicity)", {
+  # Same main-sample seed across both, so LD_true is identical. The larger
+  # ref panel should be closer to LD_true because correlation estimates
+  # are more precise at larger n.
+  r_small <- GENO_REF[[1L]]
+  r_large <- GENO_REF_FULL[[1L]]
+  LD_true <- cor(r_small$X)
+  d_small <- mean((cor(r_small$X_ref) - LD_true)^2, na.rm = TRUE)
+  d_large <- mean((cor(r_large$X_ref) - LD_true)^2, na.rm = TRUE)
+  expect_lt(d_large, d_small)
+})
+
+
+# =============================================================================
+# SECTION 18: run_sparsepro / run_sparsepro_region wrapper plumbing
+# =============================================================================
+#
+# Renumbered from the source file's duplicate "SECTION 16".
+#
+# SparsePro is a Python CLI script (sparsepro_zld.py) in the upstream repo
+# (https://github.com/zhwm/SparsePro). We don't bundle or auto-install it.
+# To detect availability we honour SPARSEPRO_DIR (+ optionally
+# SPARSEPRO_PYTHON) env vars. When absent the happy-path tests skip with
+# a clear reason; wrapper-plumbing tests (graceful failure, output shape
+# on the error path, argument forwarding, input validation) run
+# unconditionally.
+
+sparsepro_dir       <- Sys.getenv("SPARSEPRO_DIR",    unset = "")
+sparsepro_python    <- Sys.getenv("SPARSEPRO_PYTHON", unset = "python")
+sparsepro_available <- nzchar(sparsepro_dir) &&
+  file.exists(file.path(sparsepro_dir, "sparsepro_zld.py"))
+
+.rg_sp <- SIM_MINI$genotypes[[1]]
+.rp_sp <- SIM_MINI$scenarios[[1]]$regions[[1]]
+
+
+test_that("[18] sparsepro: standard-shape error result on missing dir", {
+  fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                              sparsepro_dir = "/definitely/not/a/path")
+  fields <- c("pip", "credible_sets", "method", "input_type",
+              "params", "runtime_seconds", "additional")
+  expect_true(all(fields %in% names(fit)))
+  expect_equal(fit$method, "sparsepro")
+  expect_equal(fit$input_type, "summary")
+  expect_false(is.null(fit$error))
+  expect_equal(length(fit$pip), .rg_sp$p)
+  expect_true(all(is.na(fit$pip)))
+  expect_length(fit$credible_sets, 0L)
+})
+
+test_that("[18] sparsepro: sparsepro_dir / python / K / cthres recorded in params", {
+  fit <- run_sparsepro_region(
+    .rg_sp, .rp_sp,
+    sparsepro_dir = "/tmp/SparsePro-test",
+    python        = "python",
+    K             = 7,
+    cthres        = 0.9
+  )
+  expect_identical(fit$params$sparsepro_dir, "/tmp/SparsePro-test")
+  expect_identical(fit$params$python, "python")
+  expect_equal(fit$params$K, 7)
+  expect_lt(abs(fit$params$cthres - 0.9), 1e-12)
+  expect_equal(fit$params$n, .rg_sp$n)
+})
+
+test_that("[18] sparsepro: K must be >= 1", {
+  e <- tryCatch(
+    run_sparsepro(z = .rp_sp$z, LD = .rg_sp$LD, n = .rg_sp$n,
+                  sparsepro_dir = "/tmp/x", K = 0),
+    error = function(e) conditionMessage(e)
+  )
+  expect_true(is.character(e))
+  expect_match(e, "K must be")
+})
+
+test_that("[18] sparsepro: cthres must be in (0, 1)", {
+  e <- tryCatch(
+    run_sparsepro(z = .rp_sp$z, LD = .rg_sp$LD, n = .rg_sp$n,
+                  sparsepro_dir = "/tmp/x", cthres = 1.5),
+    error = function(e) conditionMessage(e)
+  )
+  expect_true(is.character(e))
+  expect_match(e, "cthres must be")
+})
+
+test_that("[18] setup_sparsepro: errors clearly when sparsepro_dir missing", {
+  e <- tryCatch(
+    setup_sparsepro(sparsepro_dir = "/definitely/not/a/path"),
+    error = function(e) conditionMessage(e)
+  )
+  expect_true(is.character(e))
+  expect_match(e, "sparsepro_zld.py not found")
+})
+
+test_that("[18] sparsepro: produces valid PIPs on small fixture (real install)", {
+  skip_if(!sparsepro_available,
+          "SparsePro not installed (set SPARSEPRO_DIR to enable)")
+
+  fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                              sparsepro_dir = sparsepro_dir,
+                              python        = sparsepro_python,
+                              K             = 3)
+  expect_null(fit$error)
+  expect_equal(length(fit$pip), .rg_sp$p)
+  expect_true(all(fit$pip >= 0, na.rm = TRUE))
+  expect_true(all(fit$pip <= 1, na.rm = TRUE))
+})
+
+test_that("[18] sparsepro: credible_sets are integer index vectors (real install)", {
+  skip_if(!sparsepro_available,
+          "SparsePro not installed (set SPARSEPRO_DIR to enable)")
+
+  fit <- run_sparsepro_region(.rg_sp, .rp_sp,
+                              sparsepro_dir = sparsepro_dir,
+                              python        = sparsepro_python,
+                              K             = 3)
+  expect_true(is.list(fit$credible_sets))
+  if (length(fit$credible_sets) > 0L) {
+    for (cs in fit$credible_sets) {
+      expect_true(is.numeric(cs))
+      expect_true(all(cs >= 1L))
+      expect_true(all(cs <= .rg_sp$p))
+    }
+  }
+})
