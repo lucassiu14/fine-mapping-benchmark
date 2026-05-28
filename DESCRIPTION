@@ -41,9 +41,6 @@ Suggests:
     rmarkdown,
     testthat (>= 3.0.0),
     yaml
-Remotes:
-    url::https://cran.r-project.org/src/contrib/Archive/sim1000G/sim1000G_1.40.tar.gz,
-    stephenslab/susieR
 SystemRequirements: htslib (>= 1.0) for tabix and bgzip; required by the
     scripts that download 1000 Genomes Phase 3 VCF windows.
 Roxygen: list(markdown = TRUE)
