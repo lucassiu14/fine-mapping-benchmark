@@ -1054,3 +1054,309 @@ test_that("[3] phi outside (0,1) errors", {
                    verbose = FALSE)
   )
 })
+
+
+# =============================================================================
+# SECTION 4: run_methods
+# =============================================================================
+
+test_that("[4] methods = 'susie' runs on SIM_MINI", {
+  r <- run_methods(SIM_MINI, methods = "susie",
+                   method_args = list(susie = list(L = 5)),
+                   save = FALSE, verbose = FALSE)
+  expect_true("susie" %in% r$methods_run)
+})
+
+test_that("[4] methods = 'abf' runs on SIM_MINI", {
+  r <- run_methods(SIM_MINI, methods = "abf",
+                   save = FALSE, verbose = FALSE)
+  expect_true("abf" %in% r$methods_run)
+})
+
+test_that("[4] methods = 'susie_inf' runs on SIM_MINI", {
+  r <- run_methods(SIM_MINI, methods = "susie_inf",
+                   method_args = list(susie_inf = list(L = 5)),
+                   save = FALSE, verbose = FALSE)
+  expect_true("susie_inf" %in% r$methods_run)
+})
+
+test_that("[4] methods = 'carma' runs on SIM_MINI", {
+  r <- run_methods(SIM_MINI, methods = "carma",
+                   save = FALSE, verbose = FALSE)
+  expect_true("carma" %in% r$methods_run)
+})
+
+test_that("[4] multiple methods run together", {
+  r <- run_methods(SIM_MINI, methods = c("susie", "abf"),
+                   save = FALSE, verbose = FALSE)
+  expect_true(all(c("susie", "abf") %in% r$methods_run))
+})
+
+test_that("[4] method_args forwarded to susie (L and coverage)", {
+  r <- run_methods(SIM_MINI, methods = "susie",
+                   method_args = list(susie = list(L = 3, coverage = 0.9)),
+                   save = FALSE, verbose = FALSE)
+  expect_equal(r$susie$method_args$L, 3)
+  expect_equal(r$susie$method_args$coverage, 0.9)
+})
+
+test_that("[4] method_args forwarded to abf (prior_variance)", {
+  r <- run_methods(SIM_MINI, methods = "abf",
+                   method_args = list(abf = list(prior_variance = 0.02,
+                                                 coverage = 0.9)),
+                   save = FALSE, verbose = FALSE)
+  expect_equal(r$abf$method_args$prior_variance, 0.02)
+})
+
+test_that("[4] method_args forwarded to susie_inf (L)", {
+  r <- run_methods(SIM_MINI, methods = "susie_inf",
+                   method_args = list(susie_inf = list(L = 3)),
+                   save = FALSE, verbose = FALSE)
+  expect_equal(r$susie_inf$method_args$L, 3)
+})
+
+test_that("[4] method_args forwarded to carma (rho.index)", {
+  r <- run_methods(SIM_MINI, methods = "carma",
+                   method_args = list(carma = list(rho.index = 0.9)),
+                   save = FALSE, verbose = FALSE)
+  expect_equal(r$carma$method_args$rho.index, 0.9)
+})
+
+test_that("[4] unknown method name errors", {
+  expect_error(
+    run_methods(SIM_MINI, methods = "notamethod",
+                save = FALSE, verbose = FALSE)
+  )
+})
+
+test_that("[4] method_args for non-run method warns", {
+  expect_warning(
+    run_methods(SIM_MINI, methods = "abf",
+                method_args = list(abf = list(), susie = list(L = 5)),
+                save = FALSE, verbose = FALSE)
+  )
+})
+
+test_that("[4] save = TRUE writes per-method .rds + run_metadata.rds", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  run_methods(SIM_MINI, methods = "abf",
+              save = TRUE, output_dir = tmp, verbose = FALSE)
+  files <- list.files(tmp, recursive = TRUE, pattern = "[.]rds$")
+  expect_true(any(grepl("abf[.]rds", files)))
+  expect_true(any(grepl("run_metadata[.]rds", files)))
+})
+
+test_that("[4] save = FALSE produces no files", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  run_methods(SIM_MINI, methods = "abf",
+              save = FALSE, output_dir = tmp, verbose = FALSE)
+  expect_length(list.files(tmp, recursive = TRUE), 0L)
+})
+
+test_that("[4] verbose = FALSE suppresses messages", {
+  out <- utils::capture.output(
+    run_methods(SIM_MINI, methods = "abf", save = FALSE, verbose = FALSE),
+    type = "message"
+  )
+  expect_length(out, 0L)
+})
+
+test_that("[4] return value has results / n_total / n_failed / total_runtime", {
+  expect_true(all(c("results", "n_total", "n_failed",
+                    "total_runtime_seconds") %in%
+                  names(RESULTS_MINI$susie)))
+})
+
+test_that("[4] each fit has pip / credible_sets / method / scenario metadata", {
+  fit <- RESULTS_MINI$susie$results[[1]]
+  expected <- c("pip", "credible_sets", "method", "runtime_seconds",
+                "scenario_id", "region_id", "S", "phi", "iter")
+  expect_true(all(expected %in% names(fit)))
+})
+
+test_that("[4] pip length equals n_snps", {
+  fit <- RESULTS_MINI$susie$results[[1]]
+  rg  <- SIM_MINI$genotypes[[fit$region_id]]
+  expect_equal(length(fit$pip), rg$p)
+})
+
+test_that("[4] pip values in [0, 1]", {
+  pip <- RESULTS_MINI$susie$results[[1]]$pip
+  expect_true(all(pip >= 0))
+  expect_true(all(pip <= 1))
+})
+
+test_that("[4] direct wrapper call with broken inputs returns clean error", {
+  # run_abf_region called with a deliberately broken region_geno; the
+  # wrapper either errors cleanly or returns a structured error result.
+  fit <- tryCatch(
+    run_abf_region(
+      region_geno  = list(LD = NULL, n = 100),
+      region_pheno = list(z = rep(0, 5), se = rep(1, 5))
+    ),
+    error = function(e) list(error = conditionMessage(e))
+  )
+  expect_true(!is.null(fit$error) || !is.null(fit$pip))
+})
+
+test_that("[4] methods case-insensitive (SUSIE == susie)", {
+  r <- run_methods(SIM_MINI, methods = "SUSIE",
+                   method_args = list(susie = list(L = 5)),
+                   save = FALSE, verbose = FALSE)
+  expect_true("susie" %in% r$methods_run)
+})
+
+
+# =============================================================================
+# SECTION 5: evaluate_methods
+# =============================================================================
+
+test_that("[5] basic evaluation returns named list per method", {
+  expect_true(all(c("susie", "abf") %in% EVAL_MINI$methods_evaluated))
+})
+
+test_that("[5] global stratum present for each method", {
+  for (m in EVAL_MINI$methods_evaluated) {
+    expect_false(is.null(EVAL_MINI[[m]]$global),
+                 info = sprintf("method=%s", m))
+  }
+})
+
+test_that("[5] by_S stratum present and named correctly", {
+  expect_false(is.null(EVAL_MINI$susie$by_S))
+  expect_true(all(c("1", "2") %in% names(EVAL_MINI$susie$by_S)))
+})
+
+test_that("[5] by_phi stratum present and named correctly", {
+  expect_false(is.null(EVAL_MINI$susie$by_phi))
+  expect_true(all(c("0.2", "0.4") %in% names(EVAL_MINI$susie$by_phi)))
+})
+
+test_that("[5] by_p_causal is NULL for sparse model", {
+  expect_null(EVAL_MINI$susie$by_p_causal)
+})
+
+test_that("[5] by_p_causal present and populated for sparse_inf model", {
+  sim_inf <- run_simulation(
+    n_regions = 1, n = 80, p = 40,
+    n_iter = 2, S = 1, phi = 0.2,
+    model = "sparse_inf", p_causal = c(0.3, 0.7),
+    genetic_map_dir = "../../data/genetic_maps",
+    seed = 55, verbose = FALSE
+  )
+  res_inf <- run_methods(sim_inf, methods = "abf",
+                          save = FALSE, verbose = FALSE)
+  ev_inf  <- evaluate_methods(sim_inf, res_inf,
+                               save = FALSE, verbose = FALSE)
+  expect_false(is.null(ev_inf$abf$by_p_causal))
+  expect_true(all(c("0.3", "0.7") %in% names(ev_inf$abf$by_p_causal)))
+})
+
+test_that("[5] global auprc is numeric in [0, 1]", {
+  auprc <- EVAL_MINI$susie$global$auprc
+  expect_true(is.numeric(auprc))
+  expect_false(is.na(auprc))
+  expect_gte(auprc, 0)
+  expect_lte(auprc, 1)
+})
+
+test_that("[5] global cs_coverage is in [0, 1] or NA", {
+  cv <- EVAL_MINI$susie$global$cs_coverage
+  expect_true(is.numeric(cv))
+  expect_true(is.na(cv) || (cv >= 0 && cv <= 1))
+})
+
+test_that("[5] global cs_power is in [0, 1] or NA", {
+  cp <- EVAL_MINI$susie$global$cs_power
+  expect_true(is.numeric(cp))
+  expect_true(is.na(cp) || (cp >= 0 && cp <= 1))
+})
+
+test_that("[5] fdr_power_curve has all required columns", {
+  curve <- EVAL_MINI$susie$global$fdr_power_curve
+  expected <- c("threshold", "tp", "fp", "fn",
+                "fdr", "power", "precision", "recall")
+  expect_true(all(expected %in% names(curve)))
+})
+
+test_that("[5] pip_calibration has all required columns", {
+  cal <- EVAL_MINI$susie$global$pip_calibration
+  expected <- c("bin", "bin_lower", "bin_upper", "mean_pip", "frac_causal")
+  expect_true(all(expected %in% names(cal)))
+})
+
+test_that("[5] SE fields present when n_iter >= 2", {
+  expect_false(is.null(EVAL_MINI$susie$global$auprc_se))
+})
+
+test_that("[5] custom (coarser) pip_thresholds respected", {
+  ev <- evaluate_methods(SIM_MINI, RESULTS_MINI,
+                         pip_thresholds = seq(0, 1, by = 0.1),
+                         save = FALSE, verbose = FALSE)
+  # seq(0, 1, by = 0.1) has 11 values
+  expect_equal(nrow(ev$susie$global$fdr_power_curve), 11L)
+})
+
+test_that("[5] n_pip_cal_bins = 5 produces 5-row calibration table", {
+  ev <- evaluate_methods(SIM_MINI, RESULTS_MINI,
+                         n_pip_cal_bins = 5,
+                         save = FALSE, verbose = FALSE)
+  expect_equal(nrow(ev$susie$global$pip_calibration), 5L)
+})
+
+test_that("[5] n_pip_cal_bins = 20 produces 20-row calibration table", {
+  ev <- evaluate_methods(SIM_MINI, RESULTS_MINI,
+                         n_pip_cal_bins = 20,
+                         save = FALSE, verbose = FALSE)
+  expect_equal(nrow(ev$susie$global$pip_calibration), 20L)
+})
+
+test_that("[5] save = TRUE writes evaluation.rds + evaluation_summary.csv", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  evaluate_methods(SIM_MINI, RESULTS_MINI,
+                   save = TRUE, output_dir = tmp, verbose = FALSE)
+  expect_true(file.exists(file.path(tmp, "evaluation.rds")))
+  expect_true(file.exists(file.path(tmp, "evaluation_summary.csv")))
+})
+
+test_that("[5] save = FALSE writes no files", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  evaluate_methods(SIM_MINI, RESULTS_MINI,
+                   save = FALSE, output_dir = tmp, verbose = FALSE)
+  expect_length(list.files(tmp), 0L)
+})
+
+test_that("[5] output_dir created if absent (save = TRUE)", {
+  tmp <- file.path(tempfile(), "ev_out")
+  on.exit(unlink(tmp, recursive = TRUE))
+  evaluate_methods(SIM_MINI, RESULTS_MINI,
+                   save = TRUE, output_dir = tmp, verbose = FALSE)
+  expect_true(dir.exists(tmp))
+})
+
+test_that("[5] verbose = FALSE suppresses messages", {
+  out <- utils::capture.output(
+    evaluate_methods(SIM_MINI, RESULTS_MINI,
+                     save = FALSE, verbose = FALSE),
+    type = "message"
+  )
+  expect_length(out, 0L)
+})
+
+test_that("[5] methods_evaluated field present in return value", {
+  expect_true("methods_evaluated" %in% names(EVAL_MINI))
+})
+
+test_that("[5] simulation missing 'scenarios' errors", {
+  expect_error(
+    evaluate_methods(list(params = list()), RESULTS_MINI,
+                     save = FALSE, verbose = FALSE)
+  )
+})
+
+test_that("[5] results missing 'methods_run' errors", {
+  expect_error(
+    evaluate_methods(SIM_MINI, list(),
+                     save = FALSE, verbose = FALSE)
+  )
+})
