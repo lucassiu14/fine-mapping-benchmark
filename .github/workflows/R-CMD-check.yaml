@@ -64,13 +64,15 @@ jobs:
           # cran/ GitHub mirror (HEAD = last released version). hapsim must
           # be explicit because it is a grandchild dep (fmbenchmark ->
           # sim1000G -> hapsim) that a DESCRIPTION Remotes: entry would not
-          # reach. susieR comes from CRAN as a normal Imports dependency
-          # (binary; the dev GitHub HEAD fails to build from source and the
-          # CRAN release provides the susie_rss API we use). The remaining
-          # entries are the Suggests needed for the check / tests / vignette.
+          # reach. susieR is pinned to the lockfile commit (v0.15.57): the
+          # susie_inf wrapper requires susieR >= 0.15.0, which is newer than
+          # the CRAN release (0.14.2), while the GitHub dev HEAD (0.16.2)
+          # fails to build from source. The remaining entries are the
+          # Suggests needed for the check / tests / vignette.
           extra-packages: |
             cran/hapsim
             cran/sim1000G
+            stephenslab/susieR@732181c662d118930e4381a5d6dc44c89ce2cea0
             any::rcmdcheck
             any::testthat
             any::knitr
