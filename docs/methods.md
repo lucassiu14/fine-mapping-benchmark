@@ -29,9 +29,7 @@ this benchmark, how to run them, and the arguments available for each.
 ### Step 1 — Simulate data
 
 ```r
-source("R/simulate_genotypes.R")
-source("R/simulate_phenotypes.R")
-source("R/run_simulation.R")
+library(fmbenchmark)        # or, in a source checkout: pkgload::load_all()
 
 sim <- run_simulation(
   n_regions = 3,
@@ -50,21 +48,8 @@ sim <- run_simulation(
 
 ### Step 2 — Run methods
 
-Source the method files and the orchestrator:
-
-```r
-source("R/wrappers/susie.R")
-source("R/wrappers/susie_inf.R")
-source("R/wrappers/finemap.R")
-source("R/wrappers/abf.R")
-source("R/wrappers/funmap.R")
-source("R/wrappers/paintor.R")
-source("R/wrappers/beatrice.R")
-source("R/wrappers/carma.R")
-source("R/run_methods.R")
-```
-
-Run one or more methods with `run_methods()`:
+All method wrappers and the orchestrator are available once the package is
+loaded (Step 1). Run one or more methods with `run_methods()`:
 
 ```r
 out <- run_methods(
@@ -733,7 +718,7 @@ in `method_args` at all use all defaults.
 
 ## Adding a new method
 
-1. Create `R/wrappers/<method>.R` implementing:
+1. Create `R/wrapper_<method>.R` implementing:
    - `run_<method>(...)` — single-region runner returning the standard format
    - `run_<method>_region(region_geno, region_pheno, ...)` — adapter for `run_methods()`
 2. Add one line to `.FM_REGISTRY` in `R/run_methods.R`:

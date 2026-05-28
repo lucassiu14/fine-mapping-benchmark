@@ -42,9 +42,8 @@
 # CRAN runs will fail there which is the expected behaviour for a
 # Suggests-only check.
 #
-# The original `scripts/test_comprehensive.R` is kept on disk for now;
-# Phase 3b-iii decides whether to move it under `inst/scripts/` or
-# delete it.
+# The original `scripts/test_comprehensive.R` was removed in Phase
+# 3b-iii once this testthat version superseded it.
 # =============================================================================
 
 
