@@ -55,7 +55,7 @@
 # Small genotype object (2 regions, n=100, p=50)
 GENO_SMALL <- simulate_genotypes(
   n_regions = 2, n = 100, p = 50,
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 1, verbose = FALSE
 )
 
@@ -69,7 +69,7 @@ SIM_MINI <- run_simulation(
   n_regions = 2, n = 100, p = 50,
   n_iter = 2, S = c(1, 2), phi = c(0.2, 0.4),
   model = "sparse", annotations = "none",
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 42, verbose = FALSE
 )
 
@@ -79,7 +79,7 @@ SIM_MINI_ANNOT <- run_simulation(
   n_iter = 2, S = c(1, 2), phi = c(0.2, 0.4),
   model = "sparse", annotations = "binary", n_annotations = 3,
   enrichment = 5.0,
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 42, verbose = FALSE
 )
 
@@ -106,28 +106,28 @@ EVAL_MINI <- evaluate_methods(
 
 test_that("[1] n_regions = 1 returns list of length 1", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 1, verbose = FALSE)
   expect_length(g, 1L)
 })
 
 test_that("[1] n_regions = 3 returns list of length 3", {
   g <- simulate_genotypes(n_regions = 3, n = 50, p = 30,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 2, verbose = FALSE)
   expect_length(g, 3L)
 })
 
 test_that("[1] n sets number of rows in X", {
   g <- simulate_genotypes(n_regions = 1, n = 80, p = 30,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 3, verbose = FALSE)
   expect_equal(nrow(g[[1]]$X), 80L)
 })
 
 test_that("[1] p as scalar applied to all regions (with truncation cap)", {
   g <- simulate_genotypes(n_regions = 2, n = 50, p = 40,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 4, verbose = FALSE)
   expect_lte(g[[1]]$p, 40L)
   expect_lte(g[[2]]$p, 40L)
@@ -135,7 +135,7 @@ test_that("[1] p as scalar applied to all regions (with truncation cap)", {
 
 test_that("[1] p as vector sets different targets per region", {
   g <- simulate_genotypes(n_regions = 2, n = 50, p = c(30, 50),
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 5, verbose = FALSE)
   expect_length(g, 2L)
 })
@@ -143,7 +143,7 @@ test_that("[1] p as vector sets different targets per region", {
 test_that("[1] p > 500 with bundled VCF warns and caps", {
   expect_warning(
     simulate_genotypes(n_regions = 1, n = 50, p = 600,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 6, verbose = FALSE)
   )
 })
@@ -151,7 +151,7 @@ test_that("[1] p > 500 with bundled VCF warns and caps", {
 test_that("[1] vcf_files = NULL uses bundled example VCF", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
                           vcf_files = NULL,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 7, verbose = FALSE)
   expect_false(is.null(g[[1]]$X))
 })
@@ -160,7 +160,7 @@ test_that("[1] vcf_files = single path reused for all regions", {
   vcf <- system.file("examples", "region.vcf.gz", package = "sim1000G")
   g <- simulate_genotypes(n_regions = 2, n = 50, p = 30,
                           vcf_files = vcf,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 8, verbose = FALSE)
   expect_length(g, 2L)
 })
@@ -170,7 +170,7 @@ test_that("[1] vcf_files wrong length errors", {
   expect_error(
     simulate_genotypes(n_regions = 3, n = 50, p = 30,
                        vcf_files = c(vcf, vcf),
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 9, verbose = FALSE)
   )
 })
@@ -179,7 +179,7 @@ test_that("[1] vcf_files missing file errors", {
   expect_error(
     simulate_genotypes(n_regions = 1, n = 50, p = 30,
                        vcf_files = "/nonexistent/path.vcf.gz",
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 10, verbose = FALSE)
   )
 })
@@ -187,7 +187,7 @@ test_that("[1] vcf_files missing file errors", {
 test_that("[1] min_maf = 0 accepts all variants", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
                           min_maf = 0,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 11, verbose = FALSE)
   expect_false(is.null(g[[1]]$X))
 })
@@ -195,7 +195,7 @@ test_that("[1] min_maf = 0 accepts all variants", {
 test_that("[1] min_maf = 0.1 (stricter filter) works", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
                           min_maf = 0.1,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 12, verbose = FALSE)
   # MAF is two-sided; values must be in [0.1, 0.9].
   expect_true(all(g[[1]]$maf >= 0.1 | g[[1]]$maf <= 0.9))
@@ -204,7 +204,7 @@ test_that("[1] min_maf = 0.1 (stricter filter) works", {
 test_that("[1] max_maf = 0.3 applies upper MAF filter", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
                           min_maf = 0.01, max_maf = 0.3,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 13, verbose = FALSE)
   expect_false(is.null(g[[1]]$X))
 })
@@ -212,7 +212,7 @@ test_that("[1] max_maf = 0.3 applies upper MAF filter", {
 test_that("[1] standardise = TRUE gives ~zero-mean columns", {
   g <- simulate_genotypes(n_regions = 1, n = 200, p = 30,
                           standardise = TRUE,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 14, verbose = FALSE)
   expect_true(all(abs(colMeans(g[[1]]$X)) < 0.01))
 })
@@ -220,7 +220,7 @@ test_that("[1] standardise = TRUE gives ~zero-mean columns", {
 test_that("[1] standardise = FALSE returns 0/1/2 coding", {
   g <- simulate_genotypes(n_regions = 1, n = 100, p = 30,
                           standardise = FALSE,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 15, verbose = FALSE)
   vals <- unique(as.vector(g[[1]]$X))
   expect_true(all(vals %in% c(0, 1, 2)))
@@ -229,7 +229,7 @@ test_that("[1] standardise = FALSE returns 0/1/2 coding", {
 test_that("[1] standardise = FALSE: X identical to X_raw", {
   g <- simulate_genotypes(n_regions = 1, n = 100, p = 30,
                           standardise = FALSE,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 16, verbose = FALSE)
   expect_identical(g[[1]]$X, g[[1]]$X_raw)
 })
@@ -243,24 +243,24 @@ test_that("[1] genetic_map_dir = NULL (uses tempdir) works", {
 
 test_that("[1] genetic_map_dir = existing path caches maps", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = 18, verbose = FALSE)
   expect_false(is.null(g[[1]]$X))
 })
 
 test_that("[1] seed ensures reproducibility", {
   g1 <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                            genetic_map_dir = "../../data/genetic_maps",
+                            genetic_map_dir = fmb_test_map_dir(),
                             seed = 99, verbose = FALSE)
   g2 <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                            genetic_map_dir = "../../data/genetic_maps",
+                            genetic_map_dir = fmb_test_map_dir(),
                             seed = 99, verbose = FALSE)
   expect_identical(g1[[1]]$X, g2[[1]]$X)
 })
 
 test_that("[1] seed = NULL accepted (no reproducibility required)", {
   g <- simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                          genetic_map_dir = "../../data/genetic_maps",
+                          genetic_map_dir = fmb_test_map_dir(),
                           seed = NULL, verbose = FALSE)
   expect_false(is.null(g[[1]]$X))
 })
@@ -268,7 +268,7 @@ test_that("[1] seed = NULL accepted (no reproducibility required)", {
 test_that("[1] verbose = FALSE suppresses messages", {
   out <- utils::capture.output(
     simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 20, verbose = FALSE),
     type = "message"
   )
@@ -278,7 +278,7 @@ test_that("[1] verbose = FALSE suppresses messages", {
 test_that("[1] verbose = TRUE prints region progress", {
   out <- utils::capture.output(
     simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 21, verbose = TRUE),
     type = "message"
   )
@@ -294,7 +294,7 @@ test_that("[1] return value carries all expected fields", {
 test_that("[1] n_regions = 0 errors (must be positive)", {
   expect_error(
     simulate_genotypes(n_regions = 0, n = 50, p = 30,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        verbose = FALSE)
   )
 })
@@ -302,7 +302,7 @@ test_that("[1] n_regions = 0 errors (must be positive)", {
 test_that("[1] p vector length mismatch errors", {
   expect_error(
     simulate_genotypes(n_regions = 3, n = 50, p = c(30, 40),
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        verbose = FALSE)
   )
 })
@@ -650,7 +650,7 @@ test_that("[2] truth carries all expected fields", {
 test_that("[2b] save = FALSE writes no files", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = 200, save = FALSE, output_dir = tmp,
                      verbose = FALSE)
   expect_length(list.files(tmp), 0L)
@@ -659,7 +659,7 @@ test_that("[2b] save = FALSE writes no files", {
 test_that("[2b] save = TRUE writes .rds file", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = 201, save = TRUE, output_dir = tmp,
                      verbose = FALSE)
   expect_length(list.files(tmp, pattern = "[.]rds$"), 1L)
@@ -668,7 +668,7 @@ test_that("[2b] save = TRUE writes .rds file", {
 test_that("[2b] saved .rds is readable and has correct structure", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = 202, save = TRUE, output_dir = tmp,
                      verbose = FALSE)
   f   <- list.files(tmp, pattern = "[.]rds$", full.names = TRUE)
@@ -681,7 +681,7 @@ test_that("[2b] output_dir created if it does not exist", {
   tmp <- file.path(tempfile(), "geno_out")
   on.exit(unlink(dirname(tmp), recursive = TRUE))
   simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = 203, save = TRUE, output_dir = tmp,
                      verbose = FALSE)
   expect_true(dir.exists(tmp))
@@ -690,7 +690,7 @@ test_that("[2b] output_dir created if it does not exist", {
 test_that("[2b] filename encodes n_regions, n, p, seed", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   simulate_genotypes(n_regions = 2, n = 60, p = 35,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = 204, save = TRUE, output_dir = tmp,
                      verbose = FALSE)
   f <- list.files(tmp, pattern = "[.]rds$")
@@ -703,7 +703,7 @@ test_that("[2b] filename encodes n_regions, n, p, seed", {
 test_that("[2b] seed = NULL gives 'noseed' tag in filename", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   simulate_genotypes(n_regions = 1, n = 50, p = 30,
-                     genetic_map_dir = "../../data/genetic_maps",
+                     genetic_map_dir = fmb_test_map_dir(),
                      seed = NULL, save = TRUE, output_dir = tmp,
                      verbose = FALSE)
   expect_match(list.files(tmp, pattern = "[.]rds$"), "noseed")
@@ -769,7 +769,7 @@ test_that("[2c] filename encodes model, S, phi, seed", {
 test_that("[3] n_iter = 1 produces a single scenario", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 1, verbose = FALSE)
   expect_length(r$scenarios, 1L)
 })
@@ -777,7 +777,7 @@ test_that("[3] n_iter = 1 produces a single scenario", {
 test_that("[3] n_iter = 3 produces three scenarios", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 3, S = 1, phi = 0.2,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 2, verbose = FALSE)
   expect_length(r$scenarios, 3L)
 })
@@ -785,7 +785,7 @@ test_that("[3] n_iter = 3 produces three scenarios", {
 test_that("[3] S vector sweeps correctly", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = c(1, 2), phi = 0.2,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 3, verbose = FALSE)
   expect_length(r$scenarios, 2L)
   S_vals <- sapply(r$scenarios, `[[`, "S")
@@ -795,7 +795,7 @@ test_that("[3] S vector sweeps correctly", {
 test_that("[3] phi vector sweeps correctly", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = c(0.2, 0.4),
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 4, verbose = FALSE)
   expect_length(r$scenarios, 2L)
   phi_vals <- sapply(r$scenarios, `[[`, "phi")
@@ -806,7 +806,7 @@ test_that("[3] model = 'sparse' recorded in params", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       model = "sparse",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 5, verbose = FALSE)
   expect_equal(r$params$model, "sparse")
 })
@@ -815,7 +815,7 @@ test_that("[3] model = 'sparse_inf' sweeps p_causal", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       model = "sparse_inf", p_causal = c(0.2, 0.5),
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 6, verbose = FALSE)
   expect_length(r$scenarios, 2L)
   expect_equal(r$params$model, "sparse_inf")
@@ -826,7 +826,7 @@ test_that("[3] inf_model = 'beatrice' accepted in sparse_inf", {
                       n_iter = 1, S = 1, phi = 0.2,
                       model = "sparse_inf", p_causal = 0.5,
                       inf_model = "beatrice",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 7, verbose = FALSE)
   expect_equal(r$params$inf_model, "beatrice")
 })
@@ -836,7 +836,7 @@ test_that("[3] inf_model = 'susie_inf' accepted in sparse_inf", {
                       n_iter = 1, S = 1, phi = 0.2,
                       model = "sparse_inf", p_causal = 0.5,
                       inf_model = "susie_inf",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 8, verbose = FALSE)
   expect_equal(r$params$inf_model, "susie_inf")
 })
@@ -845,7 +845,7 @@ test_that("[3] effect_distribution = 'normal' recorded in params", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       effect_distribution = "normal",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 9, verbose = FALSE)
   expect_equal(r$params$effect_distribution, "normal")
 })
@@ -854,7 +854,7 @@ test_that("[3] effect_distribution = 'equal' recorded", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       effect_distribution = "equal",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 10, verbose = FALSE)
   expect_equal(r$params$effect_distribution, "equal")
 })
@@ -863,7 +863,7 @@ test_that("[3] effect_variance = 0.5 recorded", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       effect_variance = 0.5,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 11, verbose = FALSE)
   expect_equal(r$params$effect_variance, 0.5)
 })
@@ -872,7 +872,7 @@ test_that("[3] annotations = 'none' produces NULL annotation matrix", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       annotations = "none",
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 12, verbose = FALSE)
   expect_null(r$scenarios[[1]]$regions[[1]]$annotations_matrix)
 })
@@ -881,7 +881,7 @@ test_that("[3] annotations = 'binary' with n_annotations = 2", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       annotations = "binary", n_annotations = 2,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 13, verbose = FALSE)
   A <- r$scenarios[[1]]$regions[[1]]$annotations_matrix
   expect_false(is.null(A))
@@ -892,7 +892,7 @@ test_that("[3] annotations = 'continuous' with n_annotations = 3", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       annotations = "continuous", n_annotations = 3,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 14, verbose = FALSE)
   A <- r$scenarios[[1]]$regions[[1]]$annotations_matrix
   expect_false(is.null(A))
@@ -904,7 +904,7 @@ test_that("[3] annotation_proportions scalar passed through", {
                       n_iter = 1, S = 1, phi = 0.2,
                       annotations = "binary", n_annotations = 2,
                       annotation_proportions = 0.15,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 15, verbose = FALSE)
   expect_equal(r$params$annotation_proportions, 0.15)
 })
@@ -914,7 +914,7 @@ test_that("[3] enrichment scalar passed through", {
                       n_iter = 1, S = 1, phi = 0.2,
                       annotations = "binary", n_annotations = 2,
                       enrichment = 4,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 16, verbose = FALSE)
   expect_equal(r$params$enrichment, 4)
 })
@@ -924,7 +924,7 @@ test_that("[3] vcf_dir missing directory errors", {
     run_simulation(n_regions = 1, n = 80, p = 40,
                    n_iter = 1, S = 1, phi = 0.2,
                    vcf_dir = "/nonexistent/dir",
-                   genetic_map_dir = "../../data/genetic_maps",
+                   genetic_map_dir = fmb_test_map_dir(),
                    seed = 17, verbose = FALSE)
   )
 })
@@ -934,7 +934,7 @@ test_that("[3] vcf_files = single VCF path used for all regions", {
   r <- run_simulation(n_regions = 2, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       vcf_files = vcf,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 18, verbose = FALSE)
   expect_length(r$genotypes, 2L)
 })
@@ -943,7 +943,7 @@ test_that("[3] min_maf = 0.05 passed to simulate_genotypes", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       min_maf = 0.05,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 19, verbose = FALSE)
   expect_equal(r$params$min_maf, 0.05)
 })
@@ -952,7 +952,7 @@ test_that("[3] max_maf = 0.4 passed to simulate_genotypes", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       max_maf = 0.4,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 20, verbose = FALSE)
   expect_false(is.null(r$genotypes[[1]]$X))
 })
@@ -961,7 +961,7 @@ test_that("[3] standardise = FALSE returns raw 0/1/2 genotypes", {
   r <- run_simulation(n_regions = 1, n = 80, p = 40,
                       n_iter = 1, S = 1, phi = 0.2,
                       standardise = FALSE,
-                      genetic_map_dir = "../../data/genetic_maps",
+                      genetic_map_dir = fmb_test_map_dir(),
                       seed = 21, verbose = FALSE)
   vals <- unique(as.vector(r$genotypes[[1]]$X))
   expect_true(all(vals %in% c(0, 1, 2)))
@@ -970,11 +970,11 @@ test_that("[3] standardise = FALSE returns raw 0/1/2 genotypes", {
 test_that("[3] seed = 42 ensures reproducibility", {
   r1 <- run_simulation(n_regions = 1, n = 80, p = 40,
                        n_iter = 1, S = 1, phi = 0.2,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 42, verbose = FALSE)
   r2 <- run_simulation(n_regions = 1, n = 80, p = 40,
                        n_iter = 1, S = 1, phi = 0.2,
-                       genetic_map_dir = "../../data/genetic_maps",
+                       genetic_map_dir = fmb_test_map_dir(),
                        seed = 42, verbose = FALSE)
   expect_identical(r1$genotypes[[1]]$X, r2$genotypes[[1]]$X)
 })
@@ -983,7 +983,7 @@ test_that("[3] save = TRUE writes .rds file", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   run_simulation(n_regions = 1, n = 80, p = 40,
                  n_iter = 1, S = 1, phi = 0.2,
-                 genetic_map_dir = "../../data/genetic_maps",
+                 genetic_map_dir = fmb_test_map_dir(),
                  seed = 99, save = TRUE, output_dir = tmp,
                  verbose = FALSE)
   expect_length(list.files(tmp, pattern = "[.]rds$"), 1L)
@@ -993,7 +993,7 @@ test_that("[3] save = FALSE writes no files", {
   tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
   run_simulation(n_regions = 1, n = 80, p = 40,
                  n_iter = 1, S = 1, phi = 0.2,
-                 genetic_map_dir = "../../data/genetic_maps",
+                 genetic_map_dir = fmb_test_map_dir(),
                  seed = 100, save = FALSE, output_dir = tmp,
                  verbose = FALSE)
   expect_length(list.files(tmp), 0L)
@@ -1004,7 +1004,7 @@ test_that("[3] output_dir is created when nested + missing", {
   on.exit(unlink(dirname(dirname(tmp)), recursive = TRUE))
   run_simulation(n_regions = 1, n = 80, p = 40,
                  n_iter = 1, S = 1, phi = 0.2,
-                 genetic_map_dir = "../../data/genetic_maps",
+                 genetic_map_dir = fmb_test_map_dir(),
                  seed = 101, save = TRUE, output_dir = tmp,
                  verbose = FALSE)
   expect_true(dir.exists(tmp))
@@ -1014,7 +1014,7 @@ test_that("[3] verbose = FALSE suppresses messages", {
   out <- utils::capture.output(
     run_simulation(n_regions = 1, n = 80, p = 40,
                    n_iter = 1, S = 1, phi = 0.2,
-                   genetic_map_dir = "../../data/genetic_maps",
+                   genetic_map_dir = fmb_test_map_dir(),
                    seed = 102, verbose = FALSE),
     type = "message"
   )
@@ -1040,7 +1040,7 @@ test_that("[3] n_iter = 0 errors (must be positive)", {
   expect_error(
     run_simulation(n_regions = 1, n = 80, p = 40,
                    n_iter = 0, S = 1, phi = 0.2,
-                   genetic_map_dir = "../../data/genetic_maps",
+                   genetic_map_dir = fmb_test_map_dir(),
                    verbose = FALSE)
   )
 })
@@ -1049,7 +1049,7 @@ test_that("[3] phi outside (0,1) errors", {
   expect_error(
     run_simulation(n_regions = 1, n = 80, p = 40,
                    n_iter = 1, S = 1, phi = 1.5,
-                   genetic_map_dir = "../../data/genetic_maps",
+                   genetic_map_dir = fmb_test_map_dir(),
                    verbose = FALSE)
   )
 })
@@ -1240,7 +1240,7 @@ test_that("[5] by_p_causal present and populated for sparse_inf model", {
     n_regions = 1, n = 80, p = 40,
     n_iter = 2, S = 1, phi = 0.2,
     model = "sparse_inf", p_causal = c(0.3, 0.7),
-    genetic_map_dir = "../../data/genetic_maps",
+    genetic_map_dir = fmb_test_map_dir(),
     seed = 55, verbose = FALSE
   )
   res_inf <- run_methods(sim_inf, methods = "abf",
@@ -1462,7 +1462,7 @@ test_that("[6] sparse_inf eval renders the by_p_causal section in the PDF", {
     n_regions = 1, n = 80, p = 40,
     n_iter = 2, S = 1, phi = 0.2,
     model = "sparse_inf", p_causal = c(0.3, 0.7),
-    genetic_map_dir = "../../data/genetic_maps",
+    genetic_map_dir = fmb_test_map_dir(),
     seed = 66, verbose = FALSE
   )
   res_inf <- run_methods(sim_inf, methods = "abf",
@@ -1988,14 +1988,14 @@ test_that("[16] by_true_annotation_type bins carry a numeric auprc field", {
 # Baseline (no ref panel) - mirrors pre-n_ref behaviour exactly.
 GENO_NOREF <- simulate_genotypes(
   n_regions = 1L, n = 200L, p = 60L,
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 99L, verbose = FALSE
 )
 
 # Small ref panel - LD will differ noticeably from in-sample LD.
 GENO_REF <- simulate_genotypes(
   n_regions = 1L, n = 200L, p = 60L,
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 99L, verbose = FALSE,
   n_ref = 50L
 )
@@ -2003,7 +2003,7 @@ GENO_REF <- simulate_genotypes(
 # Ref panel matching n - independent draw but larger, so LD closer to truth.
 GENO_REF_FULL <- simulate_genotypes(
   n_regions = 1L, n = 200L, p = 60L,
-  genetic_map_dir = "../../data/genetic_maps",
+  genetic_map_dir = fmb_test_map_dir(),
   seed = 99L, verbose = FALSE,
   n_ref = 200L
 )
@@ -2027,7 +2027,7 @@ test_that("[17] run_simulation: LD_true and LD both populated when n_ref set", {
   sim_ref <- run_simulation(
     n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
     S = 1L, phi = 0.2, model = "sparse", annotations = "none",
-    genetic_map_dir = "../../data/genetic_maps",
+    genetic_map_dir = fmb_test_map_dir(),
     seed = 99L, verbose = FALSE, n_ref = 50L
   )
   r <- sim_ref$genotypes[[1L]]
@@ -2041,7 +2041,7 @@ test_that("[17] run_simulation: n_ref = NULL gives LD identical to LD_true", {
   sim_noref <- run_simulation(
     n_regions = 1L, n = 200L, p = 60L, n_iter = 1L,
     S = 1L, phi = 0.2, model = "sparse", annotations = "none",
-    genetic_map_dir = "../../data/genetic_maps",
+    genetic_map_dir = fmb_test_map_dir(),
     seed = 99L, verbose = FALSE
   )
   r <- sim_noref$genotypes[[1L]]
