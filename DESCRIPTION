@@ -41,10 +41,6 @@ Suggests:
     rmarkdown,
     testthat (>= 3.0.0),
     yaml
-Remotes:
-    cran/hapsim,
-    cran/sim1000G,
-    stephenslab/susieR
 SystemRequirements: htslib (>= 1.0) for tabix and bgzip; required by the
     scripts that download 1000 Genomes Phase 3 VCF windows.
 Roxygen: list(markdown = TRUE)

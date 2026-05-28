@@ -55,10 +55,21 @@ jobs:
 
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          # Only hard deps (Imports/LinkingTo) from DESCRIPTION + Remotes;
-          # skips the heavy/optional Suggests (notably CARMA + GSL).
+          # Only hard deps (Imports/LinkingTo) from DESCRIPTION; skips the
+          # heavy/optional Suggests (notably CARMA + GSL).
           dependencies: '"hard"'
+          # Non-CRAN deps are listed here as explicit top-level install
+          # refs so pak uses the right source. sim1000G and its dependency
+          # hapsim are archived on CRAN -> installed from the read-only
+          # cran/ GitHub mirror (HEAD = last released version). hapsim must
+          # be explicit because it is a grandchild dep (fmbenchmark ->
+          # sim1000G -> hapsim) that a DESCRIPTION Remotes: entry would not
+          # reach. susieR is a GitHub package. The remaining entries are the
+          # Suggests needed to run the check / tests / vignette.
           extra-packages: |
+            cran/hapsim
+            cran/sim1000G
+            stephenslab/susieR
             any::rcmdcheck
             any::testthat
             any::knitr
