@@ -1475,3 +1475,205 @@ test_that("[6] sparse_inf eval renders the by_p_causal section in the PDF", {
   plot_results(ev_inf, output_dir = tmp, verbose = FALSE)
   expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
 })
+
+
+# =============================================================================
+# Per-region fixtures shared by per-method argument tests (7-14)
+# =============================================================================
+
+.rg <- SIM_MINI$genotypes[[1]]
+.rp <- SIM_MINI$scenarios[[1]]$regions[[1]]
+
+
+# =============================================================================
+# SECTION 7: run_susie / run_susie_region argument passthrough
+# =============================================================================
+
+test_that("[7] susie: L = 5 stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5)
+  expect_equal(fit$params$L, 5)
+})
+
+test_that("[7] susie: L = 1 (single-component) accepted", {
+  fit <- run_susie_region(.rg, .rp, L = 1)
+  expect_equal(fit$params$L, 1)
+})
+
+test_that("[7] susie: coverage = 0.5 stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, coverage = 0.5)
+  expect_equal(fit$params$coverage, 0.5)
+})
+
+test_that("[7] susie: coverage = 0.99 stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, coverage = 0.99)
+  expect_equal(fit$params$coverage, 0.99)
+})
+
+test_that("[7] susie: min_abs_corr = 0 (no purity filter) accepted", {
+  fit <- run_susie_region(.rg, .rp, L = 5, min_abs_corr = 0)
+  expect_equal(fit$params$min_abs_corr, 0)
+})
+
+test_that("[7] susie: min_abs_corr = 0.8 (strict filter) accepted", {
+  fit <- run_susie_region(.rg, .rp, L = 5, min_abs_corr = 0.8)
+  expect_equal(fit$params$min_abs_corr, 0.8)
+})
+
+test_that("[7] susie: max_iter = 50 stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, max_iter = 50)
+  expect_equal(fit$params$max_iter, 50)
+})
+
+test_that("[7] susie: estimate_residual_variance = FALSE stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, estimate_residual_variance = FALSE)
+  expect_false(fit$params$estimate_residual_variance)
+})
+
+test_that("[7] susie: estimate_prior_variance = FALSE stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, estimate_prior_variance = FALSE)
+  expect_false(fit$params$estimate_prior_variance)
+})
+
+test_that("[7] susie: prior_variance = 0.05 stored in params", {
+  fit <- run_susie_region(.rg, .rp, L = 5, prior_variance = 0.05)
+  expect_equal(fit$params$prior_variance, 0.05)
+})
+
+test_that("[7] susie: output has all expected top-level fields", {
+  fit <- run_susie_region(.rg, .rp, L = 5)
+  expect_true(all(c("pip", "credible_sets", "method", "runtime_seconds",
+                    "input_type", "params", "additional") %in% names(fit)))
+})
+
+test_that("[7] susie: pip is length-p and in [0, 1]", {
+  fit <- run_susie_region(.rg, .rp, L = 5)
+  expect_true(is.numeric(fit$pip))
+  expect_equal(length(fit$pip), .rg$p)
+  expect_true(all(fit$pip >= 0))
+  expect_true(all(fit$pip <= 1))
+})
+
+
+# =============================================================================
+# SECTION 8: run_abf / run_abf_region argument passthrough
+# =============================================================================
+
+test_that("[8] abf: prior_variance = 0.04 (default) stored in params", {
+  fit <- run_abf_region(.rg, .rp, prior_variance = 0.04)
+  expect_equal(fit$params$prior_variance, 0.04)
+})
+
+test_that("[8] abf: prior_variance = 0.1 stored in params", {
+  fit <- run_abf_region(.rg, .rp, prior_variance = 0.1)
+  expect_equal(fit$params$prior_variance, 0.1)
+})
+
+test_that("[8] abf: coverage = 0.5 stored in params", {
+  fit <- run_abf_region(.rg, .rp, coverage = 0.5)
+  expect_equal(fit$params$coverage, 0.5)
+})
+
+test_that("[8] abf: coverage = 0.99 stored in params", {
+  fit <- run_abf_region(.rg, .rp, coverage = 0.99)
+  expect_equal(fit$params$coverage, 0.99)
+})
+
+test_that("[8] abf: returns exactly one credible set", {
+  fit <- run_abf_region(.rg, .rp)
+  expect_true(is.list(fit$credible_sets))
+  expect_length(fit$credible_sets, 1L)
+})
+
+test_that("[8] abf: pip sums to ~1 (normalised ABF)", {
+  fit <- run_abf_region(.rg, .rp)
+  expect_lt(abs(sum(fit$pip) - 1), 1e-9)
+})
+
+test_that("[8] abf: additional contains log10_abf", {
+  fit <- run_abf_region(.rg, .rp)
+  expect_true("log10_abf" %in% names(fit$additional))
+})
+
+test_that("[8] abf: different prior_variance values produce different PIPs", {
+  fit_lo <- run_abf_region(.rg, .rp, prior_variance = 0.01)
+  fit_hi <- run_abf_region(.rg, .rp, prior_variance = 0.5)
+  expect_false(identical(fit_lo$pip, fit_hi$pip))
+})
+
+
+# =============================================================================
+# SECTION 9: run_susie_inf / run_susie_inf_region argument passthrough
+# =============================================================================
+
+test_that("[9] susie_inf: L = 5 stored in params", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 5)
+  expect_equal(fit$params$L, 5)
+})
+
+test_that("[9] susie_inf: L = 1 accepted", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 1)
+  expect_equal(fit$params$L, 1)
+})
+
+test_that("[9] susie_inf: coverage = 0.9 stored in params", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 5, coverage = 0.9)
+  expect_equal(fit$params$coverage, 0.9)
+})
+
+test_that("[9] susie_inf: max_iter = 50 stored in params", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 5, max_iter = 50)
+  expect_equal(fit$params$max_iter, 50)
+})
+
+test_that("[9] susie_inf: output has pip, credible_sets, method", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 5)
+  expect_true(all(c("pip", "credible_sets", "method") %in% names(fit)))
+})
+
+test_that("[9] susie_inf: pip in [0, 1]", {
+  fit <- run_susie_inf_region(.rg, .rp, L = 5)
+  expect_true(all(fit$pip >= 0))
+  expect_true(all(fit$pip <= 1))
+})
+
+
+# =============================================================================
+# SECTION 10: run_carma / run_carma_region argument passthrough
+# =============================================================================
+
+test_that("[10] carma: rho.index = 0.95 (default) stored in params", {
+  fit <- run_carma_region(.rg, .rp, rho.index = 0.95)
+  expect_equal(fit$params$rho.index, 0.95)
+})
+
+test_that("[10] carma: rho.index = 0.9 stored in params", {
+  fit <- run_carma_region(.rg, .rp, rho.index = 0.9)
+  expect_equal(fit$params$rho.index, 0.9)
+})
+
+test_that("[10] carma: num.causal = 5 stored in params", {
+  fit <- run_carma_region(.rg, .rp, num.causal = 5)
+  expect_equal(fit$params$num.causal, 5)
+})
+
+test_that("[10] carma: num.causal = 1 produces a pip vector", {
+  fit <- run_carma_region(.rg, .rp, num.causal = 1)
+  expect_false(is.null(fit$pip))
+})
+
+test_that("[10] carma: pip has correct length", {
+  fit <- run_carma_region(.rg, .rp)
+  expect_equal(length(fit$pip), .rg$p)
+})
+
+test_that("[10] carma: pip in [0, 1]", {
+  fit <- run_carma_region(.rg, .rp)
+  expect_true(all(fit$pip >= 0, na.rm = TRUE))
+  expect_true(all(fit$pip <= 1, na.rm = TRUE))
+})
+
+test_that("[10] carma: credible_sets is a (possibly empty) list", {
+  fit <- run_carma_region(.rg, .rp)
+  expect_true(is.list(fit$credible_sets))
+  expect_gte(length(fit$credible_sets), 0L)
+})
