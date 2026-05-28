@@ -14,7 +14,7 @@
 #
 # Adding a new method
 # -------------------
-# 1. Create R/wrappers/<method>.R implementing:
+# 1. Create R/wrapper_<method>.R implementing:
 #      run_<method>_region(region_geno, region_pheno, ...)
 #    The function must return a list with at minimum:
 #      pip, credible_sets, method, input_type, params, runtime_seconds,
