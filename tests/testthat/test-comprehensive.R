@@ -1360,3 +1360,118 @@ test_that("[5] results missing 'methods_run' errors", {
                      save = FALSE, verbose = FALSE)
   )
 })
+
+
+# =============================================================================
+# SECTION 6: plot_results
+# =============================================================================
+
+test_that("[6] output_file explicit path writes PDF there", {
+  tmp <- tempfile(fileext = ".pdf")
+  on.exit(unlink(tmp))
+  plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE)
+  expect_true(file.exists(tmp))
+  expect_gt(file.size(tmp), 1000L)
+})
+
+test_that("[6] output_dir writes evaluation.pdf inside that directory", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  plot_results(EVAL_MINI, output_dir = tmp, verbose = FALSE)
+  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
+})
+
+test_that("[6] output_dir created when nested + missing", {
+  tmp <- file.path(tempfile(), "plots", "deep")
+  on.exit(unlink(dirname(dirname(tmp)), recursive = TRUE))
+  plot_results(EVAL_MINI, output_dir = tmp, verbose = FALSE)
+  expect_true(dir.exists(tmp))
+})
+
+test_that("[6] output_file takes precedence over output_dir", {
+  tmp_dir  <- tempfile(); dir.create(tmp_dir)
+  tmp_file <- tempfile(fileext = ".pdf")
+  on.exit({ unlink(tmp_dir, recursive = TRUE); unlink(tmp_file) })
+  plot_results(EVAL_MINI, output_file = tmp_file,
+               output_dir = tmp_dir, verbose = FALSE)
+  expect_true(file.exists(tmp_file))
+  expect_false(file.exists(file.path(tmp_dir, "evaluation.pdf")))
+})
+
+test_that("[6] save = FALSE does not write any file", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  plot_results(EVAL_MINI, output_dir = tmp,
+               save = FALSE, verbose = FALSE)
+  expect_length(list.files(tmp), 0L)
+})
+
+test_that("[6] save = TRUE (default) writes the PDF", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  plot_results(EVAL_MINI, output_dir = tmp,
+               save = TRUE, verbose = FALSE)
+  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
+})
+
+test_that("[6] methods = 'susie' only (subset of evaluated methods)", {
+  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
+  plot_results(EVAL_MINI, output_file = tmp,
+               methods = "susie", verbose = FALSE)
+  expect_true(file.exists(tmp))
+})
+
+test_that("[6] methods = c('susie', 'abf') includes both", {
+  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
+  plot_results(EVAL_MINI, output_file = tmp,
+               methods = c("susie", "abf"), verbose = FALSE)
+  expect_true(file.exists(tmp))
+})
+
+test_that("[6] methods subset to unknown name errors", {
+  expect_error(
+    plot_results(EVAL_MINI,
+                 output_file = tempfile(fileext = ".pdf"),
+                 methods = "notamethod", verbose = FALSE)
+  )
+})
+
+test_that("[6] verbose = FALSE produces no messages", {
+  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
+  out <- utils::capture.output(
+    plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE),
+    type = "message"
+  )
+  expect_length(out, 0L)
+})
+
+test_that("[6] verbose = TRUE prints section messages", {
+  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
+  out <- utils::capture.output(
+    plot_results(EVAL_MINI, output_file = tmp, verbose = TRUE),
+    type = "message"
+  )
+  expect_true(any(grepl("Global|Plotting|PDF", out)))
+})
+
+test_that("[6] return value is the resolved output path (invisibly)", {
+  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
+  ret <- plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE)
+  expect_true(is.character(ret))
+  expect_equal(ret, tmp)
+})
+
+test_that("[6] sparse_inf eval renders the by_p_causal section in the PDF", {
+  sim_inf <- run_simulation(
+    n_regions = 1, n = 80, p = 40,
+    n_iter = 2, S = 1, phi = 0.2,
+    model = "sparse_inf", p_causal = c(0.3, 0.7),
+    genetic_map_dir = "../../data/genetic_maps",
+    seed = 66, verbose = FALSE
+  )
+  res_inf <- run_methods(sim_inf, methods = "abf",
+                          save = FALSE, verbose = FALSE)
+  ev_inf  <- evaluate_methods(sim_inf, res_inf,
+                               save = FALSE, verbose = FALSE)
+
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  plot_results(ev_inf, output_dir = tmp, verbose = FALSE)
+  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
+})
