@@ -642,3 +642,415 @@ test_that("[2] truth carries all expected fields", {
                 "pve", "S", "phi", "model")
   expect_true(all(expected %in% names(PHENO_SMALL[[1]]$truth)))
 })
+
+
+# =============================================================================
+# SECTION 2b: simulate_genotypes - save / output_dir
+# =============================================================================
+
+test_that("[2b] save = FALSE writes no files", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_genotypes(n_regions = 1, n = 50, p = 30,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = 200, save = FALSE, output_dir = tmp,
+                     verbose = FALSE)
+  expect_length(list.files(tmp), 0L)
+})
+
+test_that("[2b] save = TRUE writes .rds file", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_genotypes(n_regions = 1, n = 50, p = 30,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = 201, save = TRUE, output_dir = tmp,
+                     verbose = FALSE)
+  expect_length(list.files(tmp, pattern = "[.]rds$"), 1L)
+})
+
+test_that("[2b] saved .rds is readable and has correct structure", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_genotypes(n_regions = 1, n = 50, p = 30,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = 202, save = TRUE, output_dir = tmp,
+                     verbose = FALSE)
+  f   <- list.files(tmp, pattern = "[.]rds$", full.names = TRUE)
+  obj <- readRDS(f)
+  expect_true(is.list(obj))
+  expect_false(is.null(obj[[1]]$X))
+})
+
+test_that("[2b] output_dir created if it does not exist", {
+  tmp <- file.path(tempfile(), "geno_out")
+  on.exit(unlink(dirname(tmp), recursive = TRUE))
+  simulate_genotypes(n_regions = 1, n = 50, p = 30,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = 203, save = TRUE, output_dir = tmp,
+                     verbose = FALSE)
+  expect_true(dir.exists(tmp))
+})
+
+test_that("[2b] filename encodes n_regions, n, p, seed", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_genotypes(n_regions = 2, n = 60, p = 35,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = 204, save = TRUE, output_dir = tmp,
+                     verbose = FALSE)
+  f <- list.files(tmp, pattern = "[.]rds$")
+  expect_match(f, "2regions")
+  expect_match(f, "n60")
+  expect_match(f, "p35")
+  expect_match(f, "seed204")
+})
+
+test_that("[2b] seed = NULL gives 'noseed' tag in filename", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_genotypes(n_regions = 1, n = 50, p = 30,
+                     genetic_map_dir = "../../data/genetic_maps",
+                     seed = NULL, save = TRUE, output_dir = tmp,
+                     verbose = FALSE)
+  expect_match(list.files(tmp, pattern = "[.]rds$"), "noseed")
+})
+
+
+# =============================================================================
+# SECTION 2c: simulate_phenotypes - save / output_dir
+# =============================================================================
+
+test_that("[2c] save = FALSE writes no files", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_phenotypes(GENO_SMALL, S = 1, phi = 0.2,
+                      seed = 300, save = FALSE, output_dir = tmp,
+                      verbose = FALSE)
+  expect_length(list.files(tmp), 0L)
+})
+
+test_that("[2c] save = TRUE writes .rds file", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_phenotypes(GENO_SMALL, S = 1, phi = 0.2,
+                      seed = 301, save = TRUE, output_dir = tmp,
+                      verbose = FALSE)
+  expect_length(list.files(tmp, pattern = "[.]rds$"), 1L)
+})
+
+test_that("[2c] saved .rds has y, z, truth fields", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_phenotypes(GENO_SMALL, S = 1, phi = 0.2,
+                      seed = 302, save = TRUE, output_dir = tmp,
+                      verbose = FALSE)
+  f   <- list.files(tmp, pattern = "[.]rds$", full.names = TRUE)
+  obj <- readRDS(f)
+  expect_true(all(c("y", "z", "truth") %in% names(obj[[1]])))
+})
+
+test_that("[2c] output_dir created if it does not exist", {
+  tmp <- file.path(tempfile(), "pheno_out")
+  on.exit(unlink(dirname(tmp), recursive = TRUE))
+  simulate_phenotypes(GENO_SMALL, S = 1, phi = 0.2,
+                      seed = 303, save = TRUE, output_dir = tmp,
+                      verbose = FALSE)
+  expect_true(dir.exists(tmp))
+})
+
+test_that("[2c] filename encodes model, S, phi, seed", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  simulate_phenotypes(GENO_SMALL, S = 2, phi = 0.3,
+                      model = "sparse", seed = 304,
+                      save = TRUE, output_dir = tmp, verbose = FALSE)
+  f <- list.files(tmp, pattern = "[.]rds$")
+  expect_match(f, "sparse")
+  expect_match(f, "S2")
+  expect_match(f, "phi0.3")
+  expect_match(f, "seed304")
+})
+
+
+# =============================================================================
+# SECTION 3: run_simulation
+# =============================================================================
+
+test_that("[3] n_iter = 1 produces a single scenario", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 1, verbose = FALSE)
+  expect_length(r$scenarios, 1L)
+})
+
+test_that("[3] n_iter = 3 produces three scenarios", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 3, S = 1, phi = 0.2,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 2, verbose = FALSE)
+  expect_length(r$scenarios, 3L)
+})
+
+test_that("[3] S vector sweeps correctly", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = c(1, 2), phi = 0.2,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 3, verbose = FALSE)
+  expect_length(r$scenarios, 2L)
+  S_vals <- sapply(r$scenarios, `[[`, "S")
+  expect_equal(sort(S_vals), c(1L, 2L))
+})
+
+test_that("[3] phi vector sweeps correctly", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = c(0.2, 0.4),
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 4, verbose = FALSE)
+  expect_length(r$scenarios, 2L)
+  phi_vals <- sapply(r$scenarios, `[[`, "phi")
+  expect_equal(sort(phi_vals), c(0.2, 0.4))
+})
+
+test_that("[3] model = 'sparse' recorded in params", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      model = "sparse",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 5, verbose = FALSE)
+  expect_equal(r$params$model, "sparse")
+})
+
+test_that("[3] model = 'sparse_inf' sweeps p_causal", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      model = "sparse_inf", p_causal = c(0.2, 0.5),
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 6, verbose = FALSE)
+  expect_length(r$scenarios, 2L)
+  expect_equal(r$params$model, "sparse_inf")
+})
+
+test_that("[3] inf_model = 'beatrice' accepted in sparse_inf", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      model = "sparse_inf", p_causal = 0.5,
+                      inf_model = "beatrice",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 7, verbose = FALSE)
+  expect_equal(r$params$inf_model, "beatrice")
+})
+
+test_that("[3] inf_model = 'susie_inf' accepted in sparse_inf", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      model = "sparse_inf", p_causal = 0.5,
+                      inf_model = "susie_inf",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 8, verbose = FALSE)
+  expect_equal(r$params$inf_model, "susie_inf")
+})
+
+test_that("[3] effect_distribution = 'normal' recorded in params", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      effect_distribution = "normal",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 9, verbose = FALSE)
+  expect_equal(r$params$effect_distribution, "normal")
+})
+
+test_that("[3] effect_distribution = 'equal' recorded", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      effect_distribution = "equal",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 10, verbose = FALSE)
+  expect_equal(r$params$effect_distribution, "equal")
+})
+
+test_that("[3] effect_variance = 0.5 recorded", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      effect_variance = 0.5,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 11, verbose = FALSE)
+  expect_equal(r$params$effect_variance, 0.5)
+})
+
+test_that("[3] annotations = 'none' produces NULL annotation matrix", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      annotations = "none",
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 12, verbose = FALSE)
+  expect_null(r$scenarios[[1]]$regions[[1]]$annotations_matrix)
+})
+
+test_that("[3] annotations = 'binary' with n_annotations = 2", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      annotations = "binary", n_annotations = 2,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 13, verbose = FALSE)
+  A <- r$scenarios[[1]]$regions[[1]]$annotations_matrix
+  expect_false(is.null(A))
+  expect_equal(ncol(A), 2L)
+})
+
+test_that("[3] annotations = 'continuous' with n_annotations = 3", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      annotations = "continuous", n_annotations = 3,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 14, verbose = FALSE)
+  A <- r$scenarios[[1]]$regions[[1]]$annotations_matrix
+  expect_false(is.null(A))
+  expect_equal(ncol(A), 3L)
+})
+
+test_that("[3] annotation_proportions scalar passed through", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      annotations = "binary", n_annotations = 2,
+                      annotation_proportions = 0.15,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 15, verbose = FALSE)
+  expect_equal(r$params$annotation_proportions, 0.15)
+})
+
+test_that("[3] enrichment scalar passed through", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      annotations = "binary", n_annotations = 2,
+                      enrichment = 4,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 16, verbose = FALSE)
+  expect_equal(r$params$enrichment, 4)
+})
+
+test_that("[3] vcf_dir missing directory errors", {
+  expect_error(
+    run_simulation(n_regions = 1, n = 80, p = 40,
+                   n_iter = 1, S = 1, phi = 0.2,
+                   vcf_dir = "/nonexistent/dir",
+                   genetic_map_dir = "../../data/genetic_maps",
+                   seed = 17, verbose = FALSE)
+  )
+})
+
+test_that("[3] vcf_files = single VCF path used for all regions", {
+  vcf <- system.file("examples", "region.vcf.gz", package = "sim1000G")
+  r <- run_simulation(n_regions = 2, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      vcf_files = vcf,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 18, verbose = FALSE)
+  expect_length(r$genotypes, 2L)
+})
+
+test_that("[3] min_maf = 0.05 passed to simulate_genotypes", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      min_maf = 0.05,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 19, verbose = FALSE)
+  expect_equal(r$params$min_maf, 0.05)
+})
+
+test_that("[3] max_maf = 0.4 passed to simulate_genotypes", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      max_maf = 0.4,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 20, verbose = FALSE)
+  expect_false(is.null(r$genotypes[[1]]$X))
+})
+
+test_that("[3] standardise = FALSE returns raw 0/1/2 genotypes", {
+  r <- run_simulation(n_regions = 1, n = 80, p = 40,
+                      n_iter = 1, S = 1, phi = 0.2,
+                      standardise = FALSE,
+                      genetic_map_dir = "../../data/genetic_maps",
+                      seed = 21, verbose = FALSE)
+  vals <- unique(as.vector(r$genotypes[[1]]$X))
+  expect_true(all(vals %in% c(0, 1, 2)))
+})
+
+test_that("[3] seed = 42 ensures reproducibility", {
+  r1 <- run_simulation(n_regions = 1, n = 80, p = 40,
+                       n_iter = 1, S = 1, phi = 0.2,
+                       genetic_map_dir = "../../data/genetic_maps",
+                       seed = 42, verbose = FALSE)
+  r2 <- run_simulation(n_regions = 1, n = 80, p = 40,
+                       n_iter = 1, S = 1, phi = 0.2,
+                       genetic_map_dir = "../../data/genetic_maps",
+                       seed = 42, verbose = FALSE)
+  expect_identical(r1$genotypes[[1]]$X, r2$genotypes[[1]]$X)
+})
+
+test_that("[3] save = TRUE writes .rds file", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  run_simulation(n_regions = 1, n = 80, p = 40,
+                 n_iter = 1, S = 1, phi = 0.2,
+                 genetic_map_dir = "../../data/genetic_maps",
+                 seed = 99, save = TRUE, output_dir = tmp,
+                 verbose = FALSE)
+  expect_length(list.files(tmp, pattern = "[.]rds$"), 1L)
+})
+
+test_that("[3] save = FALSE writes no files", {
+  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
+  run_simulation(n_regions = 1, n = 80, p = 40,
+                 n_iter = 1, S = 1, phi = 0.2,
+                 genetic_map_dir = "../../data/genetic_maps",
+                 seed = 100, save = FALSE, output_dir = tmp,
+                 verbose = FALSE)
+  expect_length(list.files(tmp), 0L)
+})
+
+test_that("[3] output_dir is created when nested + missing", {
+  tmp <- file.path(tempfile(), "deep", "nested")
+  on.exit(unlink(dirname(dirname(tmp)), recursive = TRUE))
+  run_simulation(n_regions = 1, n = 80, p = 40,
+                 n_iter = 1, S = 1, phi = 0.2,
+                 genetic_map_dir = "../../data/genetic_maps",
+                 seed = 101, save = TRUE, output_dir = tmp,
+                 verbose = FALSE)
+  expect_true(dir.exists(tmp))
+})
+
+test_that("[3] verbose = FALSE suppresses messages", {
+  out <- utils::capture.output(
+    run_simulation(n_regions = 1, n = 80, p = 40,
+                   n_iter = 1, S = 1, phi = 0.2,
+                   genetic_map_dir = "../../data/genetic_maps",
+                   seed = 102, verbose = FALSE),
+    type = "message"
+  )
+  expect_length(out, 0L)
+})
+
+test_that("[3] return value carries genotypes, scenarios, params", {
+  expect_true(all(c("genotypes", "scenarios", "params") %in% names(SIM_MINI)))
+})
+
+test_that("[3] scenarios carry all expected fields", {
+  expected <- c("scenario_id", "S", "phi", "p_causal", "iter", "model", "regions")
+  expect_true(all(expected %in% names(SIM_MINI$scenarios[[1]])))
+})
+
+test_that("[3] params records all key settings", {
+  expected <- c("n_regions", "n", "p", "n_iter", "S_values", "phi_values",
+                "model", "seed")
+  expect_true(all(expected %in% names(SIM_MINI$params)))
+})
+
+test_that("[3] n_iter = 0 errors (must be positive)", {
+  expect_error(
+    run_simulation(n_regions = 1, n = 80, p = 40,
+                   n_iter = 0, S = 1, phi = 0.2,
+                   genetic_map_dir = "../../data/genetic_maps",
+                   verbose = FALSE)
+  )
+})
+
+test_that("[3] phi outside (0,1) errors", {
+  expect_error(
+    run_simulation(n_regions = 1, n = 80, p = 40,
+                   n_iter = 1, S = 1, phi = 1.5,
+                   genetic_map_dir = "../../data/genetic_maps",
+                   verbose = FALSE)
+  )
+})
