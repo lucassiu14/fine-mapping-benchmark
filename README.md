@@ -70,7 +70,7 @@ The binary is downloaded automatically the first time you call
 `setup_finemap()`:
 
 ```r
-source("R/wrappers/finemap.R")
+source("R/wrapper_finemap.R")
 fp <- setup_finemap()   # downloads to R user cache dir; returns path
 ```
 
@@ -88,7 +88,7 @@ conda install -c bioconda paintor
 Then in R:
 
 ```r
-source("R/wrappers/paintor.R")
+source("R/wrapper_paintor.R")
 pp <- setup_paintor()   # finds PAINTOR on PATH
 ```
 
@@ -156,10 +156,10 @@ Then either:
 
 ```bash
 # 50 diverse 300 kb regions (per-locus benchmark; ~150 MB)
-Rscript scripts/prepare_vcfs.R
+Rscript inst/scripts/prepare_vcfs.R
 
 # OR 128 genome-wide regions (genome-wide benchmark; ~400 MB)
-Rscript scripts/prepare_gwfm_vcfs.R
+Rscript inst/scripts/prepare_gwfm_vcfs.R
 ```
 
 Each script streams the requested windows from the 1000 Genomes EBI FTP via
@@ -176,8 +176,8 @@ source("R/run_simulation.R")
 source("R/run_methods.R")
 source("R/evaluate.R")
 source("R/plot_results.R")
-source("R/wrappers/susie.R")
-source("R/wrappers/abf.R")
+source("R/wrapper_susie.R")
+source("R/wrapper_abf.R")
 
 # 1. Simulate genotypes + phenotypes across a parameter grid
 sim <- run_simulation(
@@ -255,8 +255,10 @@ and reported in the results summary. They do not crash the pipeline.
 
 ```
 fine-mapping-benchmark/
+├── DESCRIPTION                 # R package metadata
+├── NAMESPACE                   # Exported functions
 ├── R/
-│   ├── utils.R                 # Shared helpers (sourced first)
+│   ├── utils.R                 # Shared helpers (%||%, fmb_extdata)
 │   ├── simulate_genotypes.R    # Per-locus genotype simulation (sim1000G + 1000G haplotypes)
 │   ├── simulate_phenotypes.R   # Per-locus phenotype simulation (sparse / sparse+inf)
 │   ├── simulate_gwfm_data.R    # Genome-wide simulation (shared y across regions)
@@ -264,30 +266,33 @@ fine-mapping-benchmark/
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
 │   ├── plot_results.R          # Generates multi-page PDF plots
-│   └── wrappers/               # One file per method
-│       ├── susie.R
-│       ├── susie_inf.R
-│       ├── abf.R
-│       ├── carma.R
-│       ├── finemap.R
-│       ├── paintor.R
-│       ├── funmap.R
-│       ├── beatrice.R
-│       └── functional_beatrice.R
+│   └── wrapper_*.R             # One file per method (wrapper_susie.R, wrapper_finemap.R,
+│                               #   wrapper_abf.R, wrapper_carma.R, wrapper_paintor.R,
+│                               #   wrapper_funmap.R, wrapper_beatrice.R,
+│                               #   wrapper_functional_beatrice.R, wrapper_susie_inf.R,
+│                               #   wrapper_marginal_z.R, wrapper_polyfun_oracle.R,
+│                               #   wrapper_polyfun_est.R, wrapper_sparsepro.R)
+├── inst/
+│   ├── CITATION                # Package citation
+│   ├── extdata/                # Bundled region tables (ship with the package)
+│   │   ├── regions.csv                  # 50 per-locus regions (prepare_vcfs.R)
+│   │   ├── gwfm_regions.csv             # 128 genome-wide regions (prepare_gwfm_vcfs.R)
+│   │   └── gwfm_regions_ldetect_EUR.csv # ~1,703 LDetect EUR blocks (download_ldetect_regions.R)
+│   └── scripts/                # Maintainer data-prep utilities
+│       ├── prepare_vcfs.R               # Download VCFs for the 50 per-locus regions
+│       ├── prepare_gwfm_vcfs.R          # Download VCFs for the 128 genome-wide regions
+│       └── download_ldetect_regions.R   # (Optional) fetch LDetect block partition + VCFs
+├── tests/
+│   ├── testthat.R              # testthat entry point (R CMD check)
+│   └── testthat/               # test-pipeline.R, test-evaluate.R, test-comprehensive.R
+├── vignettes/
+│   └── getting-started.Rmd     # Quick-start vignette
 ├── BEATRICE_annot_sparse/      # Functional BEATRICE source (Python + training scripts)
-├── data/
-│   ├── regions.csv                  # 50 per-locus regions (prepare_vcfs.R)
-│   ├── gwfm_regions.csv             # 128 genome-wide regions (prepare_gwfm_vcfs.R)
-│   ├── gwfm_regions_ldetect_EUR.csv # ~1,703 LDetect EUR blocks (download_ldetect_regions.R)
-│   ├── vcf/                         # Downloaded 1000G VCF slices for per-locus regions
-│   └── genetic_maps/                # Cached HapMap GRCh37 maps (auto-downloaded)
+├── data/                       # Working caches (gitignored; not part of the package)
+│   ├── vcf/                    # Downloaded 1000G VCF slices for per-locus regions
+│   ├── gwfm_vcf/               # Downloaded 1000G VCF slices for genome-wide regions
+│   └── genetic_maps/           # Cached HapMap GRCh37 maps (auto-downloaded)
 ├── scripts/
-│   ├── prepare_vcfs.R               # Download VCFs for the 50 per-locus regions
-│   ├── prepare_gwfm_vcfs.R          # Download VCFs for the 128 genome-wide regions
-│   ├── download_ldetect_regions.R   # (Optional) fetch LDetect block partition + VCFs
-│   ├── test_pipeline.R              # End-to-end pipeline test (all methods)
-│   ├── test_evaluate.R              # Unit tests for evaluation module
-│   ├── test_comprehensive.R         # Argument-level tests for all functions
 │   └── hpc/                         # SLURM job array for the benchmark
 │       ├── generate_params_grid.R   # Build params_grid.csv (40 jobs)
 │       ├── params_grid.csv          # One row per HPC array task
@@ -298,8 +303,9 @@ fine-mapping-benchmark/
 ├── docs/
 │   ├── methods.md                       # Method descriptions and wrapper API
 │   ├── evaluation.md                    # Evaluation metrics: formulas and implementation
-│   ├── gw_simulation_documentation.md   # Technical spec of genome-wide simulation
-│   └── testing_report.md                # Auto-generated argument-level test report
+│   └── gw_simulation_documentation.md   # Technical spec of genome-wide simulation
+├── LICENSE                     # MIT license
+├── CITATION.cff                # Citation File Format metadata
 ├── environment.yml             # conda environment for Funmap + BEATRICE
 ├── renv.lock                   # R package lockfile (use renv::restore())
 └── README.md
@@ -465,7 +471,7 @@ sim <- run_simulation(
 | `n_annotations` | integer ≥ 1 | `3` | Number of annotation columns |
 | `annotation_proportions` | numeric, vector, or `NULL` | `NULL` | Proportion of 1s per binary annotation (scalar or per-annotation vector) |
 | `enrichment` | numeric, vector, or `NULL` | `NULL` | Fold-enrichment per annotation for causal selection |
-| `vcf_dir` | character or `NULL` | `NULL` | Directory of VCF files from `scripts/prepare_vcfs.R`. `n_regions` files are sampled at random (reproducibly if `seed` is set) |
+| `vcf_dir` | character or `NULL` | `NULL` | Directory of VCF files from `inst/scripts/prepare_vcfs.R`. `n_regions` files are sampled at random (reproducibly if `seed` is set) |
 | `vcf_files` | character vector or `NULL` | `NULL` | Explicit VCF paths; overrides `vcf_dir` when supplied |
 | `genetic_map_dir` | character or `NULL` | `"data/genetic_maps"` | Cache directory for HapMap genetic maps |
 | `min_maf` | numeric | `0.01` | Minimum MAF filter |
@@ -631,7 +637,7 @@ See [`docs/evaluation.md`](docs/evaluation.md) for full details.
 
 ## Adding a new method
 
-1. Create `R/wrappers/mymethod.R` with a `run_mymethod_region(region_geno, region_pheno, ...)` function.
+1. Create `R/wrapper_mymethod.R` with a `run_mymethod_region(region_geno, region_pheno, ...)` function.
 2. Return a named list with at minimum: `pip` (numeric vector, length p), `credible_sets` (list of integer vectors), `method`, `input_type`, `params`, `runtime_seconds`, `additional`.
 3. Register the method in `R/run_methods.R` in `.FM_REGISTRY`.
 4. Add a `setup_mymethod()` function if external dependencies are required.
@@ -640,26 +646,35 @@ See [`docs/methods.md`](docs/methods.md) for the full wrapper API specification.
 
 ## Testing
 
-Three test scripts are provided:
+The package uses [testthat](https://testthat.r-lib.org/). Tests live under
+`tests/testthat/`:
 
-| Script | Coverage | Tests |
-|--------|----------|-------|
-| `scripts/test_comprehensive.R` | Every argument of every public function | 201 PASS / 2 SKIP |
-| `scripts/test_evaluate.R` | Evaluation module unit tests | 125 PASS |
-| `scripts/test_pipeline.R` | End-to-end pipeline (all methods) | Informational |
+| File | Coverage |
+|------|----------|
+| `test-comprehensive.R` | Every argument of every public function |
+| `test-evaluate.R` | Evaluation module unit tests |
+| `test-pipeline.R` | End-to-end pipeline (simulate → run → evaluate → plot) |
 
-Run any test from the project root:
+Run the full suite from the package root. `devtools::test()` is the most
+convenient entry point (it loads the package and sets `NOT_CRAN` so the
+network-backed tests run):
 
-```bash
-Rscript scripts/test_comprehensive.R
+```r
+devtools::test()
 ```
 
-The 2 SKIPs in `test_comprehensive.R` are the FINEMAP and PAINTOR binary tests,
-which require external binaries unavailable on Apple Silicon without additional setup
-(see method-specific setup above).
+Without devtools, load the package and point testthat at the test directory:
 
-A human-readable argument-level test report is generated automatically at
-[`docs/testing_report.md`](docs/testing_report.md).
+```r
+pkgload::load_all()
+Sys.setenv(NOT_CRAN = "true")          # also run the VCF/genetic-map tests
+testthat::test_dir("tests/testthat")
+```
+
+Some tests skip automatically when a dependency is absent: the FINEMAP and
+PAINTOR binary tests (external binaries) and the SparsePro real-install tests.
+The end-to-end pipeline test skips on CRAN because the simulator may download a
+HapMap genetic map from GitHub on first use.
 
 ## Genome-wide simulation
 

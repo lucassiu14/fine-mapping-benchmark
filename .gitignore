@@ -60,12 +60,15 @@ results/
 # Claude Code settings (local only)
 .claude/
 
-# Downloaded 1000 Genomes VCF files (regenerate with scripts/prepare_vcfs.R)
+# Downloaded 1000 Genomes VCF files (regenerate with inst/scripts/prepare_vcfs.R)
 data/vcf/*.vcf.gz
 data/vcf/*.vcf.gz.tbi
 
 # Cached HapMap GRCh37 genetic maps (downloaded automatically by sim1000G)
 data/genetic_maps/*.txt.gz
+
+# sim1000G cache written when tests run with cwd = tests/testthat/
+tests/testthat/data/
 
 # CARMA writes per-locus working files to the current directory
 post_locus_*

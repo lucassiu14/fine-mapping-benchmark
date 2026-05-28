@@ -81,9 +81,9 @@ source("R/run_simulation.R")
 source("R/run_methods.R")
 source("R/evaluate.R")
 source("R/plot_results.R")
-source("R/wrappers/susie.R")
-source("R/wrappers/abf.R")
-source("R/wrappers/marginal_z.R")
+source("R/wrapper_susie.R")
+source("R/wrapper_abf.R")
+source("R/wrapper_marginal_z.R")
 ```
 
 > **Note on paths.** All chunks in this vignette run from the **project
@@ -343,7 +343,7 @@ sapply(eval$susie$by_causal_maf, function(x) round(x$auprc, 3))
 
 > **Why only one bin here?** The bundled `sim1000G` VCF contains only common
 > variants (MAF > 0.05), so all causals fall in the `"common"` bin. With the
-> real 1000G windows downloaded by `scripts/prepare_vcfs.R` (or your own
+> real 1000G windows downloaded by `inst/scripts/prepare_vcfs.R` (or your own
 > VCFs), the `"rare"` and `"low"` bins start to appear.
 
 Other axes available: `by_phi`, `by_p_causal` (sparse_inf simulations only),

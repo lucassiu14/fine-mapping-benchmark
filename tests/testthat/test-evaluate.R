@@ -4,9 +4,9 @@
 # Comprehensive testthat coverage of the full benchmark pipeline:
 #   simulate -> run_methods -> evaluate_methods -> plot_results
 #
-# Translated from scripts/test_evaluate.R as part of Phase 3b-ii bulk.
-# The original script is kept on disk for now; 3b-iii decides whether to
-# move it under inst/scripts/ or delete it.
+# Translated from the former scripts/test_evaluate.R during the Phase
+# 3b-ii bulk conversion; that original script was removed in Phase
+# 3b-iii once this testthat version superseded it.
 #
 # Coverage (mirrors the original section labels):
 #   [A] Sparse model, pure-R methods (susie, susie_inf, abf, carma)

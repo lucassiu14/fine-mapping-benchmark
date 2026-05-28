@@ -46,7 +46,7 @@ The key structural difference from the locus-based pipeline (`run_simulation`) i
 
 ### 3.1 Region set
 
-The default region set (`regions = "representative"`) consists of **128 pre-defined 300 kb windows** spread across all 22 autosomes, stored in `data/gwfm_regions.csv`. The number of regions per chromosome is approximately proportional to chromosome length (roughly 3–10 per chromosome).
+The default region set (`regions = "representative"`) consists of **128 pre-defined 300 kb windows** spread across all 22 autosomes, bundled with the package as `inst/extdata/gwfm_regions.csv`. The number of regions per chromosome is approximately proportional to chromosome length (roughly 3–10 per chromosome).
 
 Regions were selected to satisfy the following criteria:
 
@@ -67,7 +67,7 @@ http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/release/20130502/
 ALL.chr{CHR}.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz
 ```
 
-The script `scripts/prepare_gwfm_vcfs.R` uses `tabix` to stream precisely the 300 kb window for each region from the remote VCF — no whole-chromosome download is required. Each extracted file is stored as a bgzipped, tabix-indexed VCF in `data/gwfm_vcf/<region_id>.vcf.gz`. The total size across all 128 regions is approximately 400 MB.
+The script `inst/scripts/prepare_gwfm_vcfs.R` uses `tabix` to stream precisely the 300 kb window for each region from the remote VCF — no whole-chromosome download is required. Each extracted file is stored as a bgzipped, tabix-indexed VCF in `data/gwfm_vcf/<region_id>.vcf.gz`. The total size across all 128 regions is approximately 400 MB.
 
 ---
 
@@ -499,7 +499,7 @@ Subsampling is **stratified by chromosome**: for chromosome $c$ with $n_c$ regio
 **Combining `regions` and `coverage`:** use `regions` to select the upper bound (which region set to load) and `coverage` to select the density within that set. For example, to use 20% of the full LDetect EUR partition:
 
 ```r
-ldetect <- read.csv("data/gwfm_regions_ldetect_EUR.csv")
+ldetect <- read.csv(system.file("extdata", "gwfm_regions_ldetect_EUR.csv", package = "fmbenchmark"))
 sim <- simulate_gwfm_data(
   n       = 2000,
   regions = ldetect,
@@ -511,10 +511,10 @@ sim <- simulate_gwfm_data(
 
 ### 14.4 Downloading the bundled region set VCFs (128 regions, ~400 MB)
 
-Run once from the project root. Requires `tabix` and `bgzip` (install via `brew install htslib` on macOS or `conda install -c bioconda htslib`):
+Run once from the project root (source checkout). Requires `tabix` and `bgzip` (install via `brew install htslib` on macOS or `conda install -c bioconda htslib`):
 
 ```bash
-Rscript scripts/prepare_gwfm_vcfs.R
+Rscript inst/scripts/prepare_gwfm_vcfs.R
 ```
 
 This streams 128 × 300 kb windows from the 1000 Genomes Phase 3 FTP server using tabix, compresses them with bgzip, and saves them to `data/gwfm_vcf/`. No full chromosome is downloaded.
@@ -537,25 +537,25 @@ Available partitions:
 
 ```bash
 # Edit POPULATION <- "EUR" (or "AFR"/"ASN") in the script first
-Rscript scripts/download_ldetect_regions.R
+Rscript inst/scripts/download_ldetect_regions.R
 ```
 
-This produces `data/gwfm_regions_ldetect_EUR.csv` (same format as `data/gwfm_regions.csv`). Each block's central 300 kb window is extracted as the simulation region.
+This produces `inst/extdata/gwfm_regions_ldetect_EUR.csv` (same format as `inst/extdata/gwfm_regions.csv`). Each block's central 300 kb window is extracted as the simulation region.
 
 **Step 2 — Download VCF files** (slow, ~5 GB, run only when needed):
 
 Either set `DOWNLOAD_VCFS <- TRUE` inside `download_ldetect_regions.R` and re-run, or adapt `prepare_gwfm_vcfs.R` to point at the LDetect CSV:
 
 ```r
-# In scripts/prepare_gwfm_vcfs.R, change:
-REGIONS <- "data/gwfm_regions_ldetect_EUR.csv"
+# In inst/scripts/prepare_gwfm_vcfs.R, change:
+REGIONS <- find_extdata("gwfm_regions_ldetect_EUR.csv")
 VCF_DIR <- "data/gwfm_vcf_ldetect_EUR"
 ```
 
 Then:
 
 ```bash
-Rscript scripts/prepare_gwfm_vcfs.R
+Rscript inst/scripts/prepare_gwfm_vcfs.R
 ```
 
 The VCF download can be interrupted and resumed — already-downloaded files are skipped unless `OVERWRITE <- TRUE`.

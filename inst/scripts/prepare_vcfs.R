@@ -1,7 +1,8 @@
 # =============================================================================
-# scripts/prepare_vcfs.R
+# inst/scripts/prepare_vcfs.R
 #
-# Download VCF files for the 50 benchmark regions defined in data/regions.csv.
+# Download VCF files for the 50 benchmark regions defined in the bundled
+# inst/extdata/regions.csv.
 #
 # Uses tabix to stream specific genomic windows from the 1000 Genomes Phase 3
 # remote VCF files — no whole-chromosome download required.
@@ -14,12 +15,15 @@
 # Requirements:
 #   - tabix and bgzip (install via: brew install htslib  OR  conda install -c bioconda htslib)
 #
-# Usage (from project root):
-#   Rscript scripts/prepare_vcfs.R
+# Usage:
+#   # From a source checkout (project root):
+#   Rscript inst/scripts/prepare_vcfs.R
+#   # From an installed package:
+#   Rscript "$(Rscript -e 'cat(system.file("scripts/prepare_vcfs.R", package = "fmbenchmark"))')"
 #
 # Optional arguments (set before sourcing or edit below):
 #   VCF_DIR   where to save VCF files   (default: "data/vcf")
-#   REGIONS   path to regions CSV file  (default: "data/regions.csv")
+#   REGIONS   path to regions CSV file  (default: bundled inst/extdata/regions.csv)
 #   OVERWRITE if TRUE, re-download existing files (default: FALSE)
 #
 # Output:
@@ -31,8 +35,25 @@
 # Total download: ~150 MB across all 50 regions.
 # =============================================================================
 
+# Locate a file bundled under inst/extdata/. Mirrors the package's internal
+# fmb_extdata() helper, but inlined so this script runs standalone (no
+# library(fmbenchmark) required). Resolution order: installed package, then
+# the inst/extdata/ sibling of this script, then inst/extdata/ under cwd.
+find_extdata <- function(filename) {
+  p <- system.file("extdata", filename, package = "fmbenchmark")
+  if (nzchar(p) && file.exists(p)) return(p)
+  this_file  <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+  script_dir <- if (length(this_file)) dirname(normalizePath(this_file)) else getwd()
+  candidates <- c(
+    file.path(script_dir, "..", "extdata", filename),  # inst/scripts -> inst/extdata
+    file.path("inst", "extdata", filename)              # run from project root
+  )
+  for (cand in candidates) if (file.exists(cand)) return(normalizePath(cand))
+  stop("Could not locate bundled file 'inst/extdata/", filename, "'.", call. = FALSE)
+}
+
 VCF_DIR   <- "data/vcf"
-REGIONS   <- "data/regions.csv"
+REGIONS   <- find_extdata("regions.csv")
 OVERWRITE <- FALSE
 
 # 1000 Genomes Phase 3 remote VCF URL pattern (GRCh37, all populations)
