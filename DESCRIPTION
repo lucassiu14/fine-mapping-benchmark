@@ -42,8 +42,8 @@ Suggests:
     testthat (>= 3.0.0),
     yaml
 Remotes:
-    hapsim=url::https://cran.r-project.org/src/contrib/Archive/hapsim/hapsim_0.31.tar.gz,
-    sim1000G=url::https://cran.r-project.org/src/contrib/Archive/sim1000G/sim1000G_1.40.tar.gz,
+    cran/hapsim,
+    cran/sim1000G,
     stephenslab/susieR
 SystemRequirements: htslib (>= 1.0) for tabix and bgzip; required by the
     scripts that download 1000 Genomes Phase 3 VCF windows.
