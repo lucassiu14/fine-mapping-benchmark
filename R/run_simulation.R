@@ -239,7 +239,8 @@ run_simulation <- function(n_regions = 3,
     if (length(available) == 0) {
       stop(
         "No .vcf.gz files found in vcf_dir: ", vcf_dir, "\n",
-        "Run scripts/prepare_vcfs.R first.",
+        "Run inst/scripts/prepare_vcfs.R (development checkout) or ",
+        "system.file(\"scripts/prepare_vcfs.R\", package = \"fmbenchmark\") first.",
         call. = FALSE
       )
     }
@@ -249,8 +250,8 @@ run_simulation <- function(n_regions = 3,
           "vcf_dir contains %d VCF file(s) but n_regions = %d. ",
           length(available), n_regions
         ),
-        "Add more regions to data/regions.csv and re-run scripts/prepare_vcfs.R,",
-        " or reduce n_regions.",
+        "Add more regions to inst/extdata/regions.csv and re-run ",
+        "inst/scripts/prepare_vcfs.R, or reduce n_regions.",
         call. = FALSE
       )
     }

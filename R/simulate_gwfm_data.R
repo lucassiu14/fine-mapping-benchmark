@@ -69,12 +69,12 @@
 #'   annotation for causal variant selection. If NULL, drawn from
 #'   Uniform(2, 10). Values must be > 0. Default: NULL.
 #' @param regions Character or data frame. \code{"representative"} loads the
-#'   128 bundled genome-wide LD blocks from \code{data/gwfm_regions.csv}.
+#'   128 bundled genome-wide LD blocks from \code{inst/extdata/gwfm_regions.csv}.
 #'   A chromosome name (e.g. \code{"chr1"} or \code{"1"}) loads only blocks
 #'   from that chromosome (useful for small-scale testing). A data frame with
 #'   columns \code{region_id}, \code{chrom}, \code{start}, \code{end} uses
 #'   user-supplied coordinates (e.g. a full LDetect partition loaded from
-#'   \code{data/gwfm_regions_ldetect_EUR.csv}). Default: \code{"representative"}.
+#'   \code{inst/extdata/gwfm_regions_ldetect_EUR.csv}). Default: \code{"representative"}.
 #' @param coverage Numeric in \code{(0, 1]}. Fraction of the loaded region set
 #'   to use. Regions are subsampled \emph{proportionally within each chromosome}
 #'   so that genome-wide spread is preserved at all coverage levels. For each
@@ -738,20 +738,8 @@ gwfm_load_regions <- function(regions) {
     )
   }
 
-  # Load the bundled gwfm_regions.csv
-  bundled <- system.file("data/gwfm_regions.csv", package = "finemapbenchmark")
-  if (!file.exists(bundled)) {
-    # Fallback for development (running from project root)
-    bundled <- "data/gwfm_regions.csv"
-  }
-  if (!file.exists(bundled)) {
-    stop(
-      "Cannot find data/gwfm_regions.csv. ",
-      "Ensure the file exists in the project data/ directory.",
-      call. = FALSE
-    )
-  }
-
+  # Load the bundled gwfm_regions.csv (ships under inst/extdata/)
+  bundled <- fmb_extdata("gwfm_regions.csv")
   all_regions <- read.csv(bundled, stringsAsFactors = FALSE)
 
   if (regions == "representative") {
@@ -773,7 +761,7 @@ gwfm_load_regions <- function(regions) {
   if (nrow(subset_df) == 0) {
     stop(
       "No regions found for chromosome ", chrom_query,
-      " in data/gwfm_regions.csv.",
+      " in the bundled inst/extdata/gwfm_regions.csv.",
       call. = FALSE
     )
   }
