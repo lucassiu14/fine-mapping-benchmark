@@ -640,26 +640,35 @@ See [`docs/methods.md`](docs/methods.md) for the full wrapper API specification.
 
 ## Testing
 
-Three test scripts are provided:
+The package uses [testthat](https://testthat.r-lib.org/). Tests live under
+`tests/testthat/`:
 
-| Script | Coverage | Tests |
-|--------|----------|-------|
-| `scripts/test_comprehensive.R` | Every argument of every public function | 201 PASS / 2 SKIP |
-| `scripts/test_evaluate.R` | Evaluation module unit tests | 125 PASS |
-| `scripts/test_pipeline.R` | End-to-end pipeline (all methods) | Informational |
+| File | Coverage |
+|------|----------|
+| `test-comprehensive.R` | Every argument of every public function |
+| `test-evaluate.R` | Evaluation module unit tests |
+| `test-pipeline.R` | End-to-end pipeline (simulate → run → evaluate → plot) |
 
-Run any test from the project root:
+Run the full suite from the package root. `devtools::test()` is the most
+convenient entry point (it loads the package and sets `NOT_CRAN` so the
+network-backed tests run):
 
-```bash
-Rscript scripts/test_comprehensive.R
+```r
+devtools::test()
 ```
 
-The 2 SKIPs in `test_comprehensive.R` are the FINEMAP and PAINTOR binary tests,
-which require external binaries unavailable on Apple Silicon without additional setup
-(see method-specific setup above).
+Without devtools, load the package and point testthat at the test directory:
 
-A human-readable argument-level test report is generated automatically at
-[`docs/testing_report.md`](docs/testing_report.md).
+```r
+pkgload::load_all()
+Sys.setenv(NOT_CRAN = "true")          # also run the VCF/genetic-map tests
+testthat::test_dir("tests/testthat")
+```
+
+Some tests skip automatically when a dependency is absent: the FINEMAP and
+PAINTOR binary tests (external binaries) and the SparsePro real-install tests.
+The end-to-end pipeline test skips on CRAN because the simulator may download a
+HapMap genetic map from GitHub on first use.
 
 ## Genome-wide simulation
 
