@@ -1641,37 +1641,44 @@ test_that("[9] susie_inf: pip in [0, 1]", {
 # =============================================================================
 
 test_that("[10] carma: rho.index = 0.95 (default) stored in params", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp, rho.index = 0.95)
   expect_equal(fit$params$rho.index, 0.95)
 })
 
 test_that("[10] carma: rho.index = 0.9 stored in params", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp, rho.index = 0.9)
   expect_equal(fit$params$rho.index, 0.9)
 })
 
 test_that("[10] carma: num.causal = 5 stored in params", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp, num.causal = 5)
   expect_equal(fit$params$num.causal, 5)
 })
 
 test_that("[10] carma: num.causal = 1 produces a pip vector", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp, num.causal = 1)
   expect_false(is.null(fit$pip))
 })
 
 test_that("[10] carma: pip has correct length", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp)
   expect_equal(length(fit$pip), .rg$p)
 })
 
 test_that("[10] carma: pip in [0, 1]", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp)
   expect_true(all(fit$pip >= 0, na.rm = TRUE))
   expect_true(all(fit$pip <= 1, na.rm = TRUE))
 })
 
 test_that("[10] carma: credible_sets is a (possibly empty) list", {
+  skip_if_not_installed("CARMA")
   fit <- run_carma_region(.rg, .rp)
   expect_true(is.list(fit$credible_sets))
   expect_gte(length(fit$credible_sets), 0L)
