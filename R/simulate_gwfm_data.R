@@ -90,7 +90,7 @@
 #'   Default: 200.
 #' @param min_maf Numeric. Minimum minor allele frequency filter. Default: 0.01.
 #' @param vcf_dir Character. Directory containing per-region VCF files
-#'   (produced by \code{scripts/prepare_gwfm_vcfs.R}). Each file should be
+#'   (produced by \code{inst/scripts/prepare_gwfm_vcfs.R}). Each file should be
 #'   named \code{<region_id>.vcf.gz}. Default: \code{"data/gwfm_vcf"}.
 #' @param genetic_map_dir Character or NULL. Directory for caching HapMap
 #'   GRCh37 genetic maps downloaded by sim1000G. Default:
@@ -779,7 +779,7 @@ gwfm_resolve_vcf_files <- function(region_df, vcf_dir) {
   if (!dir.exists(vcf_dir)) {
     stop(
       "vcf_dir does not exist: ", vcf_dir, "\n",
-      "Run scripts/prepare_gwfm_vcfs.R first to download the VCF files.",
+      "Run inst/scripts/prepare_gwfm_vcfs.R first to download the VCF files.",
       call. = FALSE
     )
   }
@@ -791,7 +791,7 @@ gwfm_resolve_vcf_files <- function(region_df, vcf_dir) {
     stop(
       "VCF file(s) missing for regions:\n",
       paste("  ", region_df$region_id[missing], vcf_paths[missing], sep = "  "),
-      "\nRun scripts/prepare_gwfm_vcfs.R to download them.",
+      "\nRun inst/scripts/prepare_gwfm_vcfs.R to download them.",
       call. = FALSE
     )
   }

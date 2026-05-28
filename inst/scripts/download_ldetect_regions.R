@@ -1,5 +1,5 @@
 # =============================================================================
-# scripts/download_ldetect_regions.R
+# inst/scripts/download_ldetect_regions.R
 #
 # Download the LDetect LD block partition and (optionally) the corresponding
 # 1000 Genomes VCF slices for use with simulate_gwfm_data().
@@ -16,9 +16,9 @@
 # Paper:  https://doi.org/10.1093/bioinformatics/btv546
 #
 # ---------------------------------------------------------------------------
-# STEP 1 (this script): Download LDetect blocks → data/gwfm_regions_ldetect_{POP}.csv
+# STEP 1 (this script): Download LDetect blocks → inst/extdata/gwfm_regions_ldetect_{POP}.csv
 #   - Fast (~seconds), ~100 KB download per population
-#   - No large files stored on disk
+#   - Regenerates / extends the bundled gwfm_regions_ldetect_*.csv tables
 #
 # STEP 2 (optional, separate): Download VCF slices for those blocks
 #   - Run with DOWNLOAD_VCFS <- TRUE below, OR run manually afterwards
@@ -27,20 +27,36 @@
 #   - ONLY run this if you have sufficient disk space and a stable connection
 #
 # ---------------------------------------------------------------------------
-# Usage (from project root):
-#   Rscript scripts/download_ldetect_regions.R
+# Usage:
+#   # From a source checkout (project root):
+#   Rscript inst/scripts/download_ldetect_regions.R
+#   # From an installed package:
+#   Rscript "$(Rscript -e 'cat(system.file("scripts/download_ldetect_regions.R", package = "fmbenchmark"))')"
 #
 # Configuration (edit below):
 #   POPULATION    ancestry group: "EUR", "AFR", or "ASN"
-#   OUT_CSV       where to save the converted region CSV
+#   OUT_CSV       where to save the converted region CSV (bundled inst/extdata/)
 #   DOWNLOAD_VCFS if TRUE, also download VCF slices (requires tabix/bgzip)
 #   VCF_DIR       where to save VCF files (only used if DOWNLOAD_VCFS = TRUE)
 #   MIN_BLOCK_KB  minimum block size to retain (removes very small blocks)
 #   OVERWRITE     re-download even if output files already exist
 # =============================================================================
 
+# Resolve the inst/extdata/ directory for output, so the regenerated region
+# table lands where the package bundles it. Script-relative first (inst/scripts
+# -> inst/extdata), then inst/extdata/ under cwd (project root). Created if
+# absent.
+extdata_out_dir <- function() {
+  this_file  <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+  script_dir <- if (length(this_file)) dirname(normalizePath(this_file)) else getwd()
+  d <- file.path(script_dir, "..", "extdata")           # inst/scripts -> inst/extdata
+  if (!dir.exists(d)) d <- file.path("inst", "extdata")  # run from project root
+  if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+  normalizePath(d, mustWork = FALSE)
+}
+
 POPULATION    <- "EUR"
-OUT_CSV       <- file.path("data", sprintf("gwfm_regions_ldetect_%s.csv", POPULATION))
+OUT_CSV       <- file.path(extdata_out_dir(), sprintf("gwfm_regions_ldetect_%s.csv", POPULATION))
 DOWNLOAD_VCFS <- FALSE          # set TRUE to also download VCF slices
 VCF_DIR       <- file.path("data", sprintf("gwfm_vcf_ldetect_%s", POPULATION))
 MIN_BLOCK_KB  <- 100            # drop blocks smaller than 100 kb
@@ -71,8 +87,8 @@ if (!POPULATION %in% names(LDETECT_URLS)) {
   stop("POPULATION must be one of: ", paste(names(LDETECT_URLS), collapse = ", "),
        call. = FALSE)
 }
-
-if (!dir.exists("data")) dir.create("data", recursive = TRUE)
+# OUT_CSV's directory (inst/extdata/) is ensured by extdata_out_dir() above;
+# VCF_DIR is created later, only when DOWNLOAD_VCFS = TRUE.
 
 # =============================================================================
 # STEP 1: Download and convert LDetect blocks
@@ -205,7 +221,7 @@ if (!DOWNLOAD_VCFS) {
     paste0("\nVCF download skipped (DOWNLOAD_VCFS = FALSE).\n",
            "To download VCF files for these regions:\n",
            "  - Set DOWNLOAD_VCFS <- TRUE in this script and re-run, OR\n",
-           "  - Edit scripts/prepare_gwfm_vcfs.R: set REGIONS <- \"%s\"\n",
+           "  - Edit inst/scripts/prepare_gwfm_vcfs.R: set REGIONS <- \"%s\"\n",
            "    and VCF_DIR <- \"%s\", then run that script.\n",
            "Estimated disk space required: ~%.1f GB for all %d regions.\n"),
     OUT_CSV, VCF_DIR, nrow(region_df) * 3 / 1000, nrow(region_df)

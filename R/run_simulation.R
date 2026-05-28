@@ -49,7 +49,7 @@
 #' @param enrichment Numeric or NULL. Fold-enrichment for annotations.
 #'   Default: NULL (random).
 #' @param vcf_dir Character or NULL. Path to a directory of VCF files prepared
-#'   by \code{scripts/prepare_vcfs.R} (e.g. \code{"data/vcf"}). If provided,
+#'   by \code{inst/scripts/prepare_vcfs.R} (e.g. \code{"data/vcf"}). If provided,
 #'   \code{n_regions} files are sampled at random from this directory for each
 #'   run (reproducibly if \code{seed} is set). Each file provides a distinct
 #'   genomic region with real LD structure from 1000 Genomes Phase 3. Ignored
@@ -229,7 +229,7 @@ run_simulation <- function(n_regions = 3,
     if (!dir.exists(vcf_dir)) {
       stop(
         "vcf_dir does not exist: ", vcf_dir, "\n",
-        "Run scripts/prepare_vcfs.R first to download the reference VCF files.",
+        "Run inst/scripts/prepare_vcfs.R first to download the reference VCF files.",
         call. = FALSE
       )
     }

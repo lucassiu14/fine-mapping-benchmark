@@ -1,8 +1,8 @@
 # =============================================================================
-# scripts/prepare_gwfm_vcfs.R
+# inst/scripts/prepare_gwfm_vcfs.R
 #
-# Download VCF files for the 128 genome-wide benchmark regions defined in
-# data/gwfm_regions.csv.
+# Download VCF files for the 128 genome-wide benchmark regions defined in the
+# bundled inst/extdata/gwfm_regions.csv.
 #
 # These regions are used by simulate_gwfm_data() and are spread across all
 # 22 autosomes to provide a representative genome-wide sample of LD blocks.
@@ -19,12 +19,15 @@
 # Requirements:
 #   - tabix and bgzip (install via: brew install htslib  OR  conda install -c bioconda htslib)
 #
-# Usage (from project root):
-#   Rscript scripts/prepare_gwfm_vcfs.R
+# Usage:
+#   # From a source checkout (project root):
+#   Rscript inst/scripts/prepare_gwfm_vcfs.R
+#   # From an installed package:
+#   Rscript "$(Rscript -e 'cat(system.file("scripts/prepare_gwfm_vcfs.R", package = "fmbenchmark"))')"
 #
 # Optional arguments (edit below):
 #   VCF_DIR   where to save VCF files   (default: "data/gwfm_vcf")
-#   REGIONS   path to regions CSV file  (default: "data/gwfm_regions.csv")
+#   REGIONS   path to regions CSV file  (default: bundled inst/extdata/gwfm_regions.csv)
 #   OVERWRITE if TRUE, re-download existing files (default: FALSE)
 #
 # Output:
@@ -36,8 +39,25 @@
 # Total download: ~400 MB across all 128 regions.
 # =============================================================================
 
+# Locate a file bundled under inst/extdata/. Mirrors the package's internal
+# fmb_extdata() helper, but inlined so this script runs standalone (no
+# library(fmbenchmark) required). Resolution order: installed package, then
+# the inst/extdata/ sibling of this script, then inst/extdata/ under cwd.
+find_extdata <- function(filename) {
+  p <- system.file("extdata", filename, package = "fmbenchmark")
+  if (nzchar(p) && file.exists(p)) return(p)
+  this_file  <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE))
+  script_dir <- if (length(this_file)) dirname(normalizePath(this_file)) else getwd()
+  candidates <- c(
+    file.path(script_dir, "..", "extdata", filename),  # inst/scripts -> inst/extdata
+    file.path("inst", "extdata", filename)              # run from project root
+  )
+  for (cand in candidates) if (file.exists(cand)) return(normalizePath(cand))
+  stop("Could not locate bundled file 'inst/extdata/", filename, "'.", call. = FALSE)
+}
+
 VCF_DIR   <- "data/gwfm_vcf"
-REGIONS   <- "data/gwfm_regions.csv"
+REGIONS   <- find_extdata("gwfm_regions.csv")
 OVERWRITE <- FALSE
 
 # 1000 Genomes Phase 3 remote VCF URL pattern (GRCh37, all populations)
@@ -68,13 +88,8 @@ if (bgzip_path == "") {
   stop("bgzip not found on PATH. Install htslib (see above).", call. = FALSE)
 }
 
-if (!file.exists(REGIONS)) {
-  stop(
-    "Regions file not found: ", REGIONS, "\n",
-    "Ensure data/gwfm_regions.csv exists (it is bundled with the repository).",
-    call. = FALSE
-  )
-}
+# REGIONS is resolved by find_extdata() above, which already errors if the
+# bundled CSV cannot be located, so no further existence check is needed.
 
 regions <- read.csv(REGIONS, stringsAsFactors = FALSE)
 stopifnot(all(c("region_id", "chrom", "start", "end") %in% names(regions)))
