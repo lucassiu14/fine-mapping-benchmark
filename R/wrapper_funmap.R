@@ -44,6 +44,9 @@
 #'   pip install .
 #' }
 #'
+#' @param python Character or NULL. Path to the Python executable providing the
+#'   \code{funmap} package, passed to \code{reticulate::use_python()}. \code{NULL}
+#'   uses reticulate's default discovery. Default: \code{NULL}.
 #' @return Invisible TRUE if all requirements are met.
 #' @export
 setup_funmap <- function(python = NULL) {
@@ -116,6 +119,9 @@ setup_funmap <- function(python = NULL) {
 #' @param L Integer. Maximum number of causal components. Default: 10.
 #' @param max_iter Integer. Maximum iterations for convergence. Default: 100.
 #' @param tol Numeric. Convergence tolerance. Default: 5e-5.
+#' @param python Character or NULL. Path to the Python executable providing the
+#'   \code{funmap} package, passed to \code{reticulate::use_python()}. \code{NULL}
+#'   uses reticulate's default discovery. Default: \code{NULL}.
 #'
 #' @return A list with the standardised fine-mapping output:
 #' \describe{

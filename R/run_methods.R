@@ -280,7 +280,7 @@ run_methods <- function(simulation,
         if (!is.null(fit$error)) {
           n_failed <- n_failed + 1L
           if (verbose) {
-            message(sprintf("    WARNING: %s failed — %s", method, fit$error))
+            message(sprintf("    WARNING: %s failed - %s", method, fit$error))
           }
         }
 

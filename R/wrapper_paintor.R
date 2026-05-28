@@ -44,7 +44,7 @@
 #' Checks that the PAINTOR binary can be found at the supplied path or on the
 #' system PATH. If not found, prints installation instructions.
 #'
-#' PAINTOR must be compiled from source or installed via conda — no
+#' PAINTOR must be compiled from source or installed via conda - no
 #' pre-compiled binary is distributed. Typical installation:
 #'
 #' \preformatted{
@@ -82,9 +82,9 @@ setup_paintor <- function(paintor_path = "PAINTOR") {
   stop(
     "PAINTOR binary not found (searched for: '", paintor_path, "').\n\n",
     "PAINTOR v3.0 must be installed manually. Options:\n\n",
-    "  Option 1 — conda (easiest):\n",
+    "  Option 1 - conda (easiest):\n",
     "    conda install -c bioconda paintor\n\n",
-    "  Option 2 — compile from source:\n",
+    "  Option 2 - compile from source:\n",
     "    git clone https://github.com/gkichaev/PAINTOR_V3.0\n",
     "    cd PAINTOR_V3.0 && make\n",
     "    # Then add to PATH or pass the full path via:\n",
@@ -316,7 +316,7 @@ run_paintor <- function(z,
 
   pip <- as.numeric(res_df$Posterior_Prob[ord])
 
-  # Clamp to [0, 1] — floating-point rounding can push values just outside
+  # Clamp to [0, 1] - floating-point rounding can push values just outside
   pip <- pmax(0, pmin(1, pip))
 
   # Log Bayes factor column (present in some PAINTOR versions)

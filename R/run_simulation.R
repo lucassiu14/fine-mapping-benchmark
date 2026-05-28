@@ -56,6 +56,10 @@
 #'   when \code{vcf_files} is also supplied. Default: NULL.
 #' @param vcf_files Character vector or NULL. VCF files for genotype
 #'   simulation. Overrides \code{vcf_dir}. Default: NULL (use bundled example).
+#' @param genetic_map_dir Character or NULL. Directory for caching the HapMap
+#'   GRCh37 genetic maps that sim1000G downloads (~1 MB per chromosome). Created
+#'   if it does not exist; \code{NULL} uses a session tempdir.
+#'   Default: \code{"data/genetic_maps"}.
 #' @param min_maf Numeric. Minimum MAF filter. Default: 0.01.
 #' @param max_maf Numeric or NA. Maximum MAF filter. Default: NA.
 #' @param standardise Logical. Standardise genotypes. Default: TRUE.
@@ -68,6 +72,11 @@
 #'   \code{save = TRUE}. Created automatically if it does not exist.
 #'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress. Default: TRUE.
+#' @param n_ref Integer or NULL. If set, an independent reference panel of
+#'   \code{n_ref} individuals is drawn (from the same source as the in-sample
+#'   genotypes) to compute the LD matrix supplied to methods, inducing LD
+#'   mismatch between the in-sample data and the reference panel. \code{NULL}
+#'   uses the in-sample LD. Default: \code{NULL}.
 #'
 #' @return A list with two elements:
 #'   \describe{

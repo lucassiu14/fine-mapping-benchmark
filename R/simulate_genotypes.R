@@ -48,6 +48,11 @@
 #'   \code{save = TRUE}. Created automatically if it does not exist.
 #'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress messages. Default: TRUE.
+#' @param n_ref Integer or NULL. If set, an additional independent reference
+#'   panel of \code{n_ref} individuals is simulated for each region (from the
+#'   same haplotype source) and its LD matrix returned alongside the in-sample
+#'   LD, for LD-mismatch experiments. \code{NULL} returns only the in-sample
+#'   LD. Default: \code{NULL}.
 #'
 #' @return A list of length \code{n_regions}. Each element is a list with:
 #'   \describe{

@@ -36,13 +36,14 @@ Imports:
 Suggests:
     CARMA,
     knitr,
+    remotes,
     reticulate,
     rmarkdown,
     testthat (>= 3.0.0),
     yaml
 SystemRequirements: htslib (>= 1.0) for tabix and bgzip; required by the
     scripts that download 1000 Genomes Phase 3 VCF windows.
-RoxygenNote: 7.3.0
 Roxygen: list(markdown = TRUE)
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+Config/roxygen2/version: 8.0.0

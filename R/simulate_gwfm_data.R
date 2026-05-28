@@ -101,6 +101,10 @@
 #' @param output_dir Character. Directory for saved output. Created
 #'   automatically if absent. Default: \code{"results"}.
 #' @param verbose Logical. Print progress messages. Default: TRUE.
+#' @param n_ref Integer or NULL. If set, an independent reference panel of
+#'   \code{n_ref} individuals is drawn per region to compute the LD matrix
+#'   supplied to methods, inducing LD mismatch with the in-sample genotypes.
+#'   \code{NULL} uses the in-sample LD. Default: \code{NULL}.
 #'
 #' @return A list with three elements, mirroring the output of
 #'   \code{\link{run_simulation}}:

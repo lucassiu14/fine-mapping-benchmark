@@ -15,13 +15,6 @@ vignette: >
 ---
 
 ```{r setup, include = FALSE}
-# Run every chunk from the project root, not from vignettes/. This means
-# (a) `source("R/...")` paths work without ../ prefix, (b) the renv
-# autoloader activates because it walks up from the cwd looking for
-# renv/, and (c) `data/`-relative paths inside simulator helpers resolve
-# correctly.
-knitr::opts_knit$set(root.dir = "..")
-
 knitr::opts_chunk$set(
   echo       = TRUE,
   message    = FALSE,
@@ -70,32 +63,20 @@ see the
 
 # 2. Setup
 
-Source the project files. The Tier 1 set is enough for SuSiE, ABF, CARMA, the
-baselines, and PolyFun-style methods.
+Load the package. Everything in this vignette uses only Tier 1 (pure R)
+methods — SuSiE, ABF, and the `marginal_z` baseline — which need no external
+binaries.
 
-```{r sources}
-source("R/utils.R")
-source("R/simulate_genotypes.R")
-source("R/simulate_phenotypes.R")
-source("R/run_simulation.R")
-source("R/run_methods.R")
-source("R/evaluate.R")
-source("R/plot_results.R")
-source("R/wrapper_susie.R")
-source("R/wrapper_abf.R")
-source("R/wrapper_marginal_z.R")
+```{r library}
+library(fmbenchmark)
 ```
 
-> **Note on paths.** All chunks in this vignette run from the **project
-> root** — set in the setup chunk via
-> `knitr::opts_knit$set(root.dir = "..")`. The renv autoloader needs this
-> to find the project's R library. If you copy the chunks into a script,
-> run R from the project root and the paths above work as-is.
-
 The Tier 1 dependencies (`susieR`, `sim1000G`, `ggplot2`, `gridExtra`,
-`CARMA`) install via `renv::restore()` from the project root. See
-[README §Installation](../README.md#installation) if you have not done this
-yet.
+`CARMA`) are declared in the package's `Imports`/`Suggests` and install with
+it. If you are working from a source checkout managed by `renv`, run
+`renv::restore()` first. See
+[README §Installation](../README.md#installation) for the external-method
+tiers.
 
 ---
 
@@ -119,6 +100,7 @@ sim <- run_simulation(
   model     = "sparse",
   annotations = "none",
   vcf_files = NULL,     # use the bundled sim1000G example VCF
+  genetic_map_dir = tempdir(),  # cache the HapMap map in a temp dir
   seed      = 42,
   verbose   = FALSE
 )
@@ -379,7 +361,7 @@ every metric and the structure of every plot.
 
 You now have a working end-to-end pipeline. Common next steps:
 
-- **Larger simulations.** Use `prepare_vcfs.R` to download 50 real 1000G
+- **Larger simulations.** Use `inst/scripts/prepare_vcfs.R` to download 50 real 1000G
   regions, then pass `vcf_dir = "data/vcf"` to `run_simulation()`. See
   [README §Reference data](../README.md#reference-data-optional).
 - **More methods.** Tier 2 adds FINEMAP and PAINTOR (C++ binaries); Tier 3
