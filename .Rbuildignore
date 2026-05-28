@@ -47,6 +47,13 @@
 ^docs$
 ^CITATION\.cff$
 ^ROADMAP\.md$
+# Full MIT text kept for GitHub; the package ships the DCF stub LICENSE only.
+^LICENSE\.md$
+
+# --- Runtime output directory ------------------------------------------------
+# results/ holds benchmark output (gitignored except a .gitkeep placeholder);
+# it is not part of the package.
+^results$
 
 # --- External methods bundled as repo subdirectories -------------------------
 # Functional BEATRICE's Python implementation is shipped here for

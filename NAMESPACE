@@ -3,6 +3,10 @@
 # 3b-iii). Subsequent passes after Phase 3b-iv can regenerate via
 # devtools::document() to keep it in sync with any new roxygen tags.
 
+# --- Imports from base packages ----------------------------------------------
+importFrom(stats, cor, median, rbinom, rnorm, runif, sd, setNames, var)
+importFrom(utils, head, packageDescription, read.csv, tail, write.csv, write.table)
+
 # --- Pipeline (R/*.R) --------------------------------------------------------
 export(evaluate_methods)
 export(plot_results)

@@ -19,7 +19,7 @@
 # inst/extdata/ relative to a few plausible working directories: the project
 # root, one level below, and the testthat directory.
 #
-# Internal helper — not exported.
+# Internal helper - not exported.
 # -----------------------------------------------------------------------------
 fmb_extdata <- function(filename) {
   path <- system.file("extdata", filename, package = "fmbenchmark")
@@ -39,8 +39,17 @@ fmb_extdata <- function(filename) {
   stop(
     "Could not locate bundled file 'inst/extdata/", filename, "'. ",
     "If you installed the package via devtools::install() or remotes::install_github(), ",
-    "this is a bug — please report it. If you are running from a source checkout, ",
+    "this is a bug - please report it. If you are running from a source checkout, ",
     "ensure the file exists under inst/extdata/.",
     call. = FALSE
   )
 }
+
+
+# Column names referenced via non-standard evaluation inside ggplot2 aes()
+# mappings in plot_results.R. Declared here so R CMD check does not flag them
+# as undefined global variables.
+utils::globalVariables(c(
+  "frac_causal", "frac_causal_se", "mean_pip", "method", "precision",
+  "recall", "se", "stratum_val", "value"
+))
