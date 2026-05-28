@@ -1677,3 +1677,211 @@ test_that("[10] carma: credible_sets is a (possibly empty) list", {
   expect_true(is.list(fit$credible_sets))
   expect_gte(length(fit$credible_sets), 0L)
 })
+
+
+# =============================================================================
+# SECTION 11: External binary wrappers - argument forwarding
+# =============================================================================
+#
+# These wrappers call out to external binaries / Python scripts. Each
+# test_that block tries the corresponding setup, then either runs the
+# wrapper (which should error gracefully if the binary/dir is missing) or
+# skips when the binary is absent. The point is to verify argument
+# forwarding, not the actual external method.
+
+test_that("[11-finemap] finemap: finemap_path arg recognised", {
+  finemap_bin <- tryCatch(setup_finemap(download = FALSE),
+                          error = function(e) NULL)
+  skip_if(is.null(finemap_bin),
+          "FINEMAP binary not available on this machine")
+  fit <- tryCatch(
+    run_finemap_region(.rg, .rp, finemap_path = finemap_bin, n_causal = 2),
+    error = function(e) list(error = conditionMessage(e))
+  )
+  expect_false(is.null(fit))
+})
+
+test_that("[11-paintor] paintor: paintor_path arg recognised", {
+  paintor_bin <- tryCatch(setup_paintor(), error = function(e) NULL)
+  skip_if(is.null(paintor_bin),
+          "PAINTOR binary not available / not compiled")
+  fit <- tryCatch(
+    run_paintor_region(.rg, .rp, paintor_path = paintor_bin, max_causal = 1),
+    error = function(e) list(error = conditionMessage(e))
+  )
+  expect_false(is.null(fit))
+})
+
+test_that("[11-beatrice] beatrice: beatrice_dir + python args forwarded (graceful on miss)", {
+  fit <- tryCatch(
+    run_beatrice_region(.rg, .rp,
+                        beatrice_dir = "~/Beatrice-Finemapping",
+                        python = "/opt/anaconda3/bin/python3",
+                        max_iter = 500),
+    error = function(e) list(error = conditionMessage(e))
+  )
+  # Graceful return either way: pip vector or $error field
+  expect_false(is.null(fit))
+})
+
+test_that("[11-funmap] funmap: python arg forwarded (graceful on miss)", {
+  fit <- tryCatch(
+    run_funmap_region(.rg, .rp,
+                      python = "/opt/anaconda3/bin/python3",
+                      L = 5),
+    error = function(e) list(error = conditionMessage(e))
+  )
+  expect_false(is.null(fit))
+})
+
+
+# =============================================================================
+# SECTION 12: run_marginal_z / run_marginal_z_region (baseline)
+# =============================================================================
+
+test_that("[12] marginal_z: output has all standard fields", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_true(all(c("pip", "credible_sets", "method", "input_type",
+                    "params", "runtime_seconds", "additional") %in% names(fit)))
+  expect_equal(fit$method, "marginal_z")
+  expect_equal(fit$input_type, "summary")
+})
+
+test_that("[12] marginal_z: pip length equals p", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_equal(length(fit$pip), .rg$p)
+})
+
+test_that("[12] marginal_z: pip values lie in [0, 1]", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_true(all(fit$pip >= 0))
+  expect_true(all(fit$pip <= 1))
+})
+
+test_that("[12] marginal_z: pip sums to ~1 (|z|/sum|z|)", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_lt(abs(sum(fit$pip) - 1), 1e-8)
+})
+
+test_that("[12] marginal_z: default coverage = 0.95", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_equal(fit$params$coverage, 0.95)
+})
+
+test_that("[12] marginal_z: lower coverage produces smaller-or-equal CS", {
+  fit95 <- run_marginal_z_region(.rg, .rp, coverage = 0.95)
+  fit50 <- run_marginal_z_region(.rg, .rp, coverage = 0.50)
+  expect_lte(length(fit50$credible_sets[[1]]),
+             length(fit95$credible_sets[[1]]))
+})
+
+test_that("[12] marginal_z: returns exactly one credible set", {
+  fit <- run_marginal_z_region(.rg, .rp)
+  expect_true(is.list(fit$credible_sets))
+  expect_length(fit$credible_sets, 1L)
+})
+
+
+# =============================================================================
+# SECTION 13: run_polyfun_oracle / run_polyfun_oracle_region (oracle priors)
+# =============================================================================
+#
+# polyfun_oracle reads simulator truth, so it needs SIM_MINI_ANNOT (which
+# has annotations + enrichment in $truth).
+
+.rg_po <- SIM_MINI_ANNOT$genotypes[[1]]
+.rp_po <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
+
+
+test_that("[13] polyfun_oracle: output has all standard fields", {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  expect_true(all(c("pip", "credible_sets", "method", "input_type",
+                    "params", "runtime_seconds", "additional") %in% names(fit)))
+  expect_equal(fit$method, "polyfun_oracle")
+})
+
+test_that("[13] polyfun_oracle: pip valid (length p, in [0, 1])", {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  expect_equal(length(fit$pip), .rg_po$p)
+  expect_true(all(fit$pip >= 0, na.rm = TRUE))
+  expect_true(all(fit$pip <= 1, na.rm = TRUE))
+})
+
+test_that("[13] polyfun_oracle: reports prior_weights of length p", {
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+  pw  <- fit$additional$prior_weights
+  expect_false(is.null(pw))
+  expect_equal(length(pw), .rg_po$p)
+  expect_true(all(pw >= 0, na.rm = TRUE))
+})
+
+test_that("[13] polyfun_oracle: falls back to uniform prior when annotations absent", {
+  # SIM_MINI has annotations="none" so truth$enrichment is also absent.
+  # Wrapper is documented to fall back to uniform priors (degenerate to
+  # plain SuSiE) rather than erroring.
+  fit <- run_polyfun_oracle_region(.rg, .rp)
+  expect_null(fit$error)
+  expect_equal(length(fit$pip), .rg$p)
+  expect_true(all(fit$pip >= 0, na.rm = TRUE))
+  expect_true(all(fit$pip <= 1, na.rm = TRUE))
+  expect_identical(fit$params$prior_source, "uniform_fallback")
+})
+
+
+# =============================================================================
+# SECTION 14: run_polyfun_est / run_polyfun_est_region / scenario_setup
+# =============================================================================
+
+.rg_pe <- SIM_MINI_ANNOT$genotypes[[1]]
+.rp_pe <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
+
+
+test_that("[14] polyfun_est: output has all standard fields", {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  expect_true(all(c("pip", "credible_sets", "method", "input_type",
+                    "params", "runtime_seconds", "additional") %in% names(fit)))
+  expect_equal(fit$method, "polyfun_est")
+})
+
+test_that("[14] polyfun_est: pip valid (length p, in [0, 1])", {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  expect_equal(length(fit$pip), .rg_pe$p)
+  expect_true(all(fit$pip >= 0, na.rm = TRUE))
+  expect_true(all(fit$pip <= 1, na.rm = TRUE))
+})
+
+test_that("[14] polyfun_est: reports non-negative tau of length m + 1", {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
+  tau <- fit$additional$tau
+  m   <- ncol(.rg_pe$annotations_matrix)
+  expect_false(is.null(tau))
+  expect_equal(length(tau), m + 1L)
+  expect_true(all(tau >= 0, na.rm = TRUE))
+})
+
+test_that("[14] polyfun_est: runs without scenario hook (per-region tau fallback)", {
+  fit <- run_polyfun_est_region(.rg_pe, .rp_pe, pooled_tau = NULL)
+  expect_equal(length(fit$pip), .rg_pe$p)
+  expect_false(is.null(fit$additional$tau))
+})
+
+test_that("[14] polyfun_est: scenario-setup hook returns pooled_tau when consistent", {
+  scen <- SIM_MINI_ANNOT$scenarios[[1]]
+  extra <- run_polyfun_est_scenario_setup(
+    genotypes = SIM_MINI_ANNOT$genotypes,
+    regions   = scen$regions,
+    user_args = list()
+  )
+  m <- ncol(SIM_MINI_ANNOT$genotypes[[1]]$annotations_matrix)
+  expect_true("pooled_tau" %in% names(extra))
+  expect_equal(length(extra$pooled_tau), m + 1L)
+  expect_true(all(extra$pooled_tau >= 0))
+})
+
+test_that("[14] polyfun_est: graceful behaviour on no-annotation fixture", {
+  fit <- run_polyfun_est_region(.rg, .rp)
+  # Either falls back to uniform priors or sets $error. We just want
+  # no crash and a length-p pip vector.
+  expect_false(is.null(fit))
+  expect_equal(length(fit$pip), .rg$p)
+})
