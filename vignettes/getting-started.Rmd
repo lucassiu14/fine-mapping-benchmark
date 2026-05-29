@@ -315,7 +315,7 @@ cat("\nAUPRC by S, SuSiE:\n")
 sapply(eval$susie$by_S, function(x) round(x$auprc, 3))
 ```
 
-By minimum causal MAF (added in Phase 2):
+By minimum causal MAF:
 
 ```{r eval-by-maf}
 names(eval$susie$by_causal_maf)

@@ -20,7 +20,7 @@ Some methods and the reference-data setup have additional system requirements
 ## Installation
 
 Installation is tiered. **You only need to install what you actually want to
-use.** Most of the experiment — including 7 of the 9 methods, all evaluation,
+use.** Most of the experiment — including 7 of the 13 methods, all evaluation,
 and all plotting — works at Tier 1 with just R packages.
 
 ### Clone the repo
@@ -52,16 +52,21 @@ renv::restore()
 > `sim1000G` and `hapsim` are archived from CRAN and are fetched directly
 > from the CRAN archive; this is handled automatically by the lockfile.
 
+Then load the package once per R session (every snippet below assumes this):
+
+```r
+pkgload::load_all()        # load fmbenchmark from the source checkout
+# or, after installing it: library(fmbenchmark)
+```
+
 **Tier 1 unlocks:**
 
-- Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**\*,
-  **polyfun_oracle**\*, **polyfun_est**\*
+- Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
+  **polyfun_oracle**, **polyfun_est**
 - All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
 - All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
   `run_simulation()`, `simulate_gwfm_data()`)
-
-\*Added in Phase 1 of the development roadmap.
 
 ### Tier 2 — Adds C++ binary methods (~30 min more)
 
@@ -71,7 +76,6 @@ The binary is downloaded automatically the first time you call
 `setup_finemap()`:
 
 ```r
-source("R/wrapper_finemap.R")
 fp <- setup_finemap()   # downloads to R user cache dir; returns path
 ```
 
@@ -89,7 +93,6 @@ conda install -c bioconda paintor
 Then in R:
 
 ```r
-source("R/wrapper_paintor.R")
 pp <- setup_paintor()   # finds PAINTOR on PATH
 ```
 
@@ -170,15 +173,7 @@ tabix — no whole-chromosome downloads. Files are saved to `data/vcf/` (or
 ## Quick start
 
 ```r
-source("R/utils.R")
-source("R/simulate_genotypes.R")
-source("R/simulate_phenotypes.R")
-source("R/run_simulation.R")
-source("R/run_methods.R")
-source("R/evaluate.R")
-source("R/plot_results.R")
-source("R/wrapper_susie.R")
-source("R/wrapper_abf.R")
+library(fmbenchmark)   # or pkgload::load_all() from a source checkout
 
 # 1. Simulate genotypes + phenotypes across a parameter grid
 sim <- run_simulation(
@@ -685,10 +680,7 @@ genome-wide model: a single shared phenotype is generated across all regions
 and per-region summary statistics are computed from the shared phenotype.
 
 ```r
-source("R/utils.R")
-source("R/simulate_genotypes.R")
-source("R/simulate_phenotypes.R")
-source("R/simulate_gwfm_data.R")
+library(fmbenchmark)   # or pkgload::load_all() from a source checkout
 
 sim <- simulate_gwfm_data(
   n        = 2000,

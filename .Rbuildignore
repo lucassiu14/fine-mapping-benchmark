@@ -32,8 +32,8 @@
 # --- Reference data, downloads, working files --------------------------------
 # Our data/ holds VCFs, genetic maps, and curated region CSVs — too large
 # to bundle in the package, and clashes with R's `data/` convention
-# (reserved for .rda lazy-loaded package data). Phase 3b-iii will move the
-# small curated region CSVs to inst/extdata/.
+# (reserved for .rda lazy-loaded package data). The curated region CSVs
+# live in inst/extdata/; data/ holds only downloaded VCF and genetic-map caches.
 ^data$
 
 # CARMA writes per-locus scratch files to the working directory.
@@ -46,7 +46,6 @@
 # part of the package.
 ^docs$
 ^CITATION\.cff$
-^ROADMAP\.md$
 # Full MIT text kept for GitHub; the package ships the DCF stub LICENSE only.
 ^LICENSE\.md$
 
@@ -60,9 +59,9 @@
 # convenience but is not part of the R package surface.
 ^BEATRICE_annot_sparse$
 
-# --- Orchestration scripts (Phase 3b-iii will relocate as appropriate) -------
-# Until 3b-iii, scripts/ stays at the repo root and is excluded from the
-# package build. Tests will move to tests/testthat/ in 3b-ii.
+# --- Orchestration scripts ---------------------------------------------------
+# scripts/ holds HPC orchestration tooling (scripts/hpc/); kept at the repo
+# root and excluded from the package build.
 ^scripts$
 
 # --- Test / build artefacts --------------------------------------------------

@@ -2,7 +2,7 @@
 # test-comprehensive.R
 #
 # Argument-level test coverage for every public function in the benchmark.
-# Translated from scripts/test_comprehensive.R as part of Phase 3b-ii bulk.
+# Translated from the former scripts/test_comprehensive.R.
 #
 # Covers each documented argument of:
 #   simulate_genotypes, simulate_phenotypes, run_simulation,
@@ -42,8 +42,8 @@
 # CRAN runs will fail there which is the expected behaviour for a
 # Suggests-only check.
 #
-# The original `scripts/test_comprehensive.R` was removed in Phase
-# 3b-iii once this testthat version superseded it.
+# The original `scripts/test_comprehensive.R` was removed once this
+# testthat version superseded it.
 # =============================================================================
 
 
