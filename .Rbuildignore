@@ -46,8 +46,6 @@
 # part of the package.
 ^docs$
 ^CITATION\.cff$
-# Full MIT text kept for GitHub; the package ships the DCF stub LICENSE only.
-^LICENSE\.md$
 
 # --- Runtime output directory ------------------------------------------------
 # results/ holds benchmark output (gitignored except a .gitkeep placeholder);
