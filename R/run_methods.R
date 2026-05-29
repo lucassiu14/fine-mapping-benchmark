@@ -46,11 +46,11 @@
   beatrice              = "run_beatrice_region",
   functional_beatrice   = "run_functional_beatrice_region",
   carma                 = "run_carma_region",
-  # Baselines and annotation-aware comparators added in Phase 1.
+  # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
   polyfun_oracle        = "run_polyfun_oracle_region",
   polyfun_est           = "run_polyfun_est_region",
-  # Phase 4: modern variational comparator (without annotations).
+  # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region"
 )
 

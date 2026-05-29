@@ -20,7 +20,7 @@ Some methods and the reference-data setup have additional system requirements
 ## Installation
 
 Installation is tiered. **You only need to install what you actually want to
-use.** Most of the experiment — including 7 of the 9 methods, all evaluation,
+use.** Most of the experiment — including 7 of the 13 methods, all evaluation,
 and all plotting — works at Tier 1 with just R packages.
 
 ### Clone the repo
@@ -54,14 +54,12 @@ renv::restore()
 
 **Tier 1 unlocks:**
 
-- Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**\*,
-  **polyfun_oracle**\*, **polyfun_est**\*
+- Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
+  **polyfun_oracle**, **polyfun_est**
 - All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
 - All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
   `run_simulation()`, `simulate_gwfm_data()`)
-
-\*Added in Phase 1 of the development roadmap.
 
 ### Tier 2 — Adds C++ binary methods (~30 min more)
 

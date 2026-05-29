@@ -31,13 +31,13 @@
   beatrice              = "#F0E442",
   functional_beatrice   = "#E76BF3",
   finemap               = "#999999",
-  # Phase 1 additions. marginal_z is the baseline (neutral grey-blue);
+  # marginal_z is the baseline (neutral grey-blue);
   # polyfun_* methods get a related-but-distinct hue family to signal
   # they're an annotation-aware family.
   marginal_z            = "#7F7F7F",   # mid grey — baseline / floor
   polyfun_oracle        = "#1A535C",   # deep teal — the ceiling
   polyfun_est           = "#4ECDC4",   # lighter teal — the realistic version
-  # Phase 4 addition. Deep wine — visually distinct from the BEATRICE
+  # Deep wine — visually distinct from the BEATRICE
   # magenta and PAINTOR pink so the variational methods don't blur together.
   sparsepro             = "#6B2D5C"
 )

@@ -4,9 +4,8 @@
 # End-to-end smoke test of the full benchmark pipeline:
 #   simulate -> run_methods -> evaluate -> plot
 #
-# Translated from the former scripts/test_pipeline.R during Phase 3b-ii;
-# that original script was removed in Phase 3b-iii once this testthat
-# version superseded it.
+# Translated from the former scripts/test_pipeline.R, which was removed
+# once this testthat version superseded it.
 #
 # Differences from the original script:
 #
