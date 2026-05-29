@@ -1,5 +1,5 @@
-# Runs `R CMD check` on push / PR to main, reproducing the local
-# Status: OK achieved in Phase 3b-iv.
+# Runs `R CMD check` on push / PR to main, reproducing a clean local
+# `R CMD check` (Status: OK).
 #
 # Dependency notes (why this isn't the vanilla r-lib template):
 #   - sim1000G (Imports) is archived on CRAN and susieR (Imports) is a
