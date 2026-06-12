@@ -1,245 +1,200 @@
+#!/usr/bin/env Rscript
 # =============================================================================
 # scripts/hpc/run_benchmark_job.R
 #
-# SLURM array worker script.
-# Run by submit_benchmark.sh as:
+# SLURM array worker. Run with:
 #   Rscript scripts/hpc/run_benchmark_job.R <job_id>
 #
-# <job_id> is the 1-based row index into params_grid.csv (= $SLURM_ARRAY_TASK_ID).
+# <job_id> is the 1-based row of params_grid.csv (= $SLURM_ARRAY_TASK_ID).
 #
-# Each job:
+# Each invocation:
 #   1. Reads its parameter row from params_grid.csv
-#   2. Calls run_simulation() sweeping all S × phi (× p_causal) values
-#   3. Calls run_methods() with all 6 methods
-#   4. Saves results to results/benchmark/<job_label>/
-#
+#   2. Runs simulate -> run_methods -> evaluate_methods
+#   3. Saves results to results/benchmark/job_<id>_<label>/
 # =============================================================================
 
-# =============================================================================
-# Configuration — edit these paths to match your HPC environment
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Configuration - edit to match your environment
+# -----------------------------------------------------------------------------
+PARAMS_CSV  <- "scripts/hpc/params_grid.csv"
+OUTPUT_ROOT <- "results/benchmark"
+VCF_DIR     <- "data/vcf"          # per-locus benchmark; set to NULL to use
+                                    # the bundled chr4 sim1000G example VCF
+GENETIC_MAP_DIR <- "data/genetic_maps"
 
-PROJECT_ROOT  <- "."        # path to the project root (. if running from there)
+# Methods. The Tier-1 default works without any external installs.
+# Add external methods only if their binaries / conda env are reachable on
+# the node (see scripts/hpc/README.md).
+METHODS <- c("susie", "susie_inf", "abf", "carma",
+             "marginal_z", "polyfun_oracle", "polyfun_est")
 
-# Python executable with BEATRICE dependencies installed
-PYTHON        <- "python"   # e.g. "~/miniconda3/envs/beatrice/bin/python"
+# Per-method arguments. Each method's wrapper documents its options.
+METHOD_ARGS <- list(
+  susie          = list(L = 10, coverage = 0.95),
+  susie_inf      = list(L = 10),
+  abf            = list(prior_variance = 0.04),
+  carma          = list(num.causal = 5),
+  marginal_z     = list(coverage = 0.95),
+  polyfun_oracle = list(L = 10),
+  polyfun_est    = list(L = 10)
+  # finemap = list(finemap_path = "/path/to/finemap", n_causal_snps = 5),
+  # paintor = list(paintor_path = "PAINTOR")
+)
 
-# Path to BEATRICE_annot_sparse/ (Functional BEATRICE)
-FB_DIR        <- file.path(PROJECT_ROOT, "BEATRICE_annot_sparse")
-
-# Path to PAINTOR binary
-PAINTOR_PATH  <- "PAINTOR"  # or full path, e.g. "/usr/local/bin/PAINTOR"
-
-# VCF directory (pre-downloaded by prepare_vcfs.R)
-VCF_DIR       <- file.path(PROJECT_ROOT, "data", "gwfm_vcf")
-
-# Output root
-OUTPUT_DIR    <- file.path(PROJECT_ROOT, "results", "benchmark")
-
-# Methods to run
-METHODS <- c("susie", "susie_inf", "beatrice", "funmap",
-             "functional_beatrice", "paintor")
-
-# =============================================================================
-# Parse job ID from command line
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# Parse job_id
+# -----------------------------------------------------------------------------
 args   <- commandArgs(trailingOnly = TRUE)
-job_id <- as.integer(args[1])
-
+job_id <- suppressWarnings(as.integer(args[1]))
 if (is.na(job_id) || job_id < 1L) {
-  stop("Usage: Rscript run_benchmark_job.R <job_id>  (job_id >= 1)", call. = FALSE)
+  stop("Usage: Rscript scripts/hpc/run_benchmark_job.R <job_id>")
 }
 
-# =============================================================================
-# Load project (source all R files)
-# =============================================================================
-
-r_files <- list.files(file.path(PROJECT_ROOT, "R"),
-                       pattern = "\\.R$", full.names = TRUE, recursive = TRUE)
-invisible(lapply(r_files, source))
-
-# =============================================================================
-# Read parameter grid
-# =============================================================================
-
-grid_path <- file.path(PROJECT_ROOT, "scripts", "hpc", "params_grid.csv")
-if (!file.exists(grid_path)) {
-  stop("params_grid.csv not found. Run scripts/hpc/generate_params_grid.R first.",
-       call. = FALSE)
+# -----------------------------------------------------------------------------
+# Load the package
+# -----------------------------------------------------------------------------
+ok <- requireNamespace("fmbenchmark", quietly = TRUE)
+if (!ok) {
+  if (requireNamespace("pkgload", quietly = TRUE) && file.exists("DESCRIPTION")) {
+    pkgload::load_all(quiet = TRUE)
+  } else {
+    stop("fmbenchmark is not installed. Run from the project root after:\n",
+         "  R -e 'renv::restore(); install.packages(\".\", repos = NULL, type = \"source\")'")
+  }
+} else {
+  library(fmbenchmark)
 }
 
-grid <- read.csv(grid_path, stringsAsFactors = FALSE)
-
+# -----------------------------------------------------------------------------
+# Read this job's params row
+# -----------------------------------------------------------------------------
+if (!file.exists(PARAMS_CSV)) {
+  stop("params_grid.csv not found at ", PARAMS_CSV,
+       ". Run: Rscript scripts/hpc/generate_params_grid.R")
+}
+grid <- read.csv(PARAMS_CSV, stringsAsFactors = FALSE)
 if (job_id > nrow(grid)) {
-  stop(sprintf("job_id %d exceeds grid size %d.", job_id, nrow(grid)), call. = FALSE)
+  stop(sprintf("job_id %d is past end of grid (nrow = %d)", job_id, nrow(grid)))
 }
+job <- as.list(grid[job_id, ])
 
-params <- grid[job_id, ]
+S_vec   <- as.integer(strsplit(job$S_values,   "\\|")[[1]])
+phi_vec <- as.numeric(strsplit(job$phi_values, "\\|")[[1]])
 
-# Parse semicolon-delimited sweep vectors
-S_values      <- as.integer(strsplit(params$S_values,     ";")[[1]])
-phi_values    <- as.numeric(strsplit(params$phi_values,   ";")[[1]])
-p_causal_vals <- as.numeric(strsplit(params$p_causal_values, ";")[[1]])
+job_dir <- file.path(OUTPUT_ROOT, sprintf("job_%03d_%s", job$job_id, job$label))
+dir.create(job_dir, recursive = TRUE, showWarnings = FALSE)
 
-cat(sprintf("=== Job %d / %d ===\n", job_id, nrow(grid)))
-cat(sprintf("  model       : %s\n",  params$model))
-cat(sprintf("  p           : %d\n",  params$p))
-cat(sprintf("  annot       : %s\n",  params$annot_name))
-cat(sprintf("  S values    : %s\n",  paste(S_values, collapse = ", ")))
-cat(sprintf("  phi values  : %s\n",  paste(phi_values, collapse = ", ")))
-if (params$model == "sparse_inf") {
-  cat(sprintf("  p_causal    : %s\n", paste(p_causal_vals, collapse = ", ")))
+# Logs go to SLURM's --output / --error files (see submit_benchmark.sh).
+# No per-job-dir log file: avoids on.exit-at-top-level pitfalls and keeps
+# log management in one place.
+cat("=====================================================================\n")
+cat(sprintf("Job %d / %d: %s\n", job$job_id, nrow(grid), job$label))
+cat("=====================================================================\n")
+cat(sprintf("Started:        %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
+cat(sprintf("Output dir:     %s\n", job_dir))
+cat(sprintf("Model:          %s\n", job$model))
+cat(sprintf("n_regions:      %d\n", job$n_regions))
+cat(sprintf("p:              %d\n", job$p))
+cat(sprintf("n:              %d\n", job$n))
+cat(sprintf("n_iter:         %d\n", job$n_iter))
+cat(sprintf("S values:       %s\n", paste(S_vec,   collapse = ", ")))
+cat(sprintf("phi values:     %s\n", paste(phi_vec, collapse = ", ")))
+cat(sprintf("Annotation:     %s\n", job$annotation_type))
+if (job$annotation_type != "none") {
+  cat(sprintf("  tracks:       %d\n", job$n_annotations))
+  cat(sprintf("  enrichment:   %g\n", job$enrichment))
 }
+if (!is.na(job$n_ref)) {
+  cat(sprintf("LD mismatch:    n_ref = %d (independent reference panel)\n", job$n_ref))
+}
+cat(sprintf("Methods:        %s\n", paste(METHODS, collapse = ", ")))
 cat("\n")
 
-# =============================================================================
-# Derive simulation parameters
-# =============================================================================
+# Reproducible seed: derived from job_id so jobs differ but each is deterministic.
+seed <- 1000L + job$job_id
 
-annot_type       <- params$annot_type        # "none", "binary", "continuous"
-annot_enrichment <- params$annot_enrichment  # NA for "none"
+# -----------------------------------------------------------------------------
+# Pipeline
+# -----------------------------------------------------------------------------
+t0 <- Sys.time()
 
-enrichment_arg   <- if (is.na(annot_enrichment)) NULL else annot_enrichment
-p_causal_arg     <- if (params$model == "sparse_inf") p_causal_vals else NULL
-
-# Job-specific seed for reproducibility
-job_seed <- job_id * 1000L
-
-# =============================================================================
-# Construct output label and directory
-# =============================================================================
-
-job_label <- sprintf("model=%s_p=%d_annot=%s",
-                     params$model, params$p, params$annot_name)
-job_out   <- file.path(OUTPUT_DIR, job_label)
-if (!dir.exists(job_out)) dir.create(job_out, recursive = TRUE)
-
-cat(sprintf("Output directory: %s\n\n", job_out))
-
-# =============================================================================
-# Run simulation
-# =============================================================================
-
-cat("--- Running simulation ---\n")
-sim_start <- proc.time()
-
+cat("[1/3] Simulating ... ")
 sim <- run_simulation(
-  n_regions            = params$n_regions,
-  n                    = params$n,
-  p                    = params$p,
-  n_iter               = params$n_iter,
-  S                    = S_values,
-  phi                  = phi_values,
-  model                = params$model,
-  p_causal             = p_causal_arg,
-  effect_distribution  = "normal",
-  effect_variance      = 0.36,
-  annotations          = annot_type,
-  n_annotations        = params$n_annotations,
-  enrichment           = enrichment_arg,
-  vcf_dir              = if (dir.exists(VCF_DIR)) VCF_DIR else NULL,
-  seed                 = job_seed,
-  save                 = FALSE,
-  verbose              = TRUE
+  n_regions       = as.integer(job$n_regions),
+  n               = job$n,
+  p               = job$p,
+  n_iter          = job$n_iter,
+  S               = S_vec,
+  phi             = phi_vec,
+  model           = job$model,
+  annotations     = job$annotation_type,
+  n_annotations   = if (is.na(job$n_annotations)) 0L else job$n_annotations,
+  enrichment      = if (is.na(job$enrichment))    NULL else job$enrichment,
+  vcf_dir         = if (is.null(VCF_DIR) || !nzchar(VCF_DIR)) NULL else VCF_DIR,
+  genetic_map_dir = GENETIC_MAP_DIR,
+  n_ref           = if (is.na(job$n_ref)) NULL else as.integer(job$n_ref),
+  seed            = seed,
+  save            = FALSE,
+  verbose         = FALSE
 )
+t1 <- Sys.time()
+cat(sprintf("done (%.1f min)\n", as.numeric(t1 - t0, units = "mins")))
+saveRDS(sim, file.path(job_dir, "sim.rds"))
 
-sim_elapsed <- as.numeric((proc.time() - sim_start)["elapsed"])
-cat(sprintf("\nSimulation complete in %.1f s.\n", sim_elapsed))
-cat(sprintf("  Scenarios: %d\n\n", length(sim$scenarios)))
-
-# =============================================================================
-# Build per-method argument lists
-# =============================================================================
-
-method_args <- list(
-  susie = list(
-    L        = max(S_values) + 2L,   # generous upper bound on causal number
-    coverage = 0.95
-  ),
-  susie_inf = list(
-    L        = max(S_values) + 2L,
-    coverage = 0.95
-  ),
-  beatrice = list(
-    beatrice_dir    = file.path(PROJECT_ROOT, "alt_methods",
-                                "Beatrice-Finemapping"),
-    python          = PYTHON,
-    max_iter        = 2000L,
-    n_caus          = max(S_values) + 2L,
-    sparse_concrete = min(50L, params$p)
-  ),
-  funmap = list(
-    python = PYTHON
-  ),
-  functional_beatrice = list(
-    beatrice_dir         = FB_DIR,
-    python               = PYTHON,
-    max_iter             = 2000L,
-    n_caus               = max(S_values) + 2L,
-    sparse_concrete      = min(50L, params$p),
-    prior_regularisation = 1.0,
-    lambda_l1            = 0.01,
-    hierarchy_M          = 10.0
-  ),
-  paintor = list(
-    paintor_path = PAINTOR_PATH,
-    max_causal   = max(S_values),
-    coverage     = 0.95
-  )
-)
-
-# =============================================================================
-# Run methods
-# =============================================================================
-
-cat("--- Running fine-mapping methods ---\n")
-methods_start <- proc.time()
-
+cat(sprintf("[2/3] Running %d methods ... \n", length(METHODS)))
+t1 <- Sys.time()
 results <- run_methods(
-  simulation  = sim,
+  sim,
   methods     = METHODS,
-  method_args = method_args,
+  method_args = METHOD_ARGS[intersect(names(METHOD_ARGS), METHODS)],
   save        = FALSE,
-  verbose     = TRUE
+  verbose     = FALSE
 )
+t2 <- Sys.time()
+for (m in METHODS) {
+  cat(sprintf("       %-20s n_fits=%d  failed=%d\n",
+              m, results[[m]]$n_total, results[[m]]$n_failed))
+}
+cat(sprintf("       Methods total: %.1f min\n",
+            as.numeric(t2 - t1, units = "mins")))
+saveRDS(results, file.path(job_dir, "results.rds"))
 
-methods_elapsed <- as.numeric((proc.time() - methods_start)["elapsed"])
-cat(sprintf("\nMethods complete in %.1f s.\n\n", methods_elapsed))
+cat("[3/3] Evaluating ... ")
+t2 <- Sys.time()
+evaluation <- evaluate_methods(sim, results, save = FALSE, verbose = FALSE)
+t3 <- Sys.time()
+cat(sprintf("done (%.1f s)\n", as.numeric(t3 - t2, units = "secs")))
+saveRDS(evaluation, file.path(job_dir, "evaluation.rds"))
 
-# =============================================================================
-# Evaluate
-# =============================================================================
+# Headline AUPRC per method
+cat("\nGlobal AUPRC by method:\n")
+for (m in METHODS) {
+  a <- evaluation[[m]]$global$auprc
+  cat(sprintf("  %-20s %s\n", m,
+              if (is.null(a) || is.na(a)) "  NA" else sprintf("%.3f", a)))
+}
 
-cat("--- Evaluating ---\n")
-eval_out <- evaluate_methods(sim, results, verbose = TRUE)
-
-# =============================================================================
-# Save outputs
-# =============================================================================
-
-# Save full results (can be large — includes all PIPs and credible sets)
-saveRDS(results, file.path(job_out, "results.rds"))
-
-# Save evaluation summary (compact)
-saveRDS(eval_out, file.path(job_out, "evaluation.rds"))
-
-# Save job metadata
-metadata <- list(
-  job_id          = job_id,
-  job_label       = job_label,
-  params          = params,
-  S_values        = S_values,
-  phi_values      = phi_values,
-  p_causal_vals   = p_causal_vals,
-  methods_run     = METHODS,
-  sim_elapsed_s   = sim_elapsed,
-  method_elapsed_s = methods_elapsed,
-  n_scenarios     = length(sim$scenarios),
-  timestamp       = Sys.time()
+# Reproducibility metadata
+meta <- list(
+  job_id      = job$job_id,
+  label       = job$label,
+  params_row  = job,
+  methods     = METHODS,
+  method_args = METHOD_ARGS[intersect(names(METHOD_ARGS), METHODS)],
+  seed        = seed,
+  vcf_dir     = VCF_DIR,
+  genetic_map_dir = GENETIC_MAP_DIR,
+  started_at  = format(t0, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"),
+  runtime_sec = as.numeric(Sys.time() - t0, units = "secs"),
+  R_version   = R.version.string,
+  fmbenchmark_version =
+    tryCatch(as.character(utils::packageVersion("fmbenchmark")),
+             error = function(e) "source-checkout"),
+  sessionInfo = capture.output(sessionInfo())
 )
-saveRDS(metadata, file.path(job_out, "metadata.rds"))
+jsonlite::write_json(meta, file.path(job_dir, "params.json"),
+                     auto_unbox = TRUE, pretty = TRUE, null = "null")
 
-cat(sprintf("Results saved to: %s\n", job_out))
-cat(sprintf("Total job time: %.1f s\n",
-            as.numeric((proc.time() - sim_start)["elapsed"])))
+cat(sprintf("\nDone in %.1f min. Outputs at:\n  %s\n",
+            as.numeric(Sys.time() - t0, units = "mins"), job_dir))
