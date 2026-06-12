@@ -57,6 +57,10 @@ rsconnect/
 # Benchmark outputs
 results/
 
+# HPC: generated parameter grid + per-task SLURM logs
+scripts/hpc/params_grid.csv
+logs/
+
 # Claude Code settings (local only)
 .claude/
 
