@@ -2028,6 +2028,108 @@ test_that("[14] polyfun_est: graceful behaviour on no-annotation fixture", {
 
 
 # =============================================================================
+# SECTION 14b: run_polyfun_ldsc (corrected LD-score PolyFun)
+# =============================================================================
+# See wrapper_polyfun_ldsc.R for the correction rationale. These tests
+# lock in the S-LDSC-style regressor and the LOCO scenario_setup.
+
+test_that("[14b] polyfun_ldsc: single-region fit gives valid PIPs + non-uniform prior", {
+  # Use a sim with annotations so priors are non-trivial
+  sim <- run_simulation(
+    n_regions = 1, n = 150, p = 60, n_iter = 1, S = 2, phi = 0.3,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(6, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 1, verbose = FALSE
+  )
+  rg <- sim$genotypes[[1]]
+  rp <- sim$scenarios[[1]]$regions[[1]]
+
+  fit <- run_polyfun_ldsc_region(rg, rp)
+  expect_equal(length(fit$pip), rg$p)
+  expect_true(all(fit$pip >= 0 & fit$pip <= 1))
+  expect_equal(fit$method, "polyfun_ldsc")
+  expect_equal(fit$additional$prior_source, "single_region_ldsc")
+  # Priors should differ from uniform when at least one tau > 0
+  pw <- fit$additional$prior_weights
+  expect_equal(length(pw), rg$p)
+  expect_gt(sd(pw), 0)
+})
+
+test_that("[14b] polyfun_ldsc: uniform fallback when no annotations", {
+  # .rg has no annotations_matrix
+  fit <- run_polyfun_ldsc_region(.rg, .rp)
+  expect_equal(length(fit$pip), .rg$p)
+  expect_equal(fit$additional$prior_source, "uniform_fallback")
+  expect_equal(fit$additional$prior_weights,
+               rep(1 / .rg$p, .rg$p))
+})
+
+test_that("[14b] polyfun_ldsc scenario_setup: returns per-region LOCO tau vectors", {
+  sim <- run_simulation(
+    n_regions = 3, n = 150, p = 40, n_iter = 1, S = 1, phi = 0.2,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(5, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 5, verbose = FALSE
+  )
+  su <- run_polyfun_ldsc_scenario_setup(
+    genotypes = sim$genotypes,
+    regions   = sim$scenarios[[1]]$regions,
+    user_args = list()
+  )
+  # Non-empty return means LOCO succeeded
+  expect_named(su, "pooled_tau")
+  expect_equal(length(su$pooled_tau), 3L)
+  # Keyed by region_id so run_methods()'s scenario-wide arg merge still
+  # dispatches the correct tau to the correct region
+  expect_setequal(names(su$pooled_tau), c("1", "2", "3"))
+  # Each tau is intercept + m coefficients = m + 1 entries
+  for (tau in su$pooled_tau) {
+    expect_equal(length(tau), 4L)   # intercept + 3 annotations
+    expect_true(all(tau >= 0))       # NNLS enforces non-negativity
+  }
+  # LOCO: per-region taus should differ (each fit on a different subset
+  # of regions), unless the data happens to be numerically degenerate.
+  expect_false(isTRUE(all.equal(su$pooled_tau[["1"]], su$pooled_tau[["2"]])))
+})
+
+test_that("[14b] polyfun_ldsc via run_methods uses LOCO priors (differ from raw single-region)", {
+  sim <- run_simulation(
+    n_regions = 3, n = 150, p = 40, n_iter = 1, S = 1, phi = 0.2,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(5, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 7, verbose = FALSE
+  )
+  res <- run_methods(sim, methods = "polyfun_ldsc",
+                     method_args = list(polyfun_ldsc = list(L = 3)),
+                     save = FALSE, verbose = FALSE)
+  expect_equal(res$polyfun_ldsc$n_total, 3L)
+  expect_equal(res$polyfun_ldsc$n_failed, 0L)
+  first_fit <- res$polyfun_ldsc$results[[1]]
+  expect_equal(first_fit$additional$prior_source, "loco_scenario_setup")
+})
+
+test_that("[14b] polyfun_ldsc: ldscore helper computes l_{j,c} = sum_k r^2_{j,k} A_{k,c}", {
+  ldscore_matrix <- get(".ldscore_matrix", envir = asNamespace("fmbenchmark"))
+  A <- matrix(c(1, 0, 1, 0, 1,
+                0, 1, 0, 1, 0), 5, 2, byrow = FALSE)
+  LD <- diag(5); LD[1, 2] <- LD[2, 1] <- 0.5
+  ell <- ldscore_matrix(A, LD)
+  # Variant 1 (A_1 = c(1,0), r^2 to variant 2 = 0.25): ell_{1,1} = 1*1 + 0.25*0 = 1
+  # Variant 2 (A_2 = c(0,1)): ell_{2,1} = 0.25*1 + 1*0 = 0.25
+  expect_equal(ell[1, 1], 1.0)
+  expect_equal(ell[2, 1], 0.25)
+  # Column 2 has A = c(0,1,0,1,0): ell_{1,2} = 0 + 0.25*1 = 0.25
+  expect_equal(ell[1, 2], 0.25)
+})
+
+
+# =============================================================================
 # SECTION 15: MAF-stratified evaluation (by_causal_maf)
 # =============================================================================
 
