@@ -50,6 +50,7 @@
   marginal_z            = "run_marginal_z_region",
   polyfun_oracle        = "run_polyfun_oracle_region",
   polyfun_est           = "run_polyfun_est_region",
+  polyfun_ldsc          = "run_polyfun_ldsc_region",
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region"
 )

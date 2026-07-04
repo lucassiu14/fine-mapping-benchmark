@@ -36,7 +36,8 @@
   # they're an annotation-aware family.
   marginal_z            = "#7F7F7F",   # mid grey — baseline / floor
   polyfun_oracle        = "#1A535C",   # deep teal — the ceiling
-  polyfun_est           = "#4ECDC4",   # lighter teal — the realistic version
+  polyfun_est           = "#4ECDC4",   # lighter teal — the (naive) realistic version
+  polyfun_ldsc          = "#2E86AB",   # deep blue — the LD-score-corrected version
   # Deep wine — visually distinct from the BEATRICE
   # magenta and PAINTOR pink so the variational methods don't blur together.
   sparsepro             = "#6B2D5C"
