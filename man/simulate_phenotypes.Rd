@@ -17,6 +17,7 @@ simulate_phenotypes(
   n_annotations = 3,
   annotation_proportions = NULL,
   enrichment = NULL,
+  annotation_correlation = 0,
   seed = NULL,
   save = FALSE,
   output_dir = "results",
@@ -79,6 +80,17 @@ drawn from Uniform(2, 10) for each annotation. If scalar, that
 enrichment is used for all annotations. If a vector, must have length
 \code{n_annotations}. Values must be > 0 (values < 1 indicate
 depletion). Default: NULL.}
+
+\item{annotation_correlation}{Numeric scalar in \code{[0, 1]}. Approximate
+pairwise correlation between binary annotations that share the same
+enrichment fold. \code{0} (default) recovers the original independent
+generation. When positive, annotations at the same enrichment level are
+generated via a shared-factor latent Gaussian construction and
+thresholded to preserve each column's marginal frequency; annotations
+with different enrichment folds remain uncorrelated. Only affects
+\code{annotations = "binary"}; ignored when \code{enrichment} is NULL
+or has an unexpected length. The realised binary correlation is
+attenuated relative to the latent target by thresholding.}
 
 \item{seed}{Integer or NULL. Random seed. Default: NULL.}
 

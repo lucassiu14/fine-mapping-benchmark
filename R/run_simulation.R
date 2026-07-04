@@ -48,6 +48,11 @@
 #'   annotations. Default: NULL (random).
 #' @param enrichment Numeric or NULL. Fold-enrichment for annotations.
 #'   Default: NULL (random).
+#' @param annotation_correlation Numeric scalar in \code{[0, 1]}. Approximate
+#'   within-enrichment-group correlation between binary annotations. See
+#'   \code{\link{simulate_phenotypes}} for the shared-factor latent-Gaussian
+#'   construction. Only affects \code{annotations = "binary"}. Default: 0
+#'   (independent annotations, original behaviour).
 #' @param vcf_dir Character or NULL. Path to a directory of VCF files prepared
 #'   by \code{inst/scripts/prepare_vcfs.R} (e.g. \code{"data/vcf"}). If provided,
 #'   \code{n_regions} files are sampled at random from this directory for each
@@ -145,6 +150,7 @@ run_simulation <- function(n_regions = 3,
                            n_annotations = 3,
                            annotation_proportions = NULL,
                            enrichment = NULL,
+                           annotation_correlation = 0,
                            vcf_dir = NULL,
                            vcf_files = NULL,
                            genetic_map_dir = "data/genetic_maps",
@@ -344,7 +350,9 @@ run_simulation <- function(n_regions = 3,
         annotation_type = annotation_type_internal,
         n_annotations = n_annotations,
         annotation_proportions = ap_internal,
-        user_annotation_matrix = NULL
+        user_annotation_matrix = NULL,
+        annotation_correlation = annotation_correlation,
+        enrichment = enrichment
       )
       genotypes[[i]]$annotations_matrix    <- annot$matrix
       genotypes[[i]]$annotation_proportions <- annot$proportions
@@ -405,6 +413,7 @@ run_simulation <- function(n_regions = 3,
       n_annotations = n_annotations,
       annotation_proportions = annotation_proportions,
       enrichment = enrichment,
+      annotation_correlation = annotation_correlation,
       seed = NULL,  # let the RNG continue sequentially
       verbose = FALSE
     )
@@ -457,6 +466,7 @@ run_simulation <- function(n_regions = 3,
     n_annotations = n_annotations,
     annotation_proportions = annotation_proportions,
     enrichment = enrichment,
+    annotation_correlation = annotation_correlation,
     min_maf = min_maf,
     vcf_files_used = vcf_files,
     seed = seed,

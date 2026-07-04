@@ -20,6 +20,7 @@ run_simulation(
   n_annotations = 3,
   annotation_proportions = NULL,
   enrichment = NULL,
+  annotation_correlation = 0,
   vcf_dir = NULL,
   vcf_files = NULL,
   genetic_map_dir = "data/genetic_maps",
@@ -79,6 +80,12 @@ annotations. Default: NULL (random).}
 
 \item{enrichment}{Numeric or NULL. Fold-enrichment for annotations.
 Default: NULL (random).}
+
+\item{annotation_correlation}{Numeric scalar in \code{[0, 1]}. Approximate
+within-enrichment-group correlation between binary annotations. See
+\code{\link{simulate_phenotypes}} for the shared-factor latent-Gaussian
+construction. Only affects \code{annotations = "binary"}. Default: 0
+(independent annotations, original behaviour).}
 
 \item{vcf_dir}{Character or NULL. Path to a directory of VCF files prepared
 by \code{inst/scripts/prepare_vcfs.R} (e.g. \code{"data/vcf"}). If provided,

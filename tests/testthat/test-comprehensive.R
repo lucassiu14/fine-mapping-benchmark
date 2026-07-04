@@ -1740,6 +1740,82 @@ test_that("[11-funmap] funmap: python arg forwarded (graceful on miss)", {
   expect_false(is.null(fit))
 })
 
+test_that("[0.7 annotation_correlation] rho=0 gives near-identity empirical correlation", {
+  set.seed(1L)
+  p <- 5000L
+  n_annotations <- 6L
+  props <- rep(0.15, n_annotations)
+  enrichment <- c(5, 5, 5, 1, 1, 1)   # two groups of 3
+  A <- simulate_annotations_for_region(
+    p = p, annotation_type = "binary", n_annotations = n_annotations,
+    annotation_proportions = props, user_annotation_matrix = NULL,
+    annotation_correlation = 0, enrichment = enrichment
+  )$matrix
+  C <- cor(A)
+  off <- C[upper.tri(C)]
+  expect_lt(max(abs(off)), 0.05)
+  freq <- colMeans(A)
+  expect_true(all(abs(freq - props) < 0.02))
+})
+
+test_that("[0.7 annotation_correlation] rho>0 induces positive within-group corr, none across groups", {
+  set.seed(2L)
+  p <- 5000L
+  n_annotations <- 6L
+  props <- rep(0.15, n_annotations)
+  enrichment <- c(5, 5, 5, 1, 1, 1)   # two enrichment groups of 3
+  A25 <- simulate_annotations_for_region(
+    p = p, annotation_type = "binary", n_annotations = n_annotations,
+    annotation_proportions = props, user_annotation_matrix = NULL,
+    annotation_correlation = 0.25, enrichment = enrichment
+  )$matrix
+  A75 <- simulate_annotations_for_region(
+    p = p, annotation_type = "binary", n_annotations = n_annotations,
+    annotation_proportions = props, user_annotation_matrix = NULL,
+    annotation_correlation = 0.75, enrichment = enrichment
+  )$matrix
+
+  in_group_pairs <- rbind(c(1,2), c(1,3), c(2,3), c(4,5), c(4,6), c(5,6))
+  cross_pairs <- rbind(c(1,4), c(1,5), c(1,6), c(2,4), c(2,5), c(2,6),
+                       c(3,4), c(3,5), c(3,6))
+
+  mean_ig25 <- mean(apply(in_group_pairs, 1, function(ij) cor(A25[, ij[1]], A25[, ij[2]])))
+  mean_ig75 <- mean(apply(in_group_pairs, 1, function(ij) cor(A75[, ij[1]], A75[, ij[2]])))
+  mean_cross75 <- mean(apply(cross_pairs, 1, function(ij) cor(A75[, ij[1]], A75[, ij[2]])))
+
+  expect_gt(mean_ig75, 0.20)
+  expect_gt(mean_ig75, mean_ig25 + 0.05)
+  expect_lt(abs(mean_cross75), 0.05)
+  expect_true(all(abs(colMeans(A25) - props) < 0.02))
+  expect_true(all(abs(colMeans(A75) - props) < 0.02))
+})
+
+test_that("[0.7 annotation_correlation] enrichment=NULL disables correlation", {
+  set.seed(3L)
+  p <- 5000L; n_annotations <- 4L
+  props <- rep(0.2, n_annotations)
+  A <- simulate_annotations_for_region(
+    p = p, annotation_type = "binary", n_annotations = n_annotations,
+    annotation_proportions = props, user_annotation_matrix = NULL,
+    annotation_correlation = 0.75, enrichment = NULL   # no grouping info
+  )$matrix
+  expect_lt(max(abs(cor(A)[upper.tri(cor(A))])), 0.05)
+})
+
+test_that("[0.7 annotation_correlation] run_simulation accepts + forwards the arg", {
+  sim <- run_simulation(
+    n_regions = 2, n = 100, p = 40, n_iter = 1, S = 1, phi = 0.2,
+    model = "sparse", annotations = "binary", n_annotations = 4,
+    annotation_proportions = rep(0.2, 4),
+    enrichment = c(5, 5, 1, 1),
+    annotation_correlation = 0.5,
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 42, verbose = FALSE
+  )
+  expect_false(is.null(sim$scenarios[[1]]$regions[[1]]$annotations_matrix))
+  expect_equal(sim$params$annotation_correlation, 0.5)
+})
+
 test_that("[11-fb-helper] .fb_extract_annotations: geno preferred, pheno fallback", {
   extract <- get(".fb_extract_annotations", envir = asNamespace("fmbenchmark"))
   A_geno  <- matrix(1, 5, 2)
