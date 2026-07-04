@@ -32,12 +32,15 @@ run_polyfun_ldsc(
 NULL runs with a uniform prior (reports prior_source =
 "uniform_fallback").}
 
-\item{pooled_tau}{Numeric vector or NULL. Pre-computed coefficients
-(length m + 1; first entry is the intercept). When supplied, no
-per-region LDSC fit happens - these coefficients are used directly
-to build the priors. Typically supplied by
-\code{run_polyfun_ldsc_scenario_setup()} using leave-one-region-out.
-Default: NULL.}
+\item{pooled_tau}{Numeric vector, named list, or NULL. If numeric, used
+directly as the (length m + 1) coefficient vector. If a named list
+(as returned by \code{run_polyfun_ldsc_scenario_setup()}), the entry
+keyed by \code{region_id} is looked up. Default: NULL.}
+
+\item{region_id}{Character/integer or NULL. Identifier used to look up
+the correct per-region tau vector inside a list-valued
+\code{pooled_tau}. Ignored when \code{pooled_tau} is numeric or NULL.
+Automatically forwarded by \code{run_polyfun_ldsc_region()}.}
 
 \item{L}{Integer. Max single-effect components. Default: 10.}
 
