@@ -431,15 +431,20 @@ run_functional_beatrice <- function(z,
 #' and (optionally) annotation matrix from the simulation's data structures
 #' and calls \code{\link{run_functional_beatrice}}.
 #'
-#' Annotations are expected in \code{region_geno$annotations} (a p × m
-#' numeric matrix). If that field is absent or NULL, the method runs without
-#' a functional prior.
+#' The annotation matrix is read from \code{region_geno$annotations_matrix}
+#' first, falling back to \code{region_pheno$annotations_matrix} for
+#' backward compatibility with the locus pipeline (which copies annotations
+#' onto both objects). If both are NULL the method runs without a
+#' functional prior. The geno-first ordering matters for the genome-wide
+#' pipeline (\code{simulate_gwfm_data}), which populates only the geno-side
+#' matrix.
 #'
 #' @param region_geno List. One element of \code{simulation$genotypes},
 #'   containing at minimum \code{LD}, \code{n}, \code{variant_ids}, and
-#'   optionally \code{annotations}.
+#'   optionally \code{annotations_matrix} (p x m).
 #' @param region_pheno List. One element of a scenario's \code{regions},
-#'   containing \code{z}.
+#'   containing \code{z} and, in the locus pipeline, a copy of
+#'   \code{annotations_matrix}.
 #' @param ... Additional arguments passed to
 #'   \code{\link{run_functional_beatrice}} (e.g. \code{beatrice_dir},
 #'   \code{python}, \code{max_iter}).
@@ -451,10 +456,26 @@ run_functional_beatrice_region <- function(region_geno, region_pheno, ...) {
     z            = region_pheno$z,
     LD           = region_geno$LD,
     n            = region_geno$n,
-    annotations  = region_pheno$annotations_matrix,   # NULL if not simulated
+    annotations  = .fb_extract_annotations(region_geno, region_pheno),
     variant_ids  = region_geno$variant_ids,
     ...
   )
+}
+
+
+# Prefer region_geno$annotations_matrix, falling back to
+# region_pheno$annotations_matrix. Both simulators (run_simulation,
+# simulate_gwfm_data) populate the geno-side matrix; the locus pipeline
+# additionally copies it onto the pheno object at scenario-build time
+# (see run_simulation.R line ~420), but the genome-wide simulator does
+# NOT — so reading only from the pheno side silently drops annotations
+# under simulate_gwfm_data. This helper is factored out so the
+# annotation-selection contract can be regression-tested without
+# needing the Python-only run_functional_beatrice() to actually run.
+.fb_extract_annotations <- function(region_geno, region_pheno) {
+  A <- region_geno$annotations_matrix
+  if (is.null(A)) A <- region_pheno$annotations_matrix
+  A
 }
 
 

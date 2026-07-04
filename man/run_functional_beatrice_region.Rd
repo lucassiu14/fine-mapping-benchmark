@@ -9,10 +9,11 @@ run_functional_beatrice_region(region_geno, region_pheno, ...)
 \arguments{
 \item{region_geno}{List. One element of \code{simulation$genotypes},
 containing at minimum \code{LD}, \code{n}, \code{variant_ids}, and
-optionally \code{annotations}.}
+optionally \code{annotations_matrix} (p x m).}
 
 \item{region_pheno}{List. One element of a scenario's \code{regions},
-containing \code{z}.}
+containing \code{z} and, in the locus pipeline, a copy of
+\code{annotations_matrix}.}
 
 \item{...}{Additional arguments passed to
 \code{\link{run_functional_beatrice}} (e.g. \code{beatrice_dir},
@@ -27,7 +28,11 @@ and (optionally) annotation matrix from the simulation's data structures
 and calls \code{\link{run_functional_beatrice}}.
 }
 \details{
-Annotations are expected in \code{region_geno$annotations} (a p × m
-numeric matrix). If that field is absent or NULL, the method runs without
-a functional prior.
+The annotation matrix is read from \code{region_geno$annotations_matrix}
+first, falling back to \code{region_pheno$annotations_matrix} for
+backward compatibility with the locus pipeline (which copies annotations
+onto both objects). If both are NULL the method runs without a
+functional prior. The geno-first ordering matters for the genome-wide
+pipeline (\code{simulate_gwfm_data}), which populates only the geno-side
+matrix.
 }
