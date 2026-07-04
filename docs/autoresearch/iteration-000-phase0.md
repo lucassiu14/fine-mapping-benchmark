@@ -146,16 +146,77 @@ Tier 2/3 (external binaries / Python — only on hosts that have them):
 None yet — Phase 1 has not been kicked off. The next step is `§0.3`
 (laptop test on tiny config) and `§0.4` (HPC parity), then §1.
 
+## §0.3 laptop smoke test — done
+
+Extended `scripts/hpc/smoke_test.R` to include the full 8-method Tier 1
+set (adding `susie_inf`, `carma`, and the new `polyfun_ldsc`) and added
+explicit checks that every method's `pip_calibration` and
+`fdr_power_curve` compute, that `plot_results()` runs end-to-end, and
+that the AUPRC ordering (`marginal_z ≤ susie`, `≤ polyfun_oracle`,
+`≤ polyfun_ldsc`) holds.
+
+**Result on the laptop** (3 regions × 8 scenarios, ~80 s total):
+
+| Method | AUPRC | Calibration | FDR curve | Bins > 0 |
+|---|---:|:-:|:-:|---:|
+| polyfun_oracle | 0.623 | ✓ | ✓ | 10 |
+| polyfun_est | 0.592 | ✓ | ✓ | 9 |
+| susie | 0.576 | ✓ | ✓ | 9 |
+| polyfun_ldsc | 0.557 | ✓ | ✓ | 9 |
+| susie_inf | 0.518 | ✓ | ✓ | 9 |
+| abf | 0.496 | ✓ | ✓ | 8 |
+| marginal_z | 0.231 | ✓ | ✓ | 1 |
+| carma | 0.229 | ✓ | ✓ | 9 |
+
+Ordering sanity passes; `plot_results()` produces a valid PDF; every
+method emits a well-formed calibration curve. Marginal_z's single
+non-empty calibration bin is expected — it puts near-uniform mass on
+tails so most bins are empty.
+
+Note: `polyfun_est` marginally beat `polyfun_ldsc` on this tiny (3-region,
+S∈{1,2}, φ∈{0.1,0.4}) demo — well within the finite-sample noise floor
+of a smoke test and consistent with LOCO's expected variance-cost at
+n_regions = 3. The comparison that matters is in Phase 1 at
+n_regions = 20 with the full sweep; that's where §0.6 Error 1's
+motivating claim (the corrected method should exceed the naive one on
+average) will actually be tested.
+
+Also fixed a cosmetic issue: the "Precision (1 − FDR)" y-axis label used
+U+2212 (Unicode minus), which triggers `mbcsToSbcs` graphics-device
+warnings on the CI runners. Swapped to ASCII "-".
+
+## §0.4 HPC parity — deferred to the loop operator
+
+Same script (`scripts/hpc/smoke_test.R`) is what's designed to run
+first thing on the cluster. When the loop is next resumed on the HPC:
+
+```
+git pull
+R -e 'renv::restore()'
+R -e 'install.packages(".", repos = NULL, type = "source")'
+Rscript inst/scripts/prepare_vcfs.R   # once, ~150 MB
+Rscript scripts/hpc/smoke_test.R      # want "PASSED"
+```
+
+If the smoke test passes on the HPC with the same method-availability
++ ordering guarantees, Phase 1 can be submitted with the current
+`scripts/hpc/submit_benchmark.sh`.
+
 ## Next steps
 
-1. **Iteration 001 — Phase 0.3 / 0.4 smoke test.** Run the whole chain
-   (`simulate → run_methods → evaluate_methods → plot_results`) with
-   the current feasible set on a tiny config, confirm calibration curve
-   + AUPRC + FDR compute, then repeat on the HPC.
-2. **Iteration 002 — Phase 1 simulation kickoff.** Full 3125-scenario
-   grid on the HPC (§1.1 / §1.3), sanity-checked per §1.4 before Phase
-   2 begins.
-3. **Later — supervised SBayesRC round.** Once real block LD from
+1. **§0.4 HPC parity** on the cluster (run the smoke test there, one
+   session, no further code changes needed).
+2. **Iteration 001 — Phase 1 simulation kickoff.** Extend
+   `scripts/hpc/generate_params_grid.R` to encode §1.1 / §1.3 (in
+   particular the length-20 per-region `p` vector, `annotation_correlation`
+   sweep, `n_regions = 20`, length-20 enrichment vector with a handful of
+   truly enriched positions). Submit the 3125-scenario array. Sanity-check
+   per §1.4 before Phase 2 begins.
+3. **Iteration 002+ — Phase 2 loop.** Feasible set = the 8 Tier 1
+   methods above; representative dataset set = the full Phase 1
+   simulation store initially; run the loop with the calibration gate
+   (§2.3) and floor + separation-based dataset pruning (§2.5).
+4. **Later — supervised SBayesRC round.** Once real block LD from
    Phase 1 exists, prototype the LD-folder converter against a couple
    of regions; only then decide whether to include SBayesRC in the
    feasible set.
