@@ -63,6 +63,16 @@
 #'   enrichment is used for all annotations. If a vector, must have length
 #'   \code{n_annotations}. Values must be > 0 (values < 1 indicate
 #'   depletion). Default: NULL.
+#' @param annotation_correlation Numeric scalar in \code{[0, 1]}. Approximate
+#'   pairwise correlation between binary annotations that share the same
+#'   enrichment fold. \code{0} (default) recovers the original independent
+#'   generation. When positive, annotations at the same enrichment level are
+#'   generated via a shared-factor latent Gaussian construction and
+#'   thresholded to preserve each column's marginal frequency; annotations
+#'   with different enrichment folds remain uncorrelated. Only affects
+#'   \code{annotations = "binary"}; ignored when \code{enrichment} is NULL
+#'   or has an unexpected length. The realised binary correlation is
+#'   attenuated relative to the latent target by thresholding.
 #' @param seed Integer or NULL. Random seed. Default: NULL.
 #' @param save Logical. If TRUE, save the returned list (genotypes augmented
 #'   with phenotypes) as an \code{.rds} file inside \code{output_dir}. The
@@ -127,10 +137,19 @@ simulate_phenotypes <- function(genotypes,
                                 n_annotations = 3,
                                 annotation_proportions = NULL,
                                 enrichment = NULL,
+                                annotation_correlation = 0,
                                 seed = NULL,
                                 save = FALSE,
                                 output_dir = "results",
                                 verbose = TRUE) {
+
+  stopifnot(
+    "annotation_correlation must be a scalar in [0, 1]" =
+      is.numeric(annotation_correlation) &&
+      length(annotation_correlation) == 1L &&
+      !is.na(annotation_correlation) &&
+      annotation_correlation >= 0 && annotation_correlation <= 1
+  )
 
   # --- Input validation -------------------------------------------------------
 
@@ -260,7 +279,9 @@ simulate_phenotypes <- function(genotypes,
         annotation_type = annotation_type,
         n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
         annotation_proportions = annotation_proportions,
-        user_annotation_matrix = user_annotation_matrix
+        user_annotation_matrix = user_annotation_matrix,
+        annotation_correlation = annotation_correlation,
+        enrichment = enrichment
       )
       A_i     <- annot_result$matrix
       props_i <- annot_result$proportions
@@ -445,7 +466,9 @@ simulate_annotations_for_region <- function(p,
                                             annotation_type,
                                             n_annotations,
                                             annotation_proportions,
-                                            user_annotation_matrix) {
+                                            user_annotation_matrix,
+                                            annotation_correlation = 0,
+                                            enrichment = NULL) {
 
   if (annotation_type == "none") {
     return(list(matrix = NULL, proportions = NULL))
@@ -472,13 +495,9 @@ simulate_annotations_for_region <- function(p,
       props <- annotation_proportions
     }
 
-    # Generate binary matrix
-    A <- matrix(0, nrow = p, ncol = n_annotations)
-    for (k in seq_len(n_annotations)) {
-      A[, k] <- rbinom(p, size = 1, prob = props[k])
-    }
+    A <- .binary_annotations(p, n_annotations, props,
+                             annotation_correlation, enrichment)
     colnames(A) <- paste0("annot_", seq_len(n_annotations))
-
     return(list(matrix = A, proportions = props))
   }
 
@@ -489,6 +508,63 @@ simulate_annotations_for_region <- function(p,
 
     return(list(matrix = A, proportions = NULL))
   }
+}
+
+
+# =============================================================================
+# Internal: binary annotation matrix with optional within-enrichment-group
+# correlation.
+#
+# When annotation_correlation == 0 (default) OR the enrichment grouping is
+# unknown (NULL / wrong length), columns are drawn independently via rbinom
+# - recovers the original behaviour exactly.
+#
+# When annotation_correlation > 0 and enrichment is supplied, columns are
+# grouped by identical enrichment fold. Within each group of size >= 2 we
+# generate a latent Gaussian field with compound-symmetric correlation rho
+# via a shared-factor construction:
+#
+#     Z_k = sqrt(rho) * F + sqrt(1 - rho) * eps_k,  F, eps_k ~ N(0, 1) iid
+#
+# giving marginal N(0,1) and pairwise cor(Z_k, Z_l) = rho for k != l in the
+# same group; independent across groups. Each column is then thresholded at
+# qnorm(1 - prop_k) so its marginal P(A_k = 1) is exactly prop_k.
+#
+# NB: thresholding attenuates the induced Bernoulli correlation relative to
+# the latent rho - this is expected, documented in the tests, and swept as
+# an axis by the autoresearch simulation grid rather than solved for
+# analytically.
+.binary_annotations <- function(p, n_annotations, props,
+                                annotation_correlation, enrichment) {
+  A <- matrix(0L, nrow = p, ncol = n_annotations)
+
+  # Enrichment-based grouping: identical enrichment fold -> same group.
+  # Fall back to "each column is its own group" (i.e. independent) when
+  # enrichment isn't supplied or when the requested correlation is 0.
+  if (annotation_correlation == 0 || is.null(enrichment) ||
+      length(enrichment) != n_annotations) {
+    groups <- as.list(seq_len(n_annotations))
+  } else {
+    groups <- split(seq_len(n_annotations), enrichment)
+  }
+
+  rho <- annotation_correlation
+  for (grp in groups) {
+    if (length(grp) == 1L || rho == 0) {
+      for (k in grp) {
+        A[, k] <- rbinom(p, size = 1L, prob = props[k])
+      }
+    } else {
+      F <- rnorm(p)   # shared factor for this enrichment group
+      for (k in grp) {
+        eps_k    <- rnorm(p)
+        latent_k <- sqrt(rho) * F + sqrt(1 - rho) * eps_k
+        # Threshold at qnorm(1 - prop_k) => P(latent > cut) = prop_k
+        A[, k]   <- as.integer(latent_k > qnorm(1 - props[k]))
+      }
+    }
+  }
+  A
 }
 
 
