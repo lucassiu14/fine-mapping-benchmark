@@ -183,7 +183,7 @@
     ggplot2::scale_color_manual(values = cols, name = "Method") +
     ggplot2::scale_fill_manual(values = cols,  name = "Method") +
     ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
-    ggplot2::labs(title = title, x = "Recall (Power)", y = "Precision (1 \u2212 FDR)") +
+    ggplot2::labs(title = title, x = "Recall (Power)", y = "Precision (1 - FDR)") +
     .fm_theme()
 }
 

@@ -48,16 +48,20 @@ cat(sprintf("       %d regions x %d scenarios\n",
 
 cat("[2/3] Running methods ... ")
 t1 <- Sys.time()
-methods <- c("susie", "abf", "marginal_z", "polyfun_oracle", "polyfun_est")
+methods <- c("susie", "susie_inf", "abf", "carma",
+             "marginal_z", "polyfun_oracle", "polyfun_est", "polyfun_ldsc")
 results <- run_methods(
   sim,
   methods = methods,
   method_args = list(
     susie          = list(L = 5, coverage = 0.95),
+    susie_inf      = list(L = 5),
     abf            = list(prior_variance = 0.04),
+    carma          = list(num.causal = 3),
     marginal_z     = list(coverage = 0.95),
     polyfun_oracle = list(L = 5),
-    polyfun_est    = list(L = 5)
+    polyfun_est    = list(L = 5),
+    polyfun_ldsc   = list(L = 5)
   ),
   verbose = FALSE
 )
@@ -79,16 +83,44 @@ for (m in methods) {
               if (is.null(a) || is.na(a)) "  NA" else sprintf("%.3f", a)))
 }
 
-# Sanity: marginal_z should not beat susie or polyfun on a setting with signal.
-ok <- all(c(
+# --- §0.3 metric-availability checks -----------------------------------------
+# Confirm the FDR curve and PIP calibration curve compute correctly for
+# every method, not just the AUPRC scalar. If any of these are absent the
+# Phase 2 calibration gate and separation-based dataset ranking cannot run.
+cat("\nMetric availability (calibration + FDR + n_pip bins):\n")
+metrics_ok <- TRUE
+for (m in methods) {
+  g <- evaluation[[m]]$global
+  cal_ok <- !is.null(g$pip_calibration) && nrow(g$pip_calibration) > 0
+  fdr_ok <- !is.null(g$fdr_power_curve) && nrow(g$fdr_power_curve) > 0
+  n_bins <- if (cal_ok) sum(g$pip_calibration$n > 0, na.rm = TRUE) else 0L
+  cat(sprintf("  %-16s calibration=%s  fdr_curve=%s  non_empty_cal_bins=%d\n",
+              m, ifelse(cal_ok, "YES", "NO "),
+              ifelse(fdr_ok, "YES", "NO "), n_bins))
+  metrics_ok <- metrics_ok && cal_ok && fdr_ok
+}
+
+# --- plot_results end-to-end (catches plotting regressions) -----------------
+tmp_pdf <- tempfile(fileext = ".pdf")
+plot_ok <- tryCatch({
+  plot_results(evaluation, output_file = tmp_pdf, verbose = FALSE)
+  file.exists(tmp_pdf) && file.info(tmp_pdf)$size > 1000L
+}, error = function(e) { cat("plot_results error:", conditionMessage(e), "\n"); FALSE })
+cat(sprintf("plot_results:      %s\n", ifelse(plot_ok, "YES", "NO ")))
+
+# --- AUPRC ordering sanity ---------------------------------------------------
+ord_ok <- all(c(
   evaluation$marginal_z$global$auprc <= evaluation$susie$global$auprc,
-  evaluation$marginal_z$global$auprc <= evaluation$polyfun_oracle$global$auprc
+  evaluation$marginal_z$global$auprc <= evaluation$polyfun_oracle$global$auprc,
+  # polyfun_ldsc should be at least as good as marginal_z on a signal-rich
+  # setting - if not, something is broken in the corrected regressor
+  evaluation$marginal_z$global$auprc <= evaluation$polyfun_ldsc$global$auprc
 ))
+cat(sprintf("AUPRC ordering:    %s\n", ifelse(ord_ok, "OK ", "OFF")))
 
 cat(sprintf("\nTotal runtime: %.1fs\n", as.numeric(Sys.time() - t0, units = "secs")))
-if (ok) {
+if (metrics_ok && plot_ok && ord_ok) {
   cat("Smoke test PASSED. Submit with: sbatch scripts/hpc/submit_benchmark.sh\n")
 } else {
-  cat("WARNING: AUPRC ordering looks off (marginal_z >= susie/polyfun_oracle).\n",
-      "         Investigate before submitting the full array.\n")
+  cat("WARNING: smoke test issues detected - investigate before submitting.\n")
 }
