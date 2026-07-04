@@ -1740,6 +1740,64 @@ test_that("[11-funmap] funmap: python arg forwarded (graceful on miss)", {
   expect_false(is.null(fit))
 })
 
+test_that("[11-fb-helper] .fb_extract_annotations: geno preferred, pheno fallback", {
+  extract <- get(".fb_extract_annotations", envir = asNamespace("fmbenchmark"))
+  A_geno  <- matrix(1, 5, 2)
+  A_pheno <- matrix(2, 5, 2)
+  expect_identical(extract(list(annotations_matrix = A_geno), list()), A_geno)
+  expect_identical(extract(list(), list(annotations_matrix = A_pheno)), A_pheno)
+  expect_identical(
+    extract(list(annotations_matrix = A_geno),
+            list(annotations_matrix = A_pheno)),
+    A_geno
+  )
+  expect_null(extract(list(), list()))
+})
+
+test_that("[11-fb-regression] fb wrapper reads annotations from region_geno (gw-path fix)", {
+  # Regression: the genome-wide simulator sets annotations_matrix ONLY on
+  # region_geno. Previously the wrapper read from region_pheno, silently
+  # dropping annotations under simulate_gwfm_data. Mock
+  # run_functional_beatrice and inspect the annotations argument.
+  n_snp <- 20; K <- 3
+  rg <- list(
+    LD = diag(n_snp), n = 100,
+    variant_ids = as.character(seq_len(n_snp)),
+    annotations_matrix = matrix(rbinom(n_snp * K, 1, 0.3), n_snp, K)
+  )
+  rp <- list(z = rnorm(n_snp))   # no annotations here — mimics gw path
+
+  captured_A <- NULL
+  fake_fb <- function(z, LD, n, annotations = NULL, ...) {
+    captured_A <<- annotations
+    list(pip = rep(0, length(z)), method = "functional_beatrice",
+         credible_sets = list(), params = list(),
+         runtime_seconds = 0, additional = list())
+  }
+  original <- get("run_functional_beatrice", envir = asNamespace("fmbenchmark"))
+  assignInNamespace("run_functional_beatrice", fake_fb, ns = "fmbenchmark")
+  on.exit(
+    assignInNamespace("run_functional_beatrice", original, ns = "fmbenchmark"),
+    add = TRUE
+  )
+
+  invisible(run_functional_beatrice_region(rg, rp))
+  expect_false(is.null(captured_A),
+               info = "annotations should be forwarded from region_geno")
+  expect_equal(dim(captured_A), c(n_snp, K))
+  expect_equal(captured_A, rg$annotations_matrix)
+
+  # Permutation regression: shuffling annotation rows changes what the
+  # wrapper hands off (previous bug returned NULL either way).
+  perm <- sample(n_snp)
+  rg2 <- rg
+  rg2$annotations_matrix <- rg$annotations_matrix[perm, , drop = FALSE]
+  captured_A <- NULL
+  invisible(run_functional_beatrice_region(rg2, rp))
+  expect_equal(captured_A, rg2$annotations_matrix)
+  expect_false(isTRUE(all.equal(captured_A, rg$annotations_matrix)))
+})
+
 
 # =============================================================================
 # SECTION 12: run_marginal_z / run_marginal_z_region (baseline)
