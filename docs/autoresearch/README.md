@@ -5,6 +5,7 @@ This directory hosts the running record of the auto-research loop
 
 - `iteration-000-phase0.md` — Phase 0 setup + method additions (this loop's
   initial pass).
+- `iteration-001-phase1-grid.md` — Phase 1 HPC grid + worker plumbing.
 - `iteration-NNN-<slug>.md` — each subsequent Phase 2 iteration.
 
 Novel methods get their own descriptor file:
