@@ -2130,6 +2130,133 @@ test_that("[14b] polyfun_ldsc: ldscore helper computes l_{j,c} = sum_k r^2_{j,k}
 
 
 # =============================================================================
+# SECTION 14c: run_sbayesrc (in-R SBayesRC reimplementation)
+# =============================================================================
+# See wrapper_sbayesrc.R for the algorithmic derivation and the sparse
+# initial prior + regularized annotation-refit design.
+
+test_that("[14c] sbayesrc: single-region fit returns valid PIPs + posterior beta", {
+  sim <- run_simulation(
+    n_regions = 1, n = 200, p = 40, n_iter = 1, S = 2, phi = 0.3,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(5, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 11, verbose = FALSE
+  )
+  rg <- sim$genotypes[[1]]; rp <- sim$scenarios[[1]]$regions[[1]]
+  fit <- run_sbayesrc_region(rg, rp)
+  expect_equal(length(fit$pip), rg$p)
+  expect_true(all(fit$pip >= 0 & fit$pip <= 1))
+  expect_equal(fit$method, "sbayesrc")
+  expect_equal(fit$additional$prior_source, "single_region_gamma")
+  expect_equal(length(fit$additional$posterior_mean_beta), rg$p)
+  expect_equal(length(fit$additional$alpha), 4L)   # default K = 4
+})
+
+test_that("[14c] sbayesrc: no-annotation fallback runs cleanly", {
+  # .rg / .rp fixtures have no annotations
+  fit <- run_sbayesrc_region(.rg, .rp)
+  expect_equal(length(fit$pip), .rg$p)
+  expect_equal(fit$additional$prior_source, "no_annotations")
+})
+
+test_that("[14c] sbayesrc scenario_setup: returns pooled_gamma across regions", {
+  sim <- run_simulation(
+    n_regions = 3, n = 200, p = 40, n_iter = 1, S = 1, phi = 0.3,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(5, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 13, verbose = FALSE
+  )
+  su <- run_sbayesrc_scenario_setup(
+    genotypes = sim$genotypes,
+    regions   = sim$scenarios[[1]]$regions,
+    user_args = list()
+  )
+  expect_named(su, "pooled_gamma")
+  expect_named(su$pooled_gamma, c("alpha", "gamma"))
+  expect_equal(length(su$pooled_gamma$alpha), 4L)      # default K = 4
+  expect_equal(dim(su$pooled_gamma$gamma), c(3L, 4L))  # 3 annotations x 4 slabs
+  # Empty-class alphas should be safely clamped to the "very negative"
+  # range rather than left at 0 (that's the bug the fix guards against).
+  expect_true(all(su$pooled_gamma$alpha >= -12 & su$pooled_gamma$alpha <= 6))
+})
+
+test_that("[14c] sbayesrc via run_methods uses pooled_scenario_gamma prior", {
+  sim <- run_simulation(
+    n_regions = 3, n = 200, p = 40, n_iter = 1, S = 1, phi = 0.3,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(5, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 17, verbose = FALSE
+  )
+  res <- run_methods(sim, methods = "sbayesrc",
+                     method_args = list(sbayesrc = list(n_iter = 150, burn_in = 75)),
+                     save = FALSE, verbose = FALSE)
+  expect_equal(res$sbayesrc$n_total, 3L)
+  expect_equal(res$sbayesrc$n_failed, 0L)
+  expect_equal(res$sbayesrc$results[[1]]$additional$prior_source,
+               "pooled_scenario_gamma")
+  # Sparse prior: non-causal PIPs should stay well below the "everything's
+  # equal prior" pathology (mean should not exceed ~0.5)
+  truth1 <- sim$scenarios[[1]]$regions[[1]]$truth$causal_indices
+  pip1   <- res$sbayesrc$results[[1]]$pip
+  expect_lt(mean(pip1[-truth1]), 0.5)
+})
+
+test_that("[14c] sbayesrc: causal PIPs beat non-causal on aggregate", {
+  # Aggregate across three regions with modest signal - should detect a
+  # difference even at the smoke-test scale.
+  sim <- run_simulation(
+    n_regions = 3, n = 300, p = 50, n_iter = 2, S = 2, phi = 0.4,
+    model = "sparse", annotations = "binary", n_annotations = 3,
+    annotation_proportions = rep(0.2, 3),
+    enrichment = c(6, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(),
+    seed = 21, verbose = FALSE
+  )
+  res <- run_methods(sim, methods = "sbayesrc",
+                     method_args = list(sbayesrc = list(n_iter = 200, burn_in = 100)),
+                     save = FALSE, verbose = FALSE)
+  causal_pips <- c(); noncausal_pips <- c()
+  scenarios <- sim$scenarios
+  fit_idx <- 1L
+  for (sc in seq_along(scenarios)) {
+    for (rg in seq_along(scenarios[[sc]]$regions)) {
+      truth <- scenarios[[sc]]$regions[[rg]]$truth$causal_indices
+      pip   <- res$sbayesrc$results[[fit_idx]]$pip
+      causal_pips    <- c(causal_pips, pip[truth])
+      noncausal_pips <- c(noncausal_pips, pip[-truth])
+      fit_idx <- fit_idx + 1L
+    }
+  }
+  expect_gt(mean(causal_pips), mean(noncausal_pips))
+  expect_gt(mean(causal_pips) - mean(noncausal_pips), 0.05)
+})
+
+test_that("[14c] sbayesrc: .sbayesrc_priors_from_gamma matches manual softmax", {
+  softmax <- function(x) { e <- exp(x - max(x)); e / sum(e) }
+  fn <- get(".sbayesrc_priors_from_gamma", envir = asNamespace("fmbenchmark"))
+  # Two SNPs, two annotations, K = 3 slabs
+  A     <- matrix(c(1, 0, 0, 1), 2, 2, byrow = TRUE)
+  alpha <- c(-2, -3, -4)
+  gamma <- matrix(c(1, 0.5,
+                    0, 0.2,
+                    0, 0), byrow = TRUE, nrow = 2, ncol = 3)
+  pi_mat <- fn(A, alpha, gamma, K = 3L, p = 2L)
+  expect_equal(dim(pi_mat), c(2L, 4L))
+  # Reference logit is 0 for k = 0. SNP 1 logits (k=1..3):
+  # alpha + A[1,] %*% gamma[,k] for each k
+  logit_snp1 <- alpha + as.numeric(A[1, ] %*% gamma)
+  expect_equal(as.numeric(pi_mat[1, ]),
+               softmax(c(0, logit_snp1)), tolerance = 1e-10)
+})
+
+
+# =============================================================================
 # SECTION 15: MAF-stratified evaluation (by_causal_maf)
 # =============================================================================
 

@@ -49,7 +49,8 @@ cat(sprintf("       %d regions x %d scenarios\n",
 cat("[2/3] Running methods ... ")
 t1 <- Sys.time()
 methods <- c("susie", "susie_inf", "abf", "carma",
-             "marginal_z", "polyfun_oracle", "polyfun_est", "polyfun_ldsc")
+             "marginal_z", "polyfun_oracle", "polyfun_est",
+             "polyfun_ldsc", "sbayesrc")
 results <- run_methods(
   sim,
   methods = methods,
@@ -61,7 +62,8 @@ results <- run_methods(
     marginal_z     = list(coverage = 0.95),
     polyfun_oracle = list(L = 5),
     polyfun_est    = list(L = 5),
-    polyfun_ldsc   = list(L = 5)
+    polyfun_ldsc   = list(L = 5),
+    sbayesrc       = list(n_iter = 200, burn_in = 100)
   ),
   verbose = FALSE
 )

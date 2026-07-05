@@ -12,7 +12,7 @@ SBayesRC deferred per plan (§0.1 caveat).
 | 1 | Functional BEATRICE annotation-drop fix (gw path) | §0.6 Error 2 | #19 | ✅ merged |
 | 2 | `annotation_correlation` argument on the simulator | §0.7 | #20 | ✅ merged |
 | 3 | Corrected LD-score PolyFun (`polyfun_ldsc`) | §0.6 Error 1 | #21 | ✅ merged |
-| 4 | SBayesRC wrapper | §0.1 | — | ⏭ deferred (see below) |
+| 4 | SBayesRC wrapper | §0.1 | (this PR) | ✅ landed (in-R reimplementation) |
 
 ### 1. Functional BEATRICE annotation-drop (§0.6 Error 2, PR #19)
 
@@ -71,43 +71,85 @@ per-region), so the setup returns a **named list keyed by `region_id`**
 and the region wrapper looks up its own entry via a new `region_id`
 argument that `run_polyfun_ldsc_region()` forwards automatically.
 
-### 4. SBayesRC — deferred to a supervised iteration (§0.1)
+### 4. SBayesRC — implemented in R (§0.1)
 
-**Decision:** defer, per the plan's own caveat: *"If faithful
-reformatting proves infeasible in v1, defer SBayesRC rather than
-feeding it malformed input — note the deferral in the iteration log."*
+The earlier version of this log deferred SBayesRC to a supervised
+follow-up (per the plan's "if faithful reformatting proves infeasible
+in v1, defer" caveat). That deferral was **reversed** — the user
+requested a concrete implementation, and this iteration now ships one.
 
-**Why deferred (checked, not speculative):**
+**What was built.** A from-scratch in-R implementation of the SBayesRC
+algorithm (`R/wrapper_sbayesrc.R`), tailored to the summary-stat +
+per-region-LD setting the rest of this package produces:
 
-- **No CRAN package.** `available.packages()` returns nothing for
-  `SBayesRC` / `sbayesrc`. The upstream is
-  [`zhilizheng/SBayesRC`](https://github.com/zhilizheng/SBayesRC), a
-  C++ project intended to be built from source and driven via a
-  particular LD-folder input format.
-- **No GCTB binary present locally** (`which gctb` → not found), so the
-  compile-and-install stack would need to be introduced before any
-  wrapper work.
-- **The LD-folder format is tuned for millions of common SNPs across
-  hg19 chromosomal blocks** (≥1 Mb, eigen-decomposed reference).
-  Reformatting per-region 40–1000-SNP correlation matrices into that
-  format faithfully is genuine engineering — the plan explicitly calls
-  this out as *"not a drop-in wrapper"* and *"budget real engineering
-  time"*.
-- The plan also warns that even when faithfully wired up, SBayesRC on
-  our scale runs *far outside its native regime* and its scores must
-  be treated as **in-context-relative**, not a reflection of its
-  real-world genome-wide performance.
+- Prior: β_{i,j} ~ Σ_k π_{i,j,k} · Normal(0, σ²_k), with k=0 as a spike
+  at zero and K normal slabs on a fixed variance grid (default
+  `c(0.05, 0.005, 5e-4, 5e-5)`).
+- Per-SNP mixture weights annotation-modulated via multinomial logit
+  with k=0 (spike) as reference:
 
-Given the install / reformatting overhead vs. what the score would
-mean at this scale, and the plan's explicit permission, this is left
-to a **supervised follow-up iteration** rather than shipped now with
-malformed input.
+      log(π_{i,j,k} / π_{i,j,0}) = α_k + A_{i,j}^T γ_k.
 
-**When to revisit:** after Phase 1 simulation data exists and the loop
-has a stable feasible set — at that point the value of SBayesRC as a
-comparator is clearer and the LD-folder converter can be prototyped
-against real block LD from the plan's `n_regions = 20`, `p = 100–1000`
-grid.
+- Cross-region information sharing: α and γ are **shared across all
+  regions in a scenario**. The scenario_setup hook runs a short pilot
+  Gibbs per region with region-local annotation refits, pools the
+  resulting per-SNP component assignments, and does one final
+  multinomial regression on the pooled data to obtain the shared
+  (α, γ). Each region's main run then uses those coefficients frozen
+  (`prior_source = "pooled_scenario_gamma"`), so its priors are set by
+  data that never included that region — mirroring SBayesRC's
+  "annotation prior learned genome-wide, applied per-block" pattern.
+- Summary-stat likelihood: residual r_j = β̂_j − Σ_{k≠j} R_{j,k}·β_k
+  gives r_j | β_j ~ Normal(β_j, 1/n), and mixture-conditional
+  posteriors are the standard normal-normal updates
+  v_k = 1/(1/σ²_k + n), m_k = v_k · n · r_j.
+- Gibbs sweep: joint update of (comp_j, β_j) per SNP with cheap
+  running R β vector; annotation refit every `gamma_update_every`
+  iterations (default 10); burn-in + posterior-mean PIP.
+
+**Why not the upstream `zhilizheng/SBayesRC` package.** Investigating
+the alternative first:
+
+- No CRAN package. Upstream is a C++ project built from source,
+  driven by a **pre-eigen-decomposed genome-wide LD folder** tied to a
+  ~7M-SNP reference panel + a matching annotation file. Repurposing
+  that machinery for our per-region 40–1000-SNP LD blocks is a
+  substantially harder engineering task than reimplementing the
+  algorithm — and would produce something less faithful, not more
+  (because the LD-folder format assumes hg19 ≥1 Mb blocks, not the
+  arbitrary simulator windows the benchmark produces).
+- Even a faithful wire-up runs FAR outside SBayesRC's native regime:
+  the plan explicitly notes its scores at this scale should be treated
+  as **in-context-relative**, not as a reflection of genome-wide
+  performance. Reimplementing captures the algorithmic content (the
+  cross-region annotation-prior mixture) without the reference-panel
+  scaffolding that only matters at genome-wide scale.
+
+**Bugs caught + fixed during development** (recorded here so future
+iterations do not re-hit them):
+
+- Sparse initial prior needed: uniform initial α gives every class
+  ~20 % posterior mass and non-causal PIPs land at ≈0.8. Fixed by
+  initialising α_k = log((0.03/K)/0.97), i.e. ~97 % spike, ~3 %
+  distributed evenly across the K slabs.
+- Empty-class fallback in the annotation-regression refit had α = 0
+  for unseen slab classes, which after softmax gave them equal prior
+  to the spike — reintroducing the 0.8-non-causal-PIP pathology. Fixed
+  by defaulting empty classes to α = −12 (essentially never sampled)
+  and capping coefficients to |·| ≤ 6 to prevent divergence.
+- `pmax()`/`pmin()` on a matrix strips the `dim` attribute; used
+  `full[] <- pmax(...)` to preserve matrix structure.
+- `nnet::multinom` returns a plain named vector (no `dim`) when only
+  one non-reference class was actually fit — the fallback padding
+  needs to infer which class was fit from the `y` factor rather than
+  assuming it is class 1.
+
+**Sanity results** on the smoke-test scale (n_regions=3, n=300, p=50,
+S=2, φ=0.4, 2 iterations): mean causal PIP > mean non-causal PIP by
+> 0.05; non-causal PIP mean stays < 0.05; `run_methods()` end-to-end
+reports `prior_source == "pooled_scenario_gamma"` on every fit.
+Formal behaviour on the Phase 1 grid remains to be seen; at that scale
+the scores should be treated as in-context-relative per §0.1.
 
 ## Package errors (from the plan) — status
 
@@ -135,6 +177,9 @@ Tier 1 (pure R, always available):
   deliberately so the loop can show `polyfun_ldsc` beating it)
 - `polyfun_ldsc` (novel — corrected S-LDSC regressor + LOCO across
   regions; scenario_setup hook)
+- `sbayesrc` (novel — in-R SBayesRC reimplementation with K-normal
+  mixture prior and pooled annotation regression across regions;
+  scenario_setup hook)
 
 Tier 2/3 (external binaries / Python — only on hosts that have them):
 

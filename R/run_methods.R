@@ -51,6 +51,9 @@
   polyfun_oracle        = "run_polyfun_oracle_region",
   polyfun_est           = "run_polyfun_est_region",
   polyfun_ldsc          = "run_polyfun_ldsc_region",
+  # SBayesRC-style Bayesian regression with annotation-informed mixture prior
+  # pooled across regions (§0.1 of the auto-research plan).
+  sbayesrc              = "run_sbayesrc_region",
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region"
 )
