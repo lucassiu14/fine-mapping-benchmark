@@ -22,11 +22,12 @@ VCF_DIR     <- "data/vcf"          # per-locus benchmark; set to NULL to use
                                     # the bundled chr4 sim1000G example VCF
 GENETIC_MAP_DIR <- "data/genetic_maps"
 
-# Methods. The Tier-1 default works without any external installs.
+# Methods. The Tier-1 default (all 9) works without any external installs.
 # Add external methods only if their binaries / conda env are reachable on
 # the node (see scripts/hpc/README.md).
 METHODS <- c("susie", "susie_inf", "abf", "carma",
-             "marginal_z", "polyfun_oracle", "polyfun_est")
+             "marginal_z", "polyfun_oracle", "polyfun_est",
+             "polyfun_ldsc", "sbayesrc")
 
 # Per-method arguments. Each method's wrapper documents its options.
 METHOD_ARGS <- list(
@@ -36,7 +37,10 @@ METHOD_ARGS <- list(
   carma          = list(num.causal = 5),
   marginal_z     = list(coverage = 0.95),
   polyfun_oracle = list(L = 10),
-  polyfun_est    = list(L = 10)
+  polyfun_est    = list(L = 10),
+  polyfun_ldsc   = list(L = 10),
+  sbayesrc       = list(n_iter = 300L, burn_in = 150L,
+                        gamma_update_every = 10L)
   # finemap = list(finemap_path = "/path/to/finemap", n_causal_snps = 5),
   # paintor = list(paintor_path = "PAINTOR")
 )
@@ -78,8 +82,10 @@ if (job_id > nrow(grid)) {
 }
 job <- as.list(grid[job_id, ])
 
-S_vec   <- as.integer(strsplit(job$S_values,   "\\|")[[1]])
-phi_vec <- as.numeric(strsplit(job$phi_values, "\\|")[[1]])
+S_vec         <- as.integer(strsplit(job$S_values,          "\\|")[[1]])
+phi_vec       <- as.numeric(strsplit(job$phi_values,        "\\|")[[1]])
+p_vec         <- as.integer(strsplit(job$p_values,          "\\|")[[1]])
+enrichment_vec <- as.numeric(strsplit(job$enrichment_values, "\\|")[[1]])
 
 job_dir <- file.path(OUTPUT_ROOT, sprintf("job_%03d_%s", job$job_id, job$label))
 dir.create(job_dir, recursive = TRUE, showWarnings = FALSE)
@@ -93,8 +99,11 @@ cat("=====================================================================\n")
 cat(sprintf("Started:        %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
 cat(sprintf("Output dir:     %s\n", job_dir))
 cat(sprintf("Model:          %s\n", job$model))
+if (identical(job$model, "sparse_inf") && !is.null(job$p_causal) && !is.na(job$p_causal)) {
+  cat(sprintf("p_causal:       %g\n", job$p_causal))
+}
 cat(sprintf("n_regions:      %d\n", job$n_regions))
-cat(sprintf("p:              %d\n", job$p))
+cat(sprintf("p (per region): %s\n", paste(p_vec, collapse = ",")))
 cat(sprintf("n:              %d\n", job$n))
 cat(sprintf("n_iter:         %d\n", job$n_iter))
 cat(sprintf("S values:       %s\n", paste(S_vec,   collapse = ", ")))
@@ -102,9 +111,15 @@ cat(sprintf("phi values:     %s\n", paste(phi_vec, collapse = ", ")))
 cat(sprintf("Annotation:     %s\n", job$annotation_type))
 if (job$annotation_type != "none") {
   cat(sprintf("  tracks:       %d\n", job$n_annotations))
-  cat(sprintf("  enrichment:   %g\n", job$enrichment))
+  cat(sprintf("  enrichment:   %s\n", paste(enrichment_vec, collapse = ",")))
+  cat(sprintf("  correlation:  %s\n",
+              if (is.null(job$annotation_correlation) ||
+                  is.na(job$annotation_correlation)) "NA"
+              else format(job$annotation_correlation, nsmall = 2)))
 }
-if (!is.na(job$n_ref)) {
+# LD mismatch panel (n_ref) is not swept in Phase 1; kept for backward compat
+# with older grids that still carry the column.
+if (!is.null(job$n_ref) && !is.na(job$n_ref)) {
   cat(sprintf("LD mismatch:    n_ref = %d (independent reference panel)\n", job$n_ref))
 }
 cat(sprintf("Methods:        %s\n", paste(METHODS, collapse = ", ")))
@@ -119,24 +134,43 @@ seed <- 1000L + job$job_id
 t0 <- Sys.time()
 
 cat("[1/3] Simulating ... ")
-sim <- run_simulation(
-  n_regions       = as.integer(job$n_regions),
-  n               = job$n,
-  p               = job$p,
-  n_iter          = job$n_iter,
-  S               = S_vec,
-  phi             = phi_vec,
-  model           = job$model,
-  annotations     = job$annotation_type,
-  n_annotations   = if (is.na(job$n_annotations)) 0L else job$n_annotations,
-  enrichment      = if (is.na(job$enrichment))    NULL else job$enrichment,
-  vcf_dir         = if (is.null(VCF_DIR) || !nzchar(VCF_DIR)) NULL else VCF_DIR,
-  genetic_map_dir = GENETIC_MAP_DIR,
-  n_ref           = if (is.na(job$n_ref)) NULL else as.integer(job$n_ref),
-  seed            = seed,
-  save            = FALSE,
-  verbose         = FALSE
+
+# p_causal is a scalar in the grid; run_simulation() ignores it for the
+# "sparse" model. NA sentinels in the CSV become NA in R - only forward a
+# real value.
+p_causal_arg <- if (identical(job$model, "sparse_inf") &&
+                    !is.null(job$p_causal) && !is.na(job$p_causal))
+  as.numeric(job$p_causal) else NULL
+
+annotation_corr_arg <- if (!is.null(job$annotation_correlation) &&
+                           !is.na(job$annotation_correlation))
+  as.numeric(job$annotation_correlation) else 0
+
+sim_args <- list(
+  n_regions              = as.integer(job$n_regions),
+  n                      = as.integer(job$n),
+  p                      = p_vec,
+  n_iter                 = as.integer(job$n_iter),
+  S                      = S_vec,
+  phi                    = phi_vec,
+  model                  = job$model,
+  annotations            = job$annotation_type,
+  n_annotations          = if (is.null(job$n_annotations) ||
+                               is.na(job$n_annotations)) 0L
+                           else as.integer(job$n_annotations),
+  enrichment             = if (identical(job$annotation_type, "none")) NULL
+                           else enrichment_vec,
+  annotation_correlation = annotation_corr_arg,
+  vcf_dir                = if (is.null(VCF_DIR) || !nzchar(VCF_DIR)) NULL else VCF_DIR,
+  genetic_map_dir        = GENETIC_MAP_DIR,
+  n_ref                  = if (is.null(job$n_ref) || is.na(job$n_ref)) NULL
+                           else as.integer(job$n_ref),
+  seed                   = seed,
+  save                   = FALSE,
+  verbose                = FALSE
 )
+if (!is.null(p_causal_arg)) sim_args$p_causal <- p_causal_arg
+sim <- do.call(run_simulation, sim_args)
 t1 <- Sys.time()
 cat(sprintf("done (%.1f min)\n", as.numeric(t1 - t0, units = "mins")))
 saveRDS(sim, file.path(job_dir, "sim.rds"))
