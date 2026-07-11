@@ -109,6 +109,35 @@ scenario). All 9 methods completed 16/16 fits with 0 failures.
    All three are Phase 2 tuning questions. Recorded here so the auto-
    research loop can flag SBayesRC calibration in the first iteration.
 
+## Functional BEATRICE — reviewer feedback state
+
+External review of `BEATRICE_annot_sparse/` flagged four items.
+Status after the Phase 1 audit + fix pass:
+
+1. **Annotation-drop in the genome-wide path** — already fixed in
+   Phase 0 (PR #19). `wrapper_functional_beatrice.R` prefers
+   `region_geno$annotations_matrix` and falls back to
+   `region_pheno$annotations_matrix`; regression-tested.
+2. **Variational objective is only an approximation** (Bernoulli KL
+   only over selected top-K; `∑ p_{0j}^2` regularisation shrinks all
+   prior probabilities). Legitimate theoretical critique of the
+   BEATRICE design, not a bug we can quick-fix. Logged as a Phase 2
+   novel-method candidate: "Cardinality-consistent BEATRICE" (proper
+   full-KL + Beta-Binomial K, or SuSiE-like SER decomposition of the
+   prior).
+3. **LassoNet identifiability** — fixed in the Phase-1 numpy-2 branch:
+   `feature_importance` now uses the identifiable logit contrast
+   `|theta[:, 1] - theta[:, 0]|`, not `||theta_j||_2`. The full
+   reparameterisation to a single Bernoulli logit is deferred as a
+   follow-up; also flagged that the manual proximal step differs from
+   the LassoNet paper's projected-proximal-gradient path — same
+   category of concern, kept as a documented limitation for now.
+4. **numpy-2.x crash in `calculate_pip` + missing `return` in
+   `reformat_memo`** (found during this iteration's audit, not in the
+   reviewer note but same code region) — fixed in the same PR. Vanilla
+   `beatrice` now runs the FB fork with `--annot` omitted, giving
+   BEATRICE semantics without the upstream late-training crash.
+
 ## What's next
 
 The grid + worker are ready. Next steps in order:
