@@ -22,27 +22,56 @@ VCF_DIR     <- "data/vcf"          # per-locus benchmark; set to NULL to use
                                     # the bundled chr4 sim1000G example VCF
 GENETIC_MAP_DIR <- "data/genetic_maps"
 
-# Methods. The Tier-1 default (all 9) works without any external installs.
-# Add external methods only if their binaries / conda env are reachable on
-# the node (see scripts/hpc/README.md).
+# Methods. Full 15-method benchmark set: 9 Tier-1 (R-only) + 6 Tier-3
+# (external binaries via FINEMAP/PAINTOR, and Python via a venv).
+# Any missing binary degrades to NA fits without breaking the array.
 METHODS <- c("susie", "susie_inf", "abf", "carma",
              "marginal_z", "polyfun_oracle", "polyfun_est",
-             "polyfun_ldsc", "sbayesrc")
+             "polyfun_ldsc", "sbayesrc",
+             "finemap", "paintor", "beatrice",
+             "functional_beatrice", "sparsepro", "funmap")
 
-# Per-method arguments. Each method's wrapper documents its options.
+# Tool locations - edit if you move ~/tools to project space.
+TOOLS_ROOT <- normalizePath("~/tools", mustWork = FALSE)
+PY_VENV    <- file.path(TOOLS_ROOT, "py-venv-runner.sh")
+
+# BEATRICE and Functional BEATRICE both point at the in-repo
+# BEATRICE_annot_sparse/ fork. It ships a numpy-2.x-safe calculate_pip and
+# accepts --annot None, so it serves as vanilla BEATRICE too. The upstream
+# sayangsep/Beatrice-Finemapping repo has a late-training crash under
+# numpy>=2 and is intentionally not used.
+FB_DIR <- normalizePath("BEATRICE_annot_sparse", mustWork = FALSE)
+
 METHOD_ARGS <- list(
-  susie          = list(L = 10, coverage = 0.95),
-  susie_inf      = list(L = 10),
-  abf            = list(prior_variance = 0.04),
-  carma          = list(num.causal = 5),
-  marginal_z     = list(coverage = 0.95),
-  polyfun_oracle = list(L = 10),
-  polyfun_est    = list(L = 10),
-  polyfun_ldsc   = list(L = 10),
-  sbayesrc       = list(n_iter = 300L, burn_in = 150L,
-                        gamma_update_every = 10L)
-  # finemap = list(finemap_path = "/path/to/finemap", n_causal_snps = 5),
-  # paintor = list(paintor_path = "PAINTOR")
+  susie               = list(L = 10, coverage = 0.95),
+  susie_inf           = list(L = 10),
+  abf                 = list(prior_variance = 0.04),
+  carma               = list(num.causal = 5),
+  marginal_z          = list(coverage = 0.95),
+  polyfun_oracle      = list(L = 10),
+  polyfun_est         = list(L = 10),
+  polyfun_ldsc        = list(L = 10),
+  sbayesrc            = list(n_iter = 300L, burn_in = 150L,
+                             gamma_update_every = 10L),
+  finemap             = list(finemap_path = file.path(TOOLS_ROOT,
+                                "finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64"),
+                             n_causal = 5, n_iter = 100000,
+                             prior_std = 0.05, coverage = 0.95),
+  paintor             = list(paintor_path = file.path(TOOLS_ROOT,
+                                "PAINTOR_V3.0/PAINTOR"),
+                             max_causal = 2, mcmc = FALSE, coverage = 0.95),
+  beatrice            = list(beatrice_dir = FB_DIR,
+                             python = PY_VENV, max_iter = 2000, n_caus = 5,
+                             sigma_sq = 0.05, gamma_coverage = 0.95,
+                             sparse_concrete = 50),
+  functional_beatrice = list(beatrice_dir = FB_DIR,
+                             python = PY_VENV, max_iter = 2000, n_caus = 5,
+                             sigma_sq = 0.05, gamma_coverage = 0.95,
+                             sparse_concrete = 50,
+                             prior_regularisation = 1.0),
+  sparsepro           = list(sparsepro_dir = file.path(TOOLS_ROOT, "SparsePro"),
+                             python = PY_VENV, cthres = 0.95),
+  funmap              = list(python = PY_VENV, max_iter = 100, tol = 5e-5)
 )
 
 # -----------------------------------------------------------------------------

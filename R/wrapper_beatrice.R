@@ -225,13 +225,24 @@ run_beatrice <- function(z,
 
   beatrice_dir   <- path.expand(beatrice_dir)
   python         <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
-  script_path    <- file.path(beatrice_dir, "beatrice.py")
 
-  if (!file.exists(script_path)) {
+  # Prefer beatrice_annot.py (BEATRICE_annot_sparse fork) when present -
+  # upstream beatrice.py has a numpy-2.x bug in trainer.py:calculate_pip that
+  # crashes late in training. The fork fixes it and accepts the same flags
+  # when --annot is omitted, giving vanilla BEATRICE semantics.
+  script_path <- NULL
+  for (cand in c("beatrice_annot.py", "beatrice.py")) {
+    p_cand <- file.path(beatrice_dir, cand)
+    if (file.exists(p_cand)) { script_path <- p_cand; break }
+  }
+
+  if (is.null(script_path)) {
     return(.beatrice_error_result(
       p, .beatrice_params(n, max_iter, n_caus, sigma_sq, gamma_coverage,
                           sparse_concrete, beatrice_dir, python),
-      0, paste("beatrice.py not found at:", script_path)
+      0,
+      paste("No BEATRICE script (beatrice_annot.py or beatrice.py) found in:",
+            beatrice_dir)
     ))
   }
 
