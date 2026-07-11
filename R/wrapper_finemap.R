@@ -366,13 +366,17 @@ run_finemap <- function(z,
 
   # --- Run FINEMAP ------------------------------------------------------------
 
+  # FINEMAP v1.4.2 CLI: --n-iterations was renamed to --n-iter, and
+  # --credible-config-value was replaced by --prob-cred-set. --log directs
+  # FINEMAP to write to the log path specified in the master's 'log' column.
   args <- c(
     "--sss",
-    "--in-files",            master_file,
-    "--n-causal-snps",       as.character(n_causal),
-    "--n-iterations",        as.character(n_iter),
-    "--prior-std",           as.character(prior_std),
-    "--credible-config-value", as.character(coverage)
+    "--in-files",       master_file,
+    "--n-causal-snps",  as.character(n_causal),
+    "--n-iter",         as.character(n_iter),
+    "--prior-std",      as.character(prior_std),
+    "--prob-cred-set",  as.character(coverage),
+    "--log"
   )
 
   start_time <- proc.time()
