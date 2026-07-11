@@ -285,6 +285,10 @@ run_finemap <- function(z,
                         prior_std    = 0.05,
                         coverage     = 0.95) {
 
+  # Expand ~ so system2 can exec the binary. Users often pass "~/tools/..."
+  # and R's default tilde-expansion doesn't apply in system2's first arg.
+  finemap_path <- path.expand(finemap_path)
+
   # --- Validate inputs --------------------------------------------------------
 
   p <- length(z)
