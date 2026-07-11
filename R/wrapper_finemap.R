@@ -356,7 +356,11 @@ run_finemap <- function(z,
   snp_file    <- paste0(prefix, ".snp")
   config_file <- paste0(prefix, ".config")
   cred_base   <- paste0(prefix, ".cred")   # FINEMAP appends the k (e.g. .cred1)
-  log_file    <- paste0(prefix, ".log_sss")
+  # File suffix must equal the master-file header column name ("log"),
+  # else FINEMAP v1.4.2 errors with 'Extension X of file Y ... cannot be
+  # found in the header of the master file'. Previously ".log_sss" was
+  # used and no longer accepted.
+  log_file    <- paste0(prefix, ".log")
 
   master_file <- file.path(work_dir, "master")
   writeLines(

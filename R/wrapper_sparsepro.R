@@ -280,8 +280,15 @@ run_sparsepro <- function(z,
   # column, which we leave out). File paths are relative to --zdir, so we
   # use the bare filenames here.
 
+  # SparsePro's sparsepro_zld.py reads this via
+  #   pd.read_csv(args.zld, sep='\s+')
+  # which treats the first row as a HEADER. Without a header line the
+  # loop over ldlists iterates zero times, no .pip is written, and the
+  # wrapper reports "produced no .pip output". Include the header explicitly.
   zld_path <- file.path(work_dir, "zld.txt")
-  writeLines(paste(zfile_name, ldfile_name, sep = "\t"), zld_path)
+  writeLines(c("z\tld",
+               paste(zfile_name, ldfile_name, sep = "\t")),
+             zld_path)
 
   # --- Build arguments --------------------------------------------------------
 
