@@ -167,47 +167,66 @@ seed <- 1000L + job$job_id
 # -----------------------------------------------------------------------------
 t0 <- Sys.time()
 
-cat("[1/3] Simulating ... ")
+sim_file <- file.path(job_dir, "sim.rds")
 
-# p_causal is a scalar in the grid; run_simulation() ignores it for the
-# "sparse" model. NA sentinels in the CSV become NA in R - only forward a
-# real value.
-p_causal_arg <- if (identical(job$model, "sparse_inf") &&
-                    !is.null(job$p_causal) && !is.na(job$p_causal))
-  as.numeric(job$p_causal) else NULL
+# Cache-hit: reuse a previously-simulated sim.rds if one is already in the
+# job dir. Seed is deterministic (seed = 1000 + job_id), so a cached sim
+# from an earlier run of the same task is byte-identical to what we'd
+# re-simulate. This makes supplemental / re-run passes (e.g. adding a new
+# method that reads the same sim) skip the 1-3 h simulation stage.
+#
+# To force re-simulation for a task: rm results/benchmark/job_00N_*/sim.rds
+# before re-launching. Do this after any change to the grid semantics
+# (columns, sweep values) so cached sims can't drift out of sync with the
+# current row.
+if (file.exists(sim_file)) {
+  cat(sprintf("[1/3] Loading cached sim from %s ... ", sim_file))
+  sim <- readRDS(sim_file)
+  t1  <- Sys.time()
+  cat(sprintf("done (%.1f s)\n", as.numeric(t1 - t0, units = "secs")))
+} else {
+  cat("[1/3] Simulating ... ")
 
-annotation_corr_arg <- if (!is.null(job$annotation_correlation) &&
-                           !is.na(job$annotation_correlation))
-  as.numeric(job$annotation_correlation) else 0
+  # p_causal is a scalar in the grid; run_simulation() ignores it for the
+  # "sparse" model. NA sentinels in the CSV become NA in R - only forward
+  # a real value.
+  p_causal_arg <- if (identical(job$model, "sparse_inf") &&
+                      !is.null(job$p_causal) && !is.na(job$p_causal))
+    as.numeric(job$p_causal) else NULL
 
-sim_args <- list(
-  n_regions              = as.integer(job$n_regions),
-  n                      = as.integer(job$n),
-  p                      = p_vec,
-  n_iter                 = as.integer(job$n_iter),
-  S                      = S_vec,
-  phi                    = phi_vec,
-  model                  = job$model,
-  annotations            = job$annotation_type,
-  n_annotations          = if (is.null(job$n_annotations) ||
-                               is.na(job$n_annotations)) 0L
-                           else as.integer(job$n_annotations),
-  enrichment             = if (identical(job$annotation_type, "none")) NULL
-                           else enrichment_vec,
-  annotation_correlation = annotation_corr_arg,
-  vcf_dir                = if (is.null(VCF_DIR) || !nzchar(VCF_DIR)) NULL else VCF_DIR,
-  genetic_map_dir        = GENETIC_MAP_DIR,
-  n_ref                  = if (is.null(job$n_ref) || is.na(job$n_ref)) NULL
-                           else as.integer(job$n_ref),
-  seed                   = seed,
-  save                   = FALSE,
-  verbose                = FALSE
-)
-if (!is.null(p_causal_arg)) sim_args$p_causal <- p_causal_arg
-sim <- do.call(run_simulation, sim_args)
-t1 <- Sys.time()
-cat(sprintf("done (%.1f min)\n", as.numeric(t1 - t0, units = "mins")))
-saveRDS(sim, file.path(job_dir, "sim.rds"))
+  annotation_corr_arg <- if (!is.null(job$annotation_correlation) &&
+                             !is.na(job$annotation_correlation))
+    as.numeric(job$annotation_correlation) else 0
+
+  sim_args <- list(
+    n_regions              = as.integer(job$n_regions),
+    n                      = as.integer(job$n),
+    p                      = p_vec,
+    n_iter                 = as.integer(job$n_iter),
+    S                      = S_vec,
+    phi                    = phi_vec,
+    model                  = job$model,
+    annotations            = job$annotation_type,
+    n_annotations          = if (is.null(job$n_annotations) ||
+                                 is.na(job$n_annotations)) 0L
+                             else as.integer(job$n_annotations),
+    enrichment             = if (identical(job$annotation_type, "none")) NULL
+                             else enrichment_vec,
+    annotation_correlation = annotation_corr_arg,
+    vcf_dir                = if (is.null(VCF_DIR) || !nzchar(VCF_DIR)) NULL else VCF_DIR,
+    genetic_map_dir        = GENETIC_MAP_DIR,
+    n_ref                  = if (is.null(job$n_ref) || is.na(job$n_ref)) NULL
+                             else as.integer(job$n_ref),
+    seed                   = seed,
+    save                   = FALSE,
+    verbose                = FALSE
+  )
+  if (!is.null(p_causal_arg)) sim_args$p_causal <- p_causal_arg
+  sim <- do.call(run_simulation, sim_args)
+  t1 <- Sys.time()
+  cat(sprintf("done (%.1f min)\n", as.numeric(t1 - t0, units = "mins")))
+  saveRDS(sim, sim_file)
+}
 
 cat(sprintf("[2/3] Running %d methods ... \n", length(METHODS)))
 t1 <- Sys.time()
