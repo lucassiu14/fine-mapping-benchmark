@@ -60,17 +60,19 @@ METHOD_ARGS <- list(
   paintor             = list(paintor_path = file.path(TOOLS_ROOT,
                                 "PAINTOR_V3.0/PAINTOR"),
                              max_causal = 2, mcmc = FALSE, coverage = 0.95),
-  # BEATRICE / FB: max_iter = 500 (the wrapper's minimum) - critical for
-  # Phase 1 wall-clock. At p = 1000 each fit is O(minutes); the grid has
-  # ~2500 BEATRICE fits per task, so max_iter = 2000 (the previous value)
-  # would multiply per-task runtime by ~4x. 500 iters is what BEATRICE's
-  # own smoke tests use.
+  # BEATRICE / FB: max_iter = 1500 balances convergence against per-task
+  # wall-clock. Users flagged that 500 iters is not enough for the
+  # variational objective to stabilise on realistic data; 1500 is the
+  # setting used in BEATRICE's own paper experiments. Per-fit runtime
+  # at p = 1000 is ~10-15 minutes; per task (2500 BEATRICE-family fits)
+  # is the wall-clock dominant. Watch for canary timeouts and adjust
+  # only if the array hits the 72h walltime.
   beatrice            = list(beatrice_dir = FB_DIR,
-                             python = PY_VENV, max_iter = 500, n_caus = 5,
+                             python = PY_VENV, max_iter = 1500, n_caus = 5,
                              sigma_sq = 0.05, gamma_coverage = 0.95,
                              sparse_concrete = 50),
   functional_beatrice = list(beatrice_dir = FB_DIR,
-                             python = PY_VENV, max_iter = 500, n_caus = 5,
+                             python = PY_VENV, max_iter = 1500, n_caus = 5,
                              sigma_sq = 0.05, gamma_coverage = 0.95,
                              sparse_concrete = 50,
                              prior_regularisation = 1.0),
