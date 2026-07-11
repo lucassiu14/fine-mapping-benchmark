@@ -299,6 +299,16 @@ run_finemap <- function(z,
   )
 
   if (is.null(variant_ids)) variant_ids <- paste0("SNP_", seq_len(p))
+
+  # FINEMAP's .z file is space-separated. VCF-derived variant_ids like
+  # "4 77357492 rs554755626 C A" contain embedded spaces, which
+  # write.table(sep = " ") writes literally and FINEMAP then interprets
+  # as extra columns - shifting the 'position' column and failing with
+  # "Expected a positive integer value in line N column 3".
+  # Collapse embedded whitespace with underscores so each variant_id is
+  # a single token. Used only for the FINEMAP-facing .z file; other
+  # wrappers use tab-separated formats and are unaffected.
+  variant_ids <- gsub("\\s+", "_", variant_ids)
   if (is.null(maf))         maf         <- rep(0.3, p)
 
   # Derive beta/se if not supplied
