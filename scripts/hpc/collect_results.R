@@ -13,7 +13,10 @@
 #   Rscript scripts/hpc/collect_results.R
 # =============================================================================
 
-OUTPUT_ROOT <- "results/benchmark"
+# Same override the worker uses (submit_benchmark_pbs.sh points this at
+# scratch). Set FMB_OUTPUT_ROOT before running collect if the array wrote
+# to a non-default location.
+OUTPUT_ROOT <- Sys.getenv("FMB_OUTPUT_ROOT", unset = "results/benchmark")
 PARAMS_CSV  <- "scripts/hpc/params_grid.csv"
 
 if (!dir.exists(OUTPUT_ROOT)) {

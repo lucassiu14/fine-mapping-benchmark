@@ -7,8 +7,16 @@ set -euo pipefail
 
 PROJECT_ROOT="$(pwd)"
 RSCRIPT="${RSCRIPT:-Rscript}"
-LOG_DIR="${PROJECT_ROOT}/logs/benchmark"
 PARAMS_CSV="${PROJECT_ROOT}/scripts/hpc/params_grid.csv"
+
+# Output + logs go on scratch, NOT home. Each task writes ~100 MB+ of RDS
+# files; a full array overflows a 1 TB home quota and saveRDS() dies with
+# "error writing to connection". Default to personal ephemeral (multi-TB).
+# Override with FMB_SCRATCH, or FMB_OUTPUT_ROOT / FMB_LOG_DIR individually.
+FMB_SCRATCH="${FMB_SCRATCH:-${EPHEMERAL:-/rds/general/user/$USER/ephemeral}/fmbench}"
+OUTPUT_ROOT="${FMB_OUTPUT_ROOT:-${FMB_SCRATCH}/results/benchmark}"
+LOG_DIR="${FMB_LOG_DIR:-${FMB_SCRATCH}/logs/benchmark}"
+export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
 
 # Config (override with env vars: PBS_QUEUE=... bash submit_benchmark_pbs.sh)
 PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
@@ -35,7 +43,9 @@ if (( N_JOBS < 1 )); then
 fi
 if [[ -z "$ARRAY_RANGE" ]]; then ARRAY_RANGE="1-${N_JOBS}"; fi
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$OUTPUT_ROOT"
+echo "Output root: $OUTPUT_ROOT"
+echo "Log dir:     $LOG_DIR"
 
 JOB_SCRIPT="$(mktemp -t fmbench_pbs_XXXXXX.sh)"
 cat > "$JOB_SCRIPT" <<PBS_EOF
