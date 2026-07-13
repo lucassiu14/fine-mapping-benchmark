@@ -23,7 +23,13 @@ PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
 PBS_WALLTIME="${PBS_WALLTIME:-72:00:00}"       # queue max; BEATRICE-family
                                                 # is compute-heavy so start
                                                 # generous, cut later if fine.
-PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=8gb}"
+# 64gb: the 8gb default OOM-killed tasks. Each task holds the full
+# 20-region sim (p up to 1000, so ~1000x1000 LD matrices), accumulates
+# all 14 methods' per-fit results across 2500 fits in memory, AND spawns
+# a torch subprocess for BEATRICE/FB - the R process + Python child both
+# count against the cgroup limit. 64gb is comfortably under the
+# v1_small72a 128gb node cap.
+PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=64gb}"
 ARRAY_RANGE="${ARRAY_RANGE:-}"                  # e.g. "1-2" canary, "" full
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
