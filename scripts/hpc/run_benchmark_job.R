@@ -17,7 +17,12 @@
 # Configuration - edit to match your environment
 # -----------------------------------------------------------------------------
 PARAMS_CSV  <- "scripts/hpc/params_grid.csv"
-OUTPUT_ROOT <- "results/benchmark"
+# OUTPUT_ROOT holds per-task sim/results/evaluation RDS files (~100 MB+
+# each). It MUST live on a filesystem with room - on a 1 TB home quota the
+# full array overflows and saveRDS() fails with "error writing to
+# connection". submit_benchmark_pbs.sh sets FMB_OUTPUT_ROOT to a scratch
+# path; the "results/benchmark" fallback is for laptop / small runs only.
+OUTPUT_ROOT <- Sys.getenv("FMB_OUTPUT_ROOT", unset = "results/benchmark")
 VCF_DIR     <- "data/vcf"          # per-locus benchmark; set to NULL to use
                                     # the bundled chr4 sim1000G example VCF
 GENETIC_MAP_DIR <- "data/genetic_maps"
