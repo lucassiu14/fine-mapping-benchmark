@@ -23,15 +23,14 @@ PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
 PBS_WALLTIME="${PBS_WALLTIME:-72:00:00}"       # queue max; BEATRICE-family
                                                 # is compute-heavy so start
                                                 # generous, cut later if fine.
-# 120gb: the 8gb default OOM-killed tasks. Each task holds the full
-# 20-region sim (p up to 1000, so ~1000x1000 LD matrices), accumulates
-# all 14 methods' per-fit results across 2500 fits in memory, AND spawns
-# a torch subprocess for BEATRICE/FB - the R process + Python child both
-# count against the cgroup limit. 120gb is a deliberately generous margin
-# (just under the v1_small72a 128gb node cap) so we don't OOM again;
-# actual peak should be far lower. If it ever needs more, move to a
-# medium queue (450gb cap) via PBS_QUEUE=v1_medium72a PBS_SELECT=...
-PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=120gb}"
+# 32gb: each task handles ONE scenario but ALL 20 regions (the region
+# panel must stay together for cross-region pooling in scenario_setup).
+# It holds the 20-region sim (~1 GB in memory) + one scenario's results
+# (small) + a torch subprocess for BEATRICE/FB. The earlier 8gb OOM was
+# the OLD full-row task accumulating all 125 scenarios; a single-scenario
+# task needs far less. 32gb is a safe margin that still packs ~4 tasks
+# onto a 128gb node - important for parallelism across 3125 tasks.
+PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=32gb}"
 ARRAY_RANGE="${ARRAY_RANGE:-}"                  # e.g. "1-2" canary, "" full
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
@@ -44,11 +43,29 @@ if [[ ! -f "$PARAMS_CSV" ]]; then
   echo "Generating params_grid.csv ..."
   "$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV"
 fi
-N_JOBS=$(( $(wc -l < "$PARAMS_CSV") - 1 ))
-if (( N_JOBS < 1 )); then
-  echo "ERROR: params_grid.csv has no jobs" >&2
+# The array is subdivided by scenario: one task per (grid row, scenario),
+# with all regions kept together in each task. Total tasks =
+# N_ROWS * SCENARIOS_PER_ROW, where SCENARIOS_PER_ROW = |S| * |phi| * n_iter.
+# Columns are located by header name so column order can change.
+N_ROWS=$(( $(wc -l < "$PARAMS_CSV") - 1 ))
+if (( N_ROWS < 1 )); then
+  echo "ERROR: params_grid.csv has no rows" >&2
   exit 1
 fi
+_col() { head -1 "$PARAMS_CSV" | tr ',' '\n' | grep -n "\"$1\"" | cut -d: -f1; }
+S_COL=$(_col S_values); PHI_COL=$(_col phi_values); NITER_COL=$(_col n_iter)
+if [[ -z "$S_COL" || -z "$PHI_COL" || -z "$NITER_COL" ]]; then
+  echo "ERROR: params_grid.csv missing S_values/phi_values/n_iter columns" >&2
+  exit 1
+fi
+SCENARIOS_PER_ROW=$(awk -F, -v s="$S_COL" -v ph="$PHI_COL" -v ni="$NITER_COL" '
+  NR==2 {
+    gsub(/"/,"",$s); gsub(/"/,"",$ph); gsub(/"/,"",$ni);
+    ns = split($s, a, "[|]"); np = split($ph, b, "[|]");
+    print ns * np * ($ni + 0);
+  }' "$PARAMS_CSV")
+N_JOBS=$(( N_ROWS * SCENARIOS_PER_ROW ))
+echo "Grid: ${N_ROWS} rows x ${SCENARIOS_PER_ROW} scenarios = ${N_JOBS} array tasks"
 if [[ -z "$ARRAY_RANGE" ]]; then ARRAY_RANGE="1-${N_JOBS}"; fi
 
 mkdir -p "$LOG_DIR" "$OUTPUT_ROOT"

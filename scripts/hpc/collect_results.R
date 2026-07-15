@@ -23,10 +23,15 @@ if (!dir.exists(OUTPUT_ROOT)) {
   stop("No output dir at ", OUTPUT_ROOT, ". Has the array run?")
 }
 
-job_dirs <- list.dirs(OUTPUT_ROOT, recursive = FALSE)
-job_dirs <- job_dirs[grepl("^job_", basename(job_dirs))]
-if (length(job_dirs) == 0L) {
-  stop("No job_*/ subdirectories found under ", OUTPUT_ROOT)
+# Evaluations live at job_*/scenario_*/evaluation.rds (scenario-split array).
+# Fall back to the older flat job_*/evaluation.rds layout if present.
+eval_paths <- Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*", "evaluation.rds"))
+if (length(eval_paths) == 0L) {
+  eval_paths <- Sys.glob(file.path(OUTPUT_ROOT, "job_*", "evaluation.rds"))
+}
+if (length(eval_paths) == 0L) {
+  stop("No evaluation.rds found under ", OUTPUT_ROOT,
+       " (looked in job_*/scenario_*/ and job_*/). Has the array run?")
 }
 
 grid <- if (file.exists(PARAMS_CSV)) {
@@ -35,8 +40,8 @@ grid <- if (file.exists(PARAMS_CSV)) {
   NULL
 }
 
-cat(sprintf("Collecting %d job directories from %s ...\n",
-            length(job_dirs), OUTPUT_ROOT))
+cat(sprintf("Collecting %d evaluation file(s) from %s ...\n",
+            length(eval_paths), OUTPUT_ROOT))
 
 # -----------------------------------------------------------------------------
 # Per-job status
@@ -84,43 +89,29 @@ extract_stratum <- function(eval_method, method, stratum_name) {
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0L) y else x
 
-for (jd in job_dirs) {
-  job_label <- basename(jd)
-  eval_path <- file.path(jd, "evaluation.rds")
-  meta_path <- file.path(jd, "params.json")
+for (eval_path in eval_paths) {
+  unit_dir_path <- dirname(eval_path)
+  is_scenario_layout <- grepl("^scenario_", basename(unit_dir_path))
+  job_label      <- if (is_scenario_layout) basename(dirname(unit_dir_path))
+                    else                     basename(unit_dir_path)
+  scenario_label <- if (is_scenario_layout) basename(unit_dir_path) else NA_character_
 
-  if (!file.exists(eval_path)) {
-    status_rows[[length(status_rows) + 1L]] <- data.frame(
-      job_dir = job_label, status = "missing_evaluation.rds",
-      runtime_sec = NA_real_, stringsAsFactors = FALSE)
-    next
-  }
-
-  evaluation <- tryCatch(readRDS(eval_path),
-                         error = function(e) NULL)
+  evaluation <- tryCatch(readRDS(eval_path), error = function(e) NULL)
   if (is.null(evaluation)) {
     status_rows[[length(status_rows) + 1L]] <- data.frame(
-      job_dir = job_label, status = "unreadable_evaluation.rds",
+      job_dir = job_label, scenario = scenario_label,
+      status = "unreadable_evaluation.rds",
       runtime_sec = NA_real_, stringsAsFactors = FALSE)
     next
   }
 
-  meta <- if (file.exists(meta_path)) {
-    tryCatch(jsonlite::read_json(meta_path), error = function(e) NULL)
-  } else NULL
-  runtime_sec <- if (!is.null(meta) && !is.null(meta$runtime_sec)) {
-    as.numeric(meta$runtime_sec)
-  } else NA_real_
-
   status_rows[[length(status_rows) + 1L]] <- data.frame(
-    job_dir     = job_label,
-    status      = "ok",
-    runtime_sec = runtime_sec,
-    stringsAsFactors = FALSE)
+    job_dir = job_label, scenario = scenario_label,
+    status = "ok", runtime_sec = NA_real_, stringsAsFactors = FALSE)
 
   for (method in names(evaluation)) {
     em <- evaluation[[method]]
-    # Skip the non-method metadata entries (methods_evaluated, simulation_params,
+    # Skip non-method metadata entries (methods_evaluated, simulation_params,
     # pip_thresholds_used). Method entries are lists with a `global` sub-list.
     if (is.null(em) || !is.list(em) || is.null(em[["global"]])) next
     rows <- list(
@@ -134,7 +125,8 @@ for (jd in job_dirs) {
     rows <- rows[!vapply(rows, is.null, logical(1))]
     if (length(rows) == 0L) next
     df <- do.call(rbind, rows)
-    df$job_dir <- job_label
+    df$job_dir  <- job_label
+    df$scenario <- scenario_label
     combined[[length(combined) + 1L]] <- df
   }
 }
