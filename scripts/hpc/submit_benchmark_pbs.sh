@@ -68,11 +68,17 @@ cat > "$JOB_SCRIPT" <<PBS_EOF
 
 set -euo pipefail
 cd "${PROJECT_ROOT}"
+# CRITICAL: export the scratch output root INTO the compute-node job.
+# The login-side export does not propagate to the node, so without this
+# the worker falls back to results/ under home and overflows the quota.
+# \${OUTPUT_ROOT} is expanded here at submit time to the literal path.
+export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}
 source ${PY_VENV_ACTIVATE}
 echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} of ${ARRAY_RANGE} starting at \$(date)"
+echo "[node:\$(hostname)] FMB_OUTPUT_ROOT=\${FMB_OUTPUT_ROOT}"
 ${RSCRIPT} scripts/hpc/run_benchmark_job.R "\${PBS_ARRAY_INDEX}"
 echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} finished at \$(date)"
 PBS_EOF
