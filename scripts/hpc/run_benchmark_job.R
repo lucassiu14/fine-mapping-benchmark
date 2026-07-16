@@ -56,6 +56,20 @@ METHODS <- c("susie", "susie_inf", "abf", "carma",
              "finemap", "paintor", "beatrice",
              "functional_beatrice", "sparsepro", "funmap")
 
+# Supplemental mode: FMB_METHODS="beatrice,sparsepro" re-runs ONLY those
+# methods and writes results_supp.rds / evaluation_supp.rds alongside the
+# originals, leaving the existing (good) results untouched. Used to re-run
+# a method after a wrapper fix without redoing the whole 15-method grid -
+# the per-row sim.rds cache means no re-simulation either. collect_results.R
+# prefers _supp results for any method present in both.
+SUPP_METHODS <- Sys.getenv("FMB_METHODS", unset = "")
+IS_SUPP      <- nzchar(SUPP_METHODS)
+if (IS_SUPP) {
+  METHODS <- trimws(strsplit(SUPP_METHODS, ",")[[1]])
+  METHODS <- METHODS[nzchar(METHODS)]
+}
+OUT_SUFFIX <- if (IS_SUPP) "_supp" else ""
+
 # Tool locations - edit if you move ~/tools to project space.
 TOOLS_ROOT <- normalizePath("~/tools", mustWork = FALSE)
 PY_VENV    <- file.path(TOOLS_ROOT, "py-venv-runner.sh")
@@ -190,9 +204,13 @@ cat(sprintf("Annot:    %s%s\n", job$annotation_type,
                       else format(job$annotation_correlation, nsmall = 2)) else ""))
 cat(sprintf("Methods:  %s\n\n", paste(METHODS, collapse = ", ")))
 
-evaluation_file <- file.path(scenario_dir, "evaluation.rds")
+evaluation_file <- file.path(scenario_dir, paste0("evaluation", OUT_SUFFIX, ".rds"))
+results_file    <- file.path(scenario_dir, paste0("results",    OUT_SUFFIX, ".rds"))
+if (IS_SUPP) cat(sprintf("SUPPLEMENTAL run: methods = %s -> %s\n\n",
+                         paste(METHODS, collapse = ", "), basename(evaluation_file)))
 if (file.exists(evaluation_file)) {
-  cat("Scenario already complete (evaluation.rds present). Nothing to do.\n")
+  cat(sprintf("Scenario already complete (%s present). Nothing to do.\n",
+              basename(evaluation_file)))
   quit(save = "no", status = 0)
 }
 
@@ -285,7 +303,7 @@ for (m in METHODS) {
   cat(sprintf("       %-20s n_fits=%d  failed=%d\n",
               m, results[[m]]$n_total %||% 0L, results[[m]]$n_failed %||% 0L))
 }
-saveRDS(results, file.path(scenario_dir, "results.rds"))
+saveRDS(results, results_file)
 
 # --- [3/3] Evaluate this scenario -------------------------------------------
 # Wrapped so a structural hiccup can't discard the expensive method compute -
