@@ -34,6 +34,20 @@ if (length(eval_paths) == 0L) {
        " (looked in job_*/scenario_*/ and job_*/). Has the array run?")
 }
 
+# Supplemental re-runs (FMB_METHODS=...) write evaluation_supp.rds next to the
+# original. Those methods were re-run after a wrapper fix, so they SUPERSEDE
+# the stale entries in evaluation.rds for the same scenario.
+supp_for <- function(eval_path) {
+  sp <- file.path(dirname(eval_path), "evaluation_supp.rds")
+  if (file.exists(sp)) tryCatch(readRDS(sp), error = function(e) NULL) else NULL
+}
+n_supp <- length(Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*",
+                                    "evaluation_supp.rds")))
+if (n_supp > 0L) {
+  cat(sprintf("Found %d supplemental evaluation(s); these override the originals.\n",
+              n_supp))
+}
+
 grid <- if (file.exists(PARAMS_CSV)) {
   read.csv(PARAMS_CSV, stringsAsFactors = FALSE)
 } else {
@@ -103,6 +117,15 @@ for (eval_path in eval_paths) {
       status = "unreadable_evaluation.rds",
       runtime_sec = NA_real_, stringsAsFactors = FALSE)
     next
+  }
+
+  # Overlay supplemental (re-run) methods on top of the originals.
+  supp <- supp_for(eval_path)
+  if (!is.null(supp)) {
+    for (sm in names(supp)) {
+      em <- supp[[sm]]
+      if (is.list(em) && !is.null(em[["global"]])) evaluation[[sm]] <- em
+    }
   }
 
   status_rows[[length(status_rows) + 1L]] <- data.frame(
