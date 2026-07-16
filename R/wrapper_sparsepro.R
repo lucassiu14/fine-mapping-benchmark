@@ -324,10 +324,16 @@ run_sparsepro <- function(z,
   run_log <- if (is.character(run_output)) run_output else character(0)
 
   # --- Locate output files ----------------------------------------------------
-  # SparsePro writes <prefix>.pip and <prefix>.cs into --save.
+  # SparsePro names .pip/.cs after the Z FILENAME from the --zld list, not
+  # after --prefix (sparsepro_zld.py:254):
+  #     z.to_csv(os.path.join(args.save, "{}.pip".format(zfile)), ...)
+  # so with zfile = "region.z" it writes "region.z.pip" / "region.z.cs".
+  # Looking for "<prefix>.pip" silently missed every successful run and
+  # reported "produced no .pip output" even though SparsePro had converged
+  # and detected effects. (--prefix only names the .h2/.wsep/.W* files.)
 
-  pip_path <- file.path(out_dir, paste0(region_label, ".pip"))
-  cs_path  <- file.path(out_dir, paste0(region_label, ".cs"))
+  pip_path <- file.path(out_dir, paste0(zfile_name, ".pip"))
+  cs_path  <- file.path(out_dir, paste0(zfile_name, ".cs"))
 
   if (!file.exists(pip_path)) {
     err_msg <- paste(

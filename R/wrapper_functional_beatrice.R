@@ -240,6 +240,17 @@ run_functional_beatrice <- function(z,
 
   if (is.null(variant_ids)) variant_ids <- paste0("rs", seq(0, p - 1))
 
+  # CRITICAL: both the .z and .annot files are whitespace-separated, and
+  # trainer_annot.py parses them positionally:
+  #     Z = pd.read_table(z_file, sep=' ', ...).to_numpy()[:,1]
+  #     v = pd.read_table(annot_file, sep=None, ...).to_numpy()[:,1:].astype(float)
+  # VCF-derived variant_ids look like "1 40023356 . A T" - embedded spaces.
+  # Written verbatim they shift the columns, so z becomes the POSITION and
+  # the annotation cast hits the "." rsID ("could not convert string to
+  # float: '.'"), failing every annotated run. Collapse whitespace so each
+  # variant_id is a single token.
+  variant_ids <- gsub("\\s+", "_", variant_ids)
+
   beatrice_dir <- normalizePath(path.expand(beatrice_dir), mustWork = FALSE)
   python       <- if (file.exists(path.expand(python))) {
     normalizePath(path.expand(python))
