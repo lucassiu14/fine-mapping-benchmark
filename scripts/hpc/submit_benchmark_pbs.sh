@@ -90,6 +90,9 @@ cd "${PROJECT_ROOT}"
 # the worker falls back to results/ under home and overflows the quota.
 # \${OUTPUT_ROOT} is expanded here at submit time to the literal path.
 export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
+# Supplemental re-run selector, forwarded the same way (a login-side export
+# does NOT reach the node). Empty string = normal full-method run.
+export FMB_METHODS="${FMB_METHODS:-}"
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}
