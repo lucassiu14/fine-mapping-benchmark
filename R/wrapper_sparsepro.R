@@ -233,6 +233,16 @@ run_sparsepro <- function(z,
 
   if (is.null(variant_ids)) variant_ids <- paste0("snp", seq_len(p))
 
+  # VCF-derived variant_ids are "1 40023356 . A T" (embedded spaces).
+  # SparsePro echoes the id back as the INDEX of its .pip output, and we
+  # parse that file with read.table(sep = "") - i.e. split on ANY
+  # whitespace - expecting exactly 3 fields (rsid, z, pip). A spaced id
+  # yields 7 fields and the parse fails. Collapsing whitespace keeps each
+  # id a single token on both the way out and the way back, and keeps
+  # match(variant_ids, pip_df$rsid) consistent since both sides are
+  # sanitised the same way.
+  variant_ids <- gsub("\\s+", "_", variant_ids)
+
   sparsepro_dir <- path.expand(sparsepro_dir)
   python        <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
   script_path   <- file.path(sparsepro_dir, "sparsepro_zld.py")
