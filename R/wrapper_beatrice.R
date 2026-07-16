@@ -223,6 +223,17 @@ run_beatrice <- function(z,
 
   if (is.null(variant_ids)) variant_ids <- paste0("rs", seq(0, p - 1))
 
+  # CRITICAL: BEATRICE's .z file is space-separated and trainer.py reads the
+  # z-score as column 1:
+  #     Z = pd.read_table(z_file, sep=' ', header=None).to_numpy()[:,1]
+  # VCF-derived variant_ids look like "1 40023356 . A T" - embedded spaces.
+  # Writing those verbatim shifts the columns so column 1 is the POSITION,
+  # and BEATRICE silently fine-maps base-pair positions instead of z-scores
+  # (every "z" ~4e7 -> every PIP ~1 -> AUPRC at the random baseline, and
+  # completely invariant to the simulated signal). Collapse whitespace so
+  # each variant_id is a single token.
+  variant_ids <- gsub("\\s+", "_", variant_ids)
+
   beatrice_dir   <- path.expand(beatrice_dir)
   python         <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
 
