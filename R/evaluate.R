@@ -12,6 +12,12 @@
 #   eval_out$<method>$by_S            — named list, one entry per S value
 #   eval_out$<method>$by_phi          — named list, one entry per phi value
 #   eval_out$<method>$by_p_causal     — named list (sparse_inf only); NULL otherwise
+#   eval_out$<method>$by_region_size  — named list, one entry per nominal region
+#                                       length (e.g. "100","200","400","500",
+#                                       "1000"). Region size is a real scenario
+#                                       axis — fine-mapping difficulty scales with
+#                                       it — so metrics must never be pooled
+#                                       across lengths.
 #   eval_out$<method>$by_causal_maf   — named list, keys "rare" / "low" / "common"
 #                                       (bins on the minimum causal-variant MAF
 #                                       per region; NULL if no fits have causal
@@ -92,9 +98,10 @@ evaluate_methods <- function(simulation,
 
     output[[method]] <- list(
       global      = .metrics_with_se(fits, pip_thresholds, n_pip_cal_bins),
-      by_S                    = .stratify_metrics(fits, "S",        pip_thresholds, n_pip_cal_bins),
-      by_phi                  = .stratify_metrics(fits, "phi",      pip_thresholds, n_pip_cal_bins),
-      by_p_causal             = .stratify_metrics(fits, "p_causal", pip_thresholds, n_pip_cal_bins),
+      by_S                    = .stratify_metrics(fits, "S",           pip_thresholds, n_pip_cal_bins),
+      by_phi                  = .stratify_metrics(fits, "phi",         pip_thresholds, n_pip_cal_bins),
+      by_p_causal             = .stratify_metrics(fits, "p_causal",    pip_thresholds, n_pip_cal_bins),
+      by_region_size          = .stratify_metrics(fits, "region_size", pip_thresholds, n_pip_cal_bins),
       by_causal_maf           = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins),
       by_true_annotation_type = .stratify_metrics_by_annotation_type(fits, pip_thresholds, n_pip_cal_bins)
     )
@@ -164,6 +171,23 @@ evaluate_methods <- function(simulation,
     truth <- sc$regions[[f$region_id]]$truth
     f$causal_indices <- truth$causal_indices
     f$n_variants     <- length(f$pip)
+
+    # Nominal region length (the requested per-region p, NOT the realised
+    # post-MAF-filter count in params$p_actual). Fine-mapping difficulty scales
+    # steeply with region size, so this is a genuine scenario axis: metrics must
+    # be stratified by it, never pooled across region lengths. Indexed by
+    # region_id; falls back to p_actual then the realised variant count when the
+    # nominal vector is unavailable (e.g. legacy simulations).
+    p_nominal <- simulation$params$p
+    rid       <- f$region_id
+    f$region_size <- if (!is.null(p_nominal) && length(p_nominal) >= rid &&
+                         !is.na(p_nominal[rid])) {
+      as.integer(p_nominal[rid])
+    } else {
+      p_actual <- simulation$params$p_actual
+      if (!is.null(p_actual) && length(p_actual) >= rid && !is.na(p_actual[rid]))
+        as.integer(p_actual[rid]) else length(f$pip)
+    }
 
     # Attach causal-variant MAFs and a coarse stratification bin so the
     # evaluator can stratify performance by how rare the rarest causal
