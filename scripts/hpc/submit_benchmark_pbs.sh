@@ -23,13 +23,15 @@ PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
 PBS_WALLTIME="${PBS_WALLTIME:-72:00:00}"       # queue max; BEATRICE-family
                                                 # is compute-heavy so start
                                                 # generous, cut later if fine.
-# 32gb: each task handles ONE scenario but ALL 20 regions (the region
-# panel must stay together for cross-region pooling in scenario_setup).
-# It holds the 20-region sim (~1 GB in memory) + one scenario's results
-# (small) + a torch subprocess for BEATRICE/FB. The earlier 8gb OOM was
-# the OLD full-row task accumulating all 125 scenarios; a single-scenario
-# task needs far less. 32gb is a safe margin that still packs ~4 tasks
-# onto a 128gb node - important for parallelism across 3125 tasks.
+# 32gb: a task holds the row's full region panel (all regions must stay
+# together for cross-region pooling in scenario_setup) + ONE scenario's
+# results at a time (the chunk loop processes scenarios one-by-one, not all
+# at once) + a torch subprocess for BEATRICE/FB. Peak memory is set by the
+# sim + a single scenario, NOT the chunk size, so chunking does not raise it;
+# Iteration 002's 10-region sim is lighter than Iteration 001's 20-region one.
+# The earlier 8gb OOM was the OLD full-row task accumulating all scenarios'
+# results in memory. 32gb keeps a safe margin and still packs ~4 tasks per
+# 128gb node.
 PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=32gb}"
 ARRAY_RANGE="${ARRAY_RANGE:-}"                  # e.g. "1-2" canary, "" full
 
@@ -43,9 +45,9 @@ if [[ ! -f "$PARAMS_CSV" ]]; then
   echo "Generating params_grid.csv ..."
   "$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV"
 fi
-# The array is subdivided by scenario: one task per (grid row, scenario),
-# with all regions kept together in each task. Total tasks =
-# N_ROWS * SCENARIOS_PER_ROW, where SCENARIOS_PER_ROW = |S| * |phi| * n_iter.
+# The array is subdivided by scenario, with all regions kept together in each
+# task and (by default) several scenarios batched per task. SCENARIOS_PER_ROW =
+# |S| * |phi| * n_iter; the chunk size collapses that to TASKS_PER_ROW tasks.
 # Columns are located by header name so column order can change.
 N_ROWS=$(( $(wc -l < "$PARAMS_CSV") - 1 ))
 if (( N_ROWS < 1 )); then
@@ -64,8 +66,31 @@ SCENARIOS_PER_ROW=$(awk -F, -v s="$S_COL" -v ph="$PHI_COL" -v ni="$NITER_COL" '
     ns = split($s, a, "[|]"); np = split($ph, b, "[|]");
     print ns * np * ($ni + 0);
   }' "$PARAMS_CSV")
-N_JOBS=$(( N_ROWS * SCENARIOS_PER_ROW ))
-echo "Grid: ${N_ROWS} rows x ${SCENARIOS_PER_ROW} scenarios = ${N_JOBS} array tasks"
+# Scenario chunking: each task processes SCENARIOS_PER_TASK scenarios from one
+# row (see run_benchmark_job.R). This collapses N_ROWS*SCENARIOS_PER_ROW down to
+# N_ROWS*ceil(SCENARIOS_PER_ROW/chunk) tasks so a large grid fits under the PBS
+# array cap while each (fatter) task still finishes inside walltime. The worker
+# reads the SAME value from FMB_SCENARIOS_PER_TASK (exported into the job below),
+# so the two always agree.
+SCENARIOS_PER_TASK="${FMB_SCENARIOS_PER_TASK:-25}"
+if (( SCENARIOS_PER_TASK < 1 )); then SCENARIOS_PER_TASK=1; fi
+if (( SCENARIOS_PER_TASK > SCENARIOS_PER_ROW )); then SCENARIOS_PER_TASK=$SCENARIOS_PER_ROW; fi
+export FMB_SCENARIOS_PER_TASK="${SCENARIOS_PER_TASK}"
+TASKS_PER_ROW=$(( (SCENARIOS_PER_ROW + SCENARIOS_PER_TASK - 1) / SCENARIOS_PER_TASK ))
+N_JOBS=$(( N_ROWS * TASKS_PER_ROW ))
+echo "Grid: ${N_ROWS} rows x ${SCENARIOS_PER_ROW} scenarios; chunk=${SCENARIOS_PER_TASK} scenario(s)/task"
+echo "      -> ${TASKS_PER_ROW} tasks/row x ${N_ROWS} rows = ${N_JOBS} array tasks"
+
+# PBS caps the number of array elements per submission. If the chunked count
+# still exceeds it, tell the user to raise the chunk rather than silently
+# submitting an array PBS will reject.
+MAX_ARRAY="${FMB_MAX_ARRAY:-10000}"
+if (( N_JOBS > MAX_ARRAY )); then
+  NEED=$(( (SCENARIOS_PER_ROW * N_ROWS + MAX_ARRAY - 1) / MAX_ARRAY ))
+  echo "ERROR: ${N_JOBS} tasks exceeds the array cap FMB_MAX_ARRAY=${MAX_ARRAY}." >&2
+  echo "       Raise the chunk, e.g. FMB_SCENARIOS_PER_TASK=${NEED} bash $0" >&2
+  exit 1
+fi
 if [[ -z "$ARRAY_RANGE" ]]; then ARRAY_RANGE="1-${N_JOBS}"; fi
 
 mkdir -p "$LOG_DIR" "$OUTPUT_ROOT"
@@ -93,6 +118,10 @@ export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
 # Supplemental re-run selector, forwarded the same way (a login-side export
 # does NOT reach the node). Empty string = normal full-method run.
 export FMB_METHODS="${FMB_METHODS:-}"
+# Scenario chunk size. MUST match the value the submit script used to size the
+# array, or the worker's (row, scenario-block) decode won't line up. Expanded
+# here at submit time to the literal integer.
+export FMB_SCENARIOS_PER_TASK="${SCENARIOS_PER_TASK}"
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}

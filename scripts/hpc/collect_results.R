@@ -4,13 +4,27 @@
 #
 # Walk results/benchmark/job_*/ and stitch the per-job evaluation.rds files
 # into:
+#   results/benchmark/combined_scenario_metrics.rds - PRIMARY analysis artefact.
+#                                                One row per (job, S, phi,
+#                                                region_size, method) scenario
+#                                                cell, with AP + a full
+#                                                calibration + FDR metric suite,
+#                                                each computed from COUNTS pooled
+#                                                over the cell's replicates.
+#   results/benchmark/combined_scenario_metrics.csv - same, CSV
 #   results/benchmark/combined_evaluation.rds  - long data frame (one row per
-#                                                method x scenario x stratum)
+#                                                method x scenario x stratum,
+#                                                incl. by_region_size)
 #   results/benchmark/combined_evaluation.csv  - same, CSV
+#   results/benchmark/combined_pip_calibration.rds - pooled bin counts, keyed by
+#                                                (job,S,phi,region_size,method)
+#   results/benchmark/combined_fdr_curves.rds  - pooled tp/fp/fn per threshold
+#                                                (only if FMB_DUMP_FDR_CURVES=1)
 #   results/benchmark/run_summary.csv          - per-job completion status
 #
 # Usage (from project root, after the array finishes):
 #   Rscript scripts/hpc/collect_results.R
+#   FMB_DUMP_FDR_CURVES=1 Rscript scripts/hpc/collect_results.R   # + raw curves
 # =============================================================================
 
 # Same override the worker uses (submit_benchmark_pbs.sh points this at
@@ -63,14 +77,15 @@ cat(sprintf("Collecting %d evaluation file(s) from %s ...\n",
 status_rows <- list()
 combined    <- list()
 
-# Curve accumulators. We POOL COUNTS by (job, S, phi, method) - summing
-# tp/fp/fn per threshold and n/n_causal/sum_pip per calibration bin - rather
-# than averaging per-scenario RATES, which would be badly biased when many
-# scenarios have tiny denominators. Counts are additive, so downstream
-# analysis can pool these further to ANY coarser stratum (e.g. by
-# annotation_correlation) just by summing again. The 5 iterations within a
-# (job, S, phi) cell are replicates, so pooling them here is the natural unit
-# and keeps the artefact ~1.9M rows instead of ~9.4M.
+# Curve accumulators. We POOL COUNTS by (job, S, phi, region_size, method) -
+# summing tp/fp/fn per threshold and n/n_causal/sum_pip per calibration bin -
+# rather than averaging per-scenario RATES, which would be badly biased when
+# many scenarios have tiny denominators. Counts are additive, so downstream
+# analysis can pool these further to ANY coarser stratum (drop region_size, or
+# collapse across enrichment) just by summing again - but never the reverse, so
+# region_size is kept IN the key here (fine-mapping difficulty scales with it).
+# The iterations x same-length regions within a cell are replicates, so pooling
+# their counts here is the natural per-scenario unit.
 fdr_acc <- new.env(hash = TRUE, parent = emptyenv())
 cal_acc <- new.env(hash = TRUE, parent = emptyenv())
 THRESH  <- NULL
@@ -169,6 +184,7 @@ for (eval_path in eval_paths) {
       extract_stratum(em, method, "by_S"),
       extract_stratum(em, method, "by_phi"),
       extract_stratum(em, method, "by_p_causal"),
+      extract_stratum(em, method, "by_region_size"),
       extract_stratum(em, method, "by_causal_maf"),
       extract_stratum(em, method, "by_true_annotation_type")
     )
@@ -179,51 +195,133 @@ for (eval_path in eval_paths) {
     df$scenario <- scenario_label
     combined[[length(combined) + 1L]] <- df
 
-    # --- accumulate curves, keyed by (job, S, phi, method) ------------------
+    # --- accumulate curves, keyed by (job, S, phi, region_size, method) -----
     # A scenario has exactly one S and one phi, so read them off the strata.
+    # region_size is a genuine axis (see evaluate.R): pull the per-region-length
+    # curves from the by_region_size stratum so counts stay separable by length.
+    # The 10 iterations x 2 same-length regions within a (job,S,phi,size) cell
+    # are replicates; pooling their COUNTS here is the natural per-scenario unit.
+    # Legacy evaluation.rds (Iteration 001) has no by_region_size -> fall back to
+    # the global curve keyed region_size = "all".
     S_val   <- names(em$by_S   %||% list())[1] %||% NA_character_
     phi_val <- names(em$by_phi %||% list())[1] %||% NA_character_
-    key <- paste(job_label, S_val, phi_val, method, sep = "|")
 
-    cur <- em$global$fdr_power_curve
-    if (!is.null(cur) && nrow(cur) > 0L) {
-      if (is.null(THRESH)) THRESH <<- cur$threshold
-      .acc(fdr_acc, key, cbind(tp = cur$tp, fp = cur$fp, fn = cur$fn))
+    rs_strata <- em$by_region_size
+    if (is.null(rs_strata) || length(rs_strata) == 0L) {
+      rs_strata <- list(all = em$global)
     }
-    pc <- em$global$pip_calibration
-    if (!is.null(pc) && nrow(pc) > 0L) {
-      # store sum_pip (= n * mean_pip) so mean_pip is recoverable after pooling
-      sp <- ifelse(is.na(pc$mean_pip), 0, pc$mean_pip) * pc$n
-      .acc(cal_acc, key, cbind(n = pc$n, n_causal = pc$n_causal, sum_pip = sp))
+    for (rs in names(rs_strata)) {
+      v   <- rs_strata[[rs]]
+      if (is.null(v)) next
+      key <- paste(job_label, S_val, phi_val, rs, method, sep = "|")
+
+      cur <- v$fdr_power_curve
+      if (!is.null(cur) && nrow(cur) > 0L) {
+        if (is.null(THRESH)) THRESH <<- cur$threshold
+        .acc(fdr_acc, key, cbind(tp = cur$tp, fp = cur$fp, fn = cur$fn))
+      }
+      pc <- v$pip_calibration
+      if (!is.null(pc) && nrow(pc) > 0L) {
+        # store sum_pip (= n * mean_pip) so mean_pip is recoverable after pooling
+        sp <- ifelse(is.na(pc$mean_pip), 0, pc$mean_pip) * pc$n
+        .acc(cal_acc, key, cbind(n = pc$n, n_causal = pc$n_causal, sum_pip = sp))
+      }
     }
   }
 }
 
 # --- Materialise pooled curves ----------------------------------------------
+# Keys are (job_dir | S | phi | region_size | method). region_size = "all" only
+# for legacy (Iteration 001) evaluations that predate the by_region_size stratum.
 .unkey <- function(keys) {
   parts <- strsplit(keys, "|", fixed = TRUE)
   data.frame(
-    job_dir = vapply(parts, `[`, character(1), 1L),
-    S       = vapply(parts, `[`, character(1), 2L),
-    phi     = vapply(parts, `[`, character(1), 3L),
-    method  = vapply(parts, `[`, character(1), 4L),
+    job_dir     = vapply(parts, `[`, character(1), 1L),
+    S           = vapply(parts, `[`, character(1), 2L),
+    phi         = vapply(parts, `[`, character(1), 3L),
+    region_size = vapply(parts, `[`, character(1), 4L),
+    method      = vapply(parts, `[`, character(1), 5L),
     stringsAsFactors = FALSE)
 }
 
-fdr_keys <- ls(fdr_acc)
-if (length(fdr_keys) > 0L) {
-  meta <- .unkey(fdr_keys)
-  fdr_long <- do.call(rbind, lapply(seq_along(fdr_keys), function(i) {
-    m <- fdr_acc[[fdr_keys[i]]]
-    data.frame(meta[i, , drop = FALSE], row.names = NULL,
-               threshold = THRESH, tp = m[, "tp"], fp = m[, "fp"], fn = m[, "fn"],
-               stringsAsFactors = FALSE)
-  }))
-  saveRDS(fdr_long, file.path(OUTPUT_ROOT, "combined_fdr_curves.rds"))
-  cat(sprintf("  combined_fdr_curves.rds       (%d rows, pooled counts)\n",
-              nrow(fdr_long)))
+# --- Per-scenario summary from pooled counts --------------------------------
+# ONE row per (job, S, phi, region_size, method) scenario cell. Every metric is
+# computed from COUNTS pooled over that cell's replicates (10 iters x 2
+# same-length regions), never from averaged per-replicate rates. This is the
+# headline artefact for the compact-findings analysis.
+.summarise_cell <- function(fdr_mat, cal_mat, thresh) {
+  out <- list(ap = NA_real_, max_fdr_violation = NA_real_,
+              pw_at_fdr05 = NA_real_, pw_at_fdr10 = NA_real_, pw_at_fdr20 = NA_real_,
+              ece = NA_real_, mce = NA_real_, signed_bias = NA_real_,
+              cal_slope = NA_real_, total_mass_ratio = NA_real_,
+              hi_pip_reliab = NA_real_, hi_pip_n = 0L,
+              n_selected_hi = NA_integer_, n_causal_total = NA_integer_)
+
+  if (!is.null(fdr_mat)) {
+    o    <- order(thresh)
+    thr  <- thresh[o]
+    tp   <- fdr_mat[o, "tp"]; fp <- fdr_mat[o, "fp"]; fn <- fdr_mat[o, "fn"]
+    nsel <- tp + fp
+    prec <- ifelse(nsel > 0, tp / nsel, 1)
+    rec  <- ifelse((tp + fn) > 0, tp / (tp + fn), 0)
+    fdr  <- ifelse(nsel > 0, fp / nsel, 0)
+    ro   <- order(rec, -prec)
+    out$ap <- sum(diff(c(0, rec[ro])) * prec[ro])
+    out$max_fdr_violation <- max(pmax(0, fdr - (1 - thr)))
+    pw_at <- function(t) { ok <- fdr <= t; if (any(ok)) max(rec[ok]) else NA_real_ }
+    out$pw_at_fdr05 <- pw_at(0.05); out$pw_at_fdr10 <- pw_at(0.10)
+    out$pw_at_fdr20 <- pw_at(0.20)
+    out$n_causal_total <- as.integer(max(tp + fn))
+  }
+
+  if (!is.null(cal_mat)) {
+    n  <- cal_mat[, "n"]; nc <- cal_mat[, "n_causal"]; sp <- cal_mat[, "sum_pip"]
+    keep <- n > 0
+    if (any(keep)) {
+      mp <- sp[keep] / n[keep]           # pooled mean predicted PIP per bin
+      fc <- nc[keep] / n[keep]           # pooled observed frequency per bin
+      w  <- n[keep] / sum(n[keep])
+      out$ece         <- sum(w * abs(mp - fc))
+      out$mce         <- max(abs(mp - fc))
+      out$signed_bias <- sum(w * (mp - fc))     # > 0 = over-confident
+      fit <- tryCatch(stats::lm(fc ~ mp, weights = n[keep]), error = function(e) NULL)
+      out$cal_slope <- if (is.null(fit)) NA_real_ else unname(coef(fit)[2])
+      out$total_mass_ratio <- sum(sp) / max(sum(nc), 1)  # total PIP mass / #causal
+      top <- nrow(cal_mat)               # highest bin = PIP in (0.9, 1]
+      out$hi_pip_n      <- as.integer(cal_mat[top, "n"])
+      out$hi_pip_reliab <- if (cal_mat[top, "n"] > 0)
+        cal_mat[top, "n_causal"] / cal_mat[top, "n"] else NA_real_
+      out$n_selected_hi <- as.integer(cal_mat[top, "n"])
+    }
+  }
+  as.data.frame(out, stringsAsFactors = FALSE)
 }
 
+all_keys <- union(ls(fdr_acc), ls(cal_acc))
+if (length(all_keys) > 0L) {
+  meta <- .unkey(all_keys)
+  summ <- do.call(rbind, lapply(seq_along(all_keys), function(i) {
+    k <- all_keys[i]
+    s <- .summarise_cell(fdr_acc[[k]], cal_acc[[k]], THRESH)
+    cbind(meta[i, , drop = FALSE], s, row.names = NULL)
+  }))
+  # Attach readable scenario params from the grid.
+  if (!is.null(grid)) {
+    grid$job_dir <- sprintf("job_%03d_%s", grid$job_id, grid$label)
+    join_cols <- intersect(
+      c("job_dir", "model", "p_causal", "annotation_type", "annotation_correlation",
+        "enrichment_fold", "n_ref", "n_annotations"), names(grid))
+    summ <- merge(summ, grid[, join_cols], by = "job_dir", all.x = TRUE, sort = FALSE)
+  }
+  saveRDS(summ, file.path(OUTPUT_ROOT, "combined_scenario_metrics.rds"))
+  write.csv(summ, file.path(OUTPUT_ROOT, "combined_scenario_metrics.csv"),
+            row.names = FALSE)
+  cat(sprintf("  combined_scenario_metrics.rds (%d scenario-cells x method)\n",
+              nrow(summ)))
+}
+
+# Calibration bin counts kept at (job,S,phi,region_size,method) granularity so
+# any calibration metric can be recomputed later by pooling counts.
 cal_keys <- ls(cal_acc)
 if (length(cal_keys) > 0L) {
   meta <- .unkey(cal_keys)
@@ -238,6 +336,27 @@ if (length(cal_keys) > 0L) {
   saveRDS(cal_long, file.path(OUTPUT_ROOT, "combined_pip_calibration.rds"))
   cat(sprintf("  combined_pip_calibration.rds  (%d rows, pooled counts)\n",
               nrow(cal_long)))
+}
+
+# Full FDR threshold curves are large at region_size granularity (~200k cells x
+# 201 thresholds). The scenario summary already carries every FDR metric, so the
+# raw curves are dumped only on request (FMB_DUMP_FDR_CURVES=1) for deep dives.
+if (nzchar(Sys.getenv("FMB_DUMP_FDR_CURVES"))) {
+  fdr_keys <- ls(fdr_acc)
+  if (length(fdr_keys) > 0L) {
+    meta <- .unkey(fdr_keys)
+    fdr_long <- do.call(rbind, lapply(seq_along(fdr_keys), function(i) {
+      m <- fdr_acc[[fdr_keys[i]]]
+      data.frame(meta[i, , drop = FALSE], row.names = NULL,
+                 threshold = THRESH, tp = m[, "tp"], fp = m[, "fp"], fn = m[, "fn"],
+                 stringsAsFactors = FALSE)
+    }))
+    saveRDS(fdr_long, file.path(OUTPUT_ROOT, "combined_fdr_curves.rds"))
+    cat(sprintf("  combined_fdr_curves.rds       (%d rows, pooled counts)\n",
+                nrow(fdr_long)))
+  }
+} else {
+  cat("  combined_fdr_curves.rds       (skipped; set FMB_DUMP_FDR_CURVES=1 to write)\n")
 }
 
 status_df <- do.call(rbind, status_rows)
@@ -258,8 +377,8 @@ if (!is.null(grid)) {
   # them - i.e. two of the plan's headline swept axes (Section 1.3) were
   # missing from the aggregate. Use the current schema.
   keep_cols <- c("job_dir", "model", "p_causal", "annotation_type",
-                 "annotation_correlation", "n_annotations", "n_regions",
-                 "n", "n_iter")
+                 "annotation_correlation", "enrichment_fold", "n_ref",
+                 "n_annotations", "n_regions", "n", "n_iter")
   combined_df <- merge(combined_df, grid[, intersect(keep_cols, names(grid))],
                        by = "job_dir", all.x = TRUE, sort = FALSE)
 }

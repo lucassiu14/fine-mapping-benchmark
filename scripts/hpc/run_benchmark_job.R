@@ -17,20 +17,26 @@
 # (plan lines: "the shared prior is a single artifact written once per
 # scenario"; "you cannot remove specific regions of an iteration").
 #
-# array_index i (1-based) maps to:
-#   row      = ((i - 1) %/% SCENARIOS_PER_ROW) + 1
-#   scenario = ((i - 1) %%  SCENARIOS_PER_ROW) + 1
-# giving nrow(grid) * SCENARIOS_PER_ROW tasks (25 * 125 = 3125). Each task is
-# 1 scenario x 20 regions x 15 methods - a small fraction of a full row, so it
-# fits comfortably in walltime and the array runs with ~125x the parallelism.
-# Scenario-level resume: a completed scenario has evaluation.rds; a walltime
-# kill costs at most the single scenario in flight.
+# Each task processes a CONTIGUOUS BLOCK of FMB_SCENARIOS_PER_TASK scenarios
+# from ONE row (all from the same sim, so it is simulated/loaded once and
+# amortised over the block). With TASKS_PER_ROW = ceil(SCENARIOS_PER_ROW /
+# FMB_SCENARIOS_PER_TASK), array_index i (1-based) maps to:
+#   row         = ((i - 1) %/% TASKS_PER_ROW) + 1
+#   task_in_row = ((i - 1) %%  TASKS_PER_ROW)
+#   scenarios   = [task_in_row*chunk + 1 .. min(+chunk, SCENARIOS_PER_ROW)]
+# giving nrow(grid) * TASKS_PER_ROW tasks. Iteration 002 (135 rows x 250
+# scenarios) at chunk=25 -> 10 tasks/row -> 1350 tasks, each ~10-25 scenarios
+# well inside a 72h walltime. chunk=1 recovers one-task-per-scenario (3125 in
+# Iteration 001). Every scenario is still checkpointed and skipped on resume, so
+# a walltime kill loses only the scenario in flight - which is exactly what
+# makes a fat, few-task array safe.
 #
 # Each invocation:
-#   1. Decodes (row, scenario) from the array index.
-#   2. Simulates the row's full region panel (cached per row in sim.rds).
-#   3. Runs run_methods on that ONE scenario (all regions -> pooling intact).
-#   4. Evaluates + saves to <OUTPUT_ROOT>/job_<row>_<label>/scenario_<sc>/.
+#   1. Decodes (row, scenario block) from the array index.
+#   2. Simulates the row's full region panel once (cached per row in sim.rds).
+#   3. For each scenario in the block: runs run_methods on that ONE scenario
+#      (all regions -> cross-region pooling intact), evaluates, and saves to
+#      <OUTPUT_ROOT>/job_<row>_<label>/scenario_<sc>/ before starting the next.
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -165,13 +171,31 @@ if (length(unique(per_row)) != 1L) {
   stop("All grid rows must yield the same scenario count for the scenario-split array.")
 }
 SCENARIOS_PER_ROW <- per_row[1]
-n_tasks <- nrow(grid) * SCENARIOS_PER_ROW
+
+# Scenario chunking. Each array task processes a CONTIGUOUS BLOCK of
+# SCENARIOS_PER_TASK scenarios from ONE row, so it simulates/loads that row's
+# sim.rds just once and amortises it over the whole block. Every scenario is
+# still checkpointed individually (its own scenario_<sc>/evaluation.rds) and
+# skipped on resume, so a walltime kill costs at most the single scenario in
+# flight - the guarantee that lets us pack many scenarios per task and raise
+# walltime rather than run 33,750 one-scenario tasks past the array cap. The
+# worker and submit script MUST agree on this value: the submit script exports
+# FMB_SCENARIOS_PER_TASK into the job. Set to 1 to recover one-task-per-scenario.
+SCENARIOS_PER_TASK <- suppressWarnings(as.integer(
+  Sys.getenv("FMB_SCENARIOS_PER_TASK", unset = "25")))
+if (is.na(SCENARIOS_PER_TASK) || SCENARIOS_PER_TASK < 1L) SCENARIOS_PER_TASK <- 1L
+SCENARIOS_PER_TASK <- min(SCENARIOS_PER_TASK, SCENARIOS_PER_ROW)
+TASKS_PER_ROW <- as.integer(ceiling(SCENARIOS_PER_ROW / SCENARIOS_PER_TASK))
+n_tasks <- nrow(grid) * TASKS_PER_ROW
 if (array_idx > n_tasks) {
-  stop(sprintf("array_index %d past end (nrow=%d x scenarios=%d = %d tasks)",
-               array_idx, nrow(grid), SCENARIOS_PER_ROW, n_tasks))
+  stop(sprintf("array_index %d past end (%d rows x %d tasks/row = %d tasks)",
+               array_idx, nrow(grid), TASKS_PER_ROW, n_tasks))
 }
-row_idx      <- ((array_idx - 1L) %/% SCENARIOS_PER_ROW) + 1L
-scenario_idx <- ((array_idx - 1L) %%  SCENARIOS_PER_ROW) + 1L
+row_idx        <- ((array_idx - 1L) %/% TASKS_PER_ROW) + 1L
+task_in_row    <-  (array_idx - 1L) %%  TASKS_PER_ROW           # 0-based
+scenario_start <- task_in_row * SCENARIOS_PER_TASK + 1L
+scenario_end   <- min(scenario_start + SCENARIOS_PER_TASK - 1L, SCENARIOS_PER_ROW)
+scenario_ids   <- scenario_start:scenario_end
 
 job <- as.list(grid[row_idx, ])
 
@@ -180,39 +204,53 @@ phi_vec        <- as.numeric(strsplit(job$phi_values,        "\\|")[[1]])
 p_vec          <- as.integer(strsplit(job$p_values,          "\\|")[[1]])
 enrichment_vec <- as.numeric(strsplit(job$enrichment_values, "\\|")[[1]])
 
-# job_<row>/ holds the shared per-row sim.rds; scenario_<sc>/ holds this
-# task's results. Scenario-level resume: a completed scenario has
-# evaluation.rds and the task exits immediately.
-job_dir      <- file.path(OUTPUT_ROOT, sprintf("job_%03d_%s", job$job_id, job$label))
-scenario_dir <- file.path(job_dir, sprintf("scenario_%03d", scenario_idx))
-dir.create(scenario_dir, recursive = TRUE, showWarnings = FALSE)
+# job_<row>/ holds the shared per-row sim.rds; each scenario_<sc>/ holds one
+# scenario's results. This task owns scenarios scenario_start..scenario_end.
+job_dir <- file.path(OUTPUT_ROOT, sprintf("job_%03d_%s", job$job_id, job$label))
+dir.create(job_dir, recursive = TRUE, showWarnings = FALSE)
 
 cat("=====================================================================\n")
-cat(sprintf("Task %d  ->  row %d (%s), scenario %d/%d\n",
-            array_idx, row_idx, job$label, scenario_idx, SCENARIOS_PER_ROW))
+cat(sprintf("Task %d  ->  row %d (%s), scenarios %d-%d of %d  (chunk=%d)\n",
+            array_idx, row_idx, job$label, scenario_start, scenario_end,
+            SCENARIOS_PER_ROW, SCENARIOS_PER_TASK))
 cat("=====================================================================\n")
 cat(sprintf("Started:  %s\n", format(Sys.time(), "%Y-%m-%d %H:%M:%S")))
-cat(sprintf("Out dir:  %s\n", scenario_dir))
+cat(sprintf("Out dir:  %s\n", job_dir))
 cat(sprintf("Model:    %s%s\n", job$model,
             if (identical(job$model, "sparse_inf") &&
                 !is.na(job$p_causal)) sprintf("  p_causal=%g", job$p_causal) else ""))
 cat(sprintf("Regions:  %d  (p = %s)\n", job$n_regions, paste(p_vec, collapse = ",")))
 cat(sprintf("Annot:    %s%s\n", job$annotation_type,
             if (job$annotation_type != "none")
-              sprintf("  (%s tracks, corr=%s)", job$n_annotations,
+              sprintf("  (%s tracks, corr=%s, enrich_fold=%s)", job$n_annotations,
                       if (is.na(job$annotation_correlation)) "NA"
-                      else format(job$annotation_correlation, nsmall = 2)) else ""))
-cat(sprintf("Methods:  %s\n\n", paste(METHODS, collapse = ", ")))
+                      else format(job$annotation_correlation, nsmall = 2),
+                      if (is.null(job$enrichment_fold) || is.na(job$enrichment_fold)) "NA"
+                      else format(job$enrichment_fold)) else ""))
+cat(sprintf("LD:       %s\n",
+            if (is.null(job$n_ref) || is.na(job$n_ref)) "in-sample (perfect)"
+            else sprintf("reference panel n_ref=%d", as.integer(job$n_ref))))
+cat(sprintf("Methods:  %s\n", paste(METHODS, collapse = ", ")))
+if (IS_SUPP) cat(sprintf("SUPPLEMENTAL run: methods = %s -> evaluation%s.rds\n",
+                         paste(METHODS, collapse = ", "), OUT_SUFFIX))
+cat("\n")
 
-evaluation_file <- file.path(scenario_dir, paste0("evaluation", OUT_SUFFIX, ".rds"))
-results_file    <- file.path(scenario_dir, paste0("results",    OUT_SUFFIX, ".rds"))
-if (IS_SUPP) cat(sprintf("SUPPLEMENTAL run: methods = %s -> %s\n\n",
-                         paste(METHODS, collapse = ", "), basename(evaluation_file)))
-if (file.exists(evaluation_file)) {
-  cat(sprintf("Scenario already complete (%s present). Nothing to do.\n",
-              basename(evaluation_file)))
+# Scenario-level resume. Determine which of this task's scenarios still need
+# doing BEFORE touching the sim: if the whole block is already checkpointed we
+# can exit without paying the (1-3h) simulation/load cost.
+scenario_eval_file <- function(sc)
+  file.path(job_dir, sprintf("scenario_%03d", sc),
+            paste0("evaluation", OUT_SUFFIX, ".rds"))
+todo <- scenario_ids[!vapply(scenario_ids,
+                             function(sc) file.exists(scenario_eval_file(sc)),
+                             logical(1))]
+if (length(todo) == 0L) {
+  cat(sprintf("All %d scenarios (%d-%d) already complete. Nothing to do.\n",
+              length(scenario_ids), scenario_start, scenario_end))
   quit(save = "no", status = 0)
 }
+cat(sprintf("Scenarios to run this task: %d of %d (rest already checkpointed)\n\n",
+            length(todo), length(scenario_ids)))
 
 # -----------------------------------------------------------------------------
 # Pipeline
@@ -223,9 +261,9 @@ t0 <- Sys.time()
 # All scenarios of a row share the same genotypes + the same deterministic
 # per-scenario phenotypes (seed = 1000 + row). Simulating the whole row and
 # then subsetting to one scenario keeps the region panel intact for pooling.
-# The sim.rds is shared across the row's 125 scenario tasks; the atomic
-# write (tmp + rename) makes concurrent first-run writers safe, and resubmits
-# skip re-simulation entirely.
+# The sim.rds is shared across all of the row's tasks; the atomic write
+# (tmp + rename) makes concurrent first-run writers safe, and resubmits skip
+# re-simulation entirely.
 sim_file <- file.path(job_dir, "sim.rds")
 if (file.exists(sim_file)) {
   cat("[1/3] loading cached row sim.rds\n")
@@ -239,6 +277,10 @@ if (file.exists(sim_file)) {
   annotation_corr_arg <- if (!is.null(job$annotation_correlation) &&
                              !is.na(job$annotation_correlation))
     as.numeric(job$annotation_correlation) else 0
+  # n_ref: LD reference-panel size. Absent column or NA -> NULL (in-sample LD),
+  # preserving Iteration 001 behaviour. Integer -> methods receive cor(X_ref).
+  n_ref_arg <- if (!is.null(job$n_ref) && !is.na(job$n_ref))
+    as.integer(job$n_ref) else NULL
 
   sim_args <- list(
     n_regions              = as.integer(job$n_regions),
@@ -262,6 +304,7 @@ if (file.exists(sim_file)) {
     verbose                = FALSE
   )
   if (!is.null(p_causal_arg)) sim_args$p_causal <- p_causal_arg
+  if (!is.null(n_ref_arg))    sim_args$n_ref    <- n_ref_arg
   sim <- do.call(run_simulation, sim_args)
 
   tmp <- paste0(sim_file, ".tmp.", Sys.getpid())
@@ -271,79 +314,80 @@ if (file.exists(sim_file)) {
 }
 
 n_sc_total <- length(sim$scenarios)
-if (scenario_idx > n_sc_total) {
-  stop(sprintf("scenario_idx %d exceeds simulated scenarios %d",
-               scenario_idx, n_sc_total))
+if (scenario_end > n_sc_total) {
+  stop(sprintf("scenario_end %d exceeds simulated scenarios %d",
+               scenario_end, n_sc_total))
 }
 
-# --- [2/3] Run all methods on THIS ONE scenario (all regions) ---------------
-# mini keeps every region (sim$genotypes) and just the one scenario, so
-# scenario_setup pools across the full region panel exactly as designed.
-# evaluate_methods() maps fits back to scenarios via scenario_id used as a
-# LIST INDEX (simulation$scenarios[[f$scenario_id]]); after subsetting, the
-# single scenario sits at position 1, so its scenario_id must be reset to 1
-# for that indexing to line up. The true scenario index is preserved in the
-# scenario_<sc> dir name and params.json.
-mini <- sim
-mini$scenarios <- sim$scenarios[scenario_idx]   # length-1 list
-mini$scenarios[[1]]$scenario_id <- 1L
-
-sc_meta <- sim$scenarios[[scenario_idx]]
-cat(sprintf("[2/3] scenario %d: S=%s, phi=%s, iter=%s  x %d regions x %d methods\n",
-            scenario_idx, sc_meta$S %||% "?", sc_meta$phi %||% "?",
-            sc_meta$iter %||% "?", job$n_regions, length(METHODS)))
-
-t1 <- Sys.time()
-results <- run_methods(mini, methods = METHODS,
-                       method_args = METHOD_ARGS[intersect(names(METHOD_ARGS), METHODS)],
-                       save = FALSE, verbose = FALSE)
-cat(sprintf("[2/3] methods done (%.1f min)\n",
-            as.numeric(Sys.time() - t1, units = "mins")))
-for (m in METHODS) {
-  cat(sprintf("       %-20s n_fits=%d  failed=%d\n",
-              m, results[[m]]$n_total %||% 0L, results[[m]]$n_failed %||% 0L))
-}
-saveRDS(results, results_file)
-
-# --- [3/3] Evaluate this scenario -------------------------------------------
-# Wrapped so a structural hiccup can't discard the expensive method compute -
-# results.rds is already on disk and collect_results.R can re-evaluate.
-cat("[3/3] evaluating ... ")
-evaluation <- tryCatch(
-  evaluate_methods(mini, results, save = FALSE, verbose = FALSE),
-  error = function(e) {
-    cat(sprintf("\nevaluate_methods failed: %s\n", conditionMessage(e)))
-    cat("results.rds is saved; collect_results.R can evaluate later.\n")
-    NULL
+# --- [2/3 + 3/3] Loop over this task's scenarios, checkpointing each ---------
+# For each scenario: keep every region (sim$genotypes) and just that one
+# scenario, so scenario_setup pools across the full region panel as designed.
+# evaluate_methods() maps fits back via scenario_id used as a LIST INDEX
+# (simulation$scenarios[[f$scenario_id]]); after subsetting the single scenario
+# sits at position 1, so its scenario_id must be reset to 1. The true scenario
+# index is preserved in the scenario_<sc> dir name and params.json. Each
+# scenario is saved before the next begins, so a walltime kill only loses the
+# scenario in flight and a resubmit resumes at `todo`.
+n_done <- 0L
+for (scenario_idx in todo) {
+  scenario_dir <- file.path(job_dir, sprintf("scenario_%03d", scenario_idx))
+  dir.create(scenario_dir, recursive = TRUE, showWarnings = FALSE)
+  evaluation_file <- file.path(scenario_dir, paste0("evaluation", OUT_SUFFIX, ".rds"))
+  results_file    <- file.path(scenario_dir, paste0("results",    OUT_SUFFIX, ".rds"))
+  # Re-check just before the work: a resubmit that overlaps could have filled it.
+  if (file.exists(evaluation_file)) {
+    cat(sprintf("  scenario %d already complete; skip\n", scenario_idx)); next
   }
-)
-if (!is.null(evaluation)) {
-  saveRDS(evaluation, evaluation_file)
-  cat(sprintf("done\n"))
 
-  cat("\nGlobal AUPRC by method (this scenario):\n")
+  ts   <- Sys.time()
+  mini <- sim
+  mini$scenarios <- sim$scenarios[scenario_idx]   # length-1 list
+  mini$scenarios[[1]]$scenario_id <- 1L
+  sc_meta <- sim$scenarios[[scenario_idx]]
+  cat(sprintf("[scenario %d/%d] S=%s phi=%s iter=%s  x %d regions x %d methods\n",
+              scenario_idx, SCENARIOS_PER_ROW, sc_meta$S %||% "?", sc_meta$phi %||% "?",
+              sc_meta$iter %||% "?", job$n_regions, length(METHODS)))
+
+  results <- run_methods(mini, methods = METHODS,
+                         method_args = METHOD_ARGS[intersect(names(METHOD_ARGS), METHODS)],
+                         save = FALSE, verbose = FALSE)
+  saveRDS(results, results_file)
   for (m in METHODS) {
-    a <- evaluation[[m]]$global$auprc
-    cat(sprintf("  %-20s %s\n", m,
-                if (is.null(a) || is.na(a)) "  NA" else sprintf("%.3f", a)))
+    cat(sprintf("       %-20s n_fits=%d  failed=%d\n",
+                m, results[[m]]$n_total %||% 0L, results[[m]]$n_failed %||% 0L))
   }
 
-  meta <- list(
-    array_index = array_idx,
-    job_id      = job$job_id,
-    label       = job$label,
-    scenario    = scenario_idx,
-    methods     = METHODS,
-    seed        = 1000L + row_idx,
-    vcf_dir     = VCF_DIR,
-    runtime_sec = as.numeric(Sys.time() - t0, units = "secs"),
-    R_version   = R.version.string,
-    finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+  # Wrapped so a structural hiccup can't discard the expensive method compute -
+  # results.rds is already on disk and collect_results.R can re-evaluate.
+  evaluation <- tryCatch(
+    evaluate_methods(mini, results, save = FALSE, verbose = FALSE),
+    error = function(e) {
+      cat(sprintf("  evaluate_methods failed: %s\n", conditionMessage(e)))
+      cat("  results.rds is saved; collect_results.R can evaluate later.\n")
+      NULL
+    }
   )
-  jsonlite::write_json(meta, file.path(scenario_dir, "params.json"),
-                       auto_unbox = TRUE, pretty = TRUE, null = "null")
-
-  cat(sprintf("[done] scenario %d complete in %.1f min. Output: %s\n",
-              scenario_idx, as.numeric(Sys.time() - t0, units = "mins"),
-              scenario_dir))
+  if (!is.null(evaluation)) {
+    saveRDS(evaluation, evaluation_file)
+    meta <- list(
+      array_index = array_idx,
+      job_id      = job$job_id,
+      label       = job$label,
+      scenario    = scenario_idx,
+      methods     = METHODS,
+      seed        = 1000L + row_idx,
+      vcf_dir     = VCF_DIR,
+      runtime_sec = as.numeric(Sys.time() - ts, units = "secs"),
+      R_version   = R.version.string,
+      finished_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+    )
+    jsonlite::write_json(meta, file.path(scenario_dir, "params.json"),
+                         auto_unbox = TRUE, pretty = TRUE, null = "null")
+    n_done <- n_done + 1L
+    cat(sprintf("  [done] scenario %d in %.1f min  (%d/%d this task)\n",
+                scenario_idx, as.numeric(Sys.time() - ts, units = "mins"),
+                n_done, length(todo)))
+  }
 }
+cat(sprintf("\n[task complete] %d scenario(s) evaluated in %.1f min total. Output: %s\n",
+            n_done, as.numeric(Sys.time() - t0, units = "mins"), job_dir))
