@@ -251,8 +251,11 @@ for (eval_path in eval_paths) {
 # headline artefact for the compact-findings analysis.
 .summarise_cell <- function(fdr_mat, cal_mat, thresh) {
   out <- list(ap = NA_real_, max_fdr_violation = NA_real_,
+              max_fdr_violation_n20 = NA_real_, max_fdr_violation_n50 = NA_real_,
+              viol_argmax_nsel = NA_integer_,
               pw_at_fdr05 = NA_real_, pw_at_fdr10 = NA_real_, pw_at_fdr20 = NA_real_,
-              ece = NA_real_, mce = NA_real_, signed_bias = NA_real_,
+              ece = NA_real_, ece_hi = NA_real_, n_above_pip10 = NA_integer_,
+              mce = NA_real_, signed_bias = NA_real_,
               cal_slope = NA_real_, total_mass_ratio = NA_real_,
               hi_pip_reliab = NA_real_, hi_pip_n = 0L,
               n_selected_hi = NA_integer_, n_causal_total = NA_integer_)
@@ -267,7 +270,20 @@ for (eval_path in eval_paths) {
     fdr  <- ifelse(nsel > 0, fp / nsel, 0)
     ro   <- order(rec, -prec)
     out$ap <- sum(diff(c(0, rec[ro])) * prec[ro])
-    out$max_fdr_violation <- max(pmax(0, fdr - (1 - thr)))
+    viol <- pmax(0, fdr - (1 - thr))
+    out$max_fdr_violation <- max(viol)
+    # The unguarded max is taken over ALL thresholds, including the extreme tail
+    # where only a handful of variants clear the cut. There FDR is a ratio with a
+    # tiny denominator and a single false positive can drive it to 1.0, inflating
+    # the statistic for otherwise well-behaved methods (audited: susie's 0.385 at
+    # t=0.985 came from just 15 selected variants; requiring >=50 gives 0.063,
+    # while genuinely broken methods such as sbayesrc are unaffected). The
+    # guarded versions restrict the max to thresholds selecting at least n
+    # variants and are the ones downstream analysis should prefer.
+    g <- function(nmin) if (any(nsel >= nmin)) max(viol[nsel >= nmin]) else NA_real_
+    out$max_fdr_violation_n20 <- g(20L)
+    out$max_fdr_violation_n50 <- g(50L)
+    out$viol_argmax_nsel <- as.integer(nsel[which.max(viol)])
     pw_at <- function(t) { ok <- fdr <= t; if (any(ok)) max(rec[ok]) else NA_real_ }
     out$pw_at_fdr05 <- pw_at(0.05); out$pw_at_fdr10 <- pw_at(0.10)
     out$pw_at_fdr20 <- pw_at(0.20)
@@ -284,6 +300,22 @@ for (eval_path in eval_paths) {
       out$ece         <- sum(w * abs(mp - fc))
       out$mce         <- max(abs(mp - fc))
       out$signed_bias <- sum(w * (mp - fc))     # > 0 = over-confident
+      # ECE is n-weighted, and ~94% of all variant-observations sit in bin 1
+      # (PIP < 0.1), so the plain ECE is overwhelmingly a statement about how
+      # well NEAR-ZERO pips are calibrated. It is a weak discriminator and can
+      # rank a badly-calibrated method well (audited: paintor ECE 0.009 with
+      # high-PIP reliability 0.600, vs beatrice ECE 0.022 with reliability
+      # 1.000). ece_hi repeats the calculation over the informative range only
+      # (PIP >= 0.1, i.e. bins 2..K), renormalising the weights within it.
+      idx  <- which(keep)
+      hi   <- idx > 1L                      # bin 1 is [0, 0.1)
+      if (any(hi) && sum(n[idx][hi]) > 0) {
+        wh <- n[idx][hi] / sum(n[idx][hi])
+        out$ece_hi <- sum(wh * abs(mp[hi] - fc[hi]))
+        out$n_above_pip10 <- as.integer(sum(n[idx][hi]))
+      } else {
+        out$ece_hi <- NA_real_; out$n_above_pip10 <- 0L
+      }
       fit <- tryCatch(stats::lm(fc ~ mp, weights = n[keep]), error = function(e) NULL)
       out$cal_slope <- if (is.null(fit)) NA_real_ else unname(coef(fit)[2])
       out$total_mass_ratio <- sum(sp) / max(sum(nc), 1)  # total PIP mass / #causal
