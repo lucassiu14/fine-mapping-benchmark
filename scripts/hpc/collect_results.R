@@ -88,6 +88,15 @@ combined    <- list()
 # their counts here is the natural per-scenario unit.
 fdr_acc <- new.env(hash = TRUE, parent = emptyenv())
 cal_acc <- new.env(hash = TRUE, parent = emptyenv())
+# AUPRC is a RANKING metric, not a rate: the correct per-cell estimate is the
+# MEAN of the per-replicate (per-iteration) AUPRCs, not the AUPRC of the pooled
+# ranked list. Pooling systematically under-states AUPRC (one locus's false
+# positives outrank another's true positives) and gives no standard error.
+# ap_acc keeps running (n, sum, sumsq) of the per-task AUPRCs per cell so we can
+# emit ap_macro + ap_macro_se. (The pooled `ap` from the summed FDR counts is
+# still reported as ap_micro for continuity - for rate metrics, FDR/calibration,
+# pooling remains correct.)
+ap_acc  <- new.env(hash = TRUE, parent = emptyenv())
 THRESH  <- NULL
 
 .acc <- function(env, key, m) {
@@ -226,6 +235,11 @@ for (eval_path in eval_paths) {
         sp <- ifelse(is.na(pc$mean_pip), 0, pc$mean_pip) * pc$n
         .acc(cal_acc, key, cbind(n = pc$n, n_causal = pc$n_causal, sum_pip = sp))
       }
+      # macro AUPRC: accumulate this ONE task's (= one iteration's) AUPRC as a
+      # replicate, so the per-cell value averages replicates instead of pooling.
+      apv <- v$ap %||% NA_real_
+      if (!is.na(apv))
+        .acc(ap_acc, key, c(n = 1, sum = apv, sumsq = apv * apv))
     }
   }
 }
@@ -335,6 +349,17 @@ if (length(all_keys) > 0L) {
   summ <- do.call(rbind, lapply(seq_along(all_keys), function(i) {
     k <- all_keys[i]
     s <- .summarise_cell(fdr_acc[[k]], cal_acc[[k]], THRESH)
+    # macro AUPRC = mean of per-replicate AUPRCs; SE across replicates.
+    a  <- ap_acc[[k]]
+    if (!is.null(a) && a["n"] > 0) {
+      mean_ap <- a["sum"] / a["n"]
+      var_ap  <- if (a["n"] > 1) (a["sumsq"] - a["sum"]^2 / a["n"]) / (a["n"] - 1) else NA_real_
+      s$ap_macro    <- unname(mean_ap)
+      s$ap_macro_se <- unname(if (is.na(var_ap)) NA_real_ else sqrt(max(var_ap, 0)) / sqrt(a["n"]))
+      s$ap_n        <- as.integer(a["n"])
+    } else { s$ap_macro <- NA_real_; s$ap_macro_se <- NA_real_; s$ap_n <- 0L }
+    s$ap_micro <- s$ap            # the pooled AUPRC, kept for reference
+    s$ap       <- s$ap_macro      # `ap` is the corrected (macro) AUPRC
     cbind(meta[i, , drop = FALSE], s, row.names = NULL)
   }))
   # Attach readable scenario params from the grid.
