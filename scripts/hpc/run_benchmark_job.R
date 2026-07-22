@@ -141,6 +141,15 @@ METHOD_ARGS$fb_reg_combo      <- modifyList(.FBv, list(lambda_l1 = 0.1,
 METHOD_ARGS$beatrice_ncaus2   <- modifyList(.BEv, list(n_caus = 2))
 METHOD_ARGS$beatrice_sigma_hi <- modifyList(.BEv, list(sigma_sq = 0.2))
 
+# --- Iteration 003 Track B: cross-region JOINT prior models ------------------
+# Same FB base args (beatrice_dir, python, max_iter, n_caus, ...). The joint
+# training is driven by each method's scenario_setup hook (run_fb_*_scenario_setup
+# in R/wrapper_fb_joint.R), which invokes BEATRICE_annot_sparse/beatrice_joint.py
+# once per scenario. fb_pooled = shared logistic head (idea #1); fb_xregion =
+# shared LassoNet head (idea #2). On the `none` arm they fall back to plain FB.
+METHOD_ARGS$fb_pooled         <- .FBv
+METHOD_ARGS$fb_xregion        <- .FBv
+
 # -----------------------------------------------------------------------------
 # Parse array index
 # -----------------------------------------------------------------------------
