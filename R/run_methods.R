@@ -55,7 +55,25 @@
   # pooled across regions (§0.1 of the auto-research plan).
   sbayesrc              = "run_sbayesrc_region",
   # Modern variational comparator (without annotations).
-  sparsepro             = "run_sparsepro_region"
+  sparsepro             = "run_sparsepro_region",
+
+  # --- Iteration 003: FB / BEATRICE hyperparameter variants ------------------
+  # Each reuses the tested run_functional_beatrice_region / run_beatrice_region
+  # wrapper; only the per-method args differ (set in the worker's METHOD_ARGS).
+  # Targets FB's diagnosed weaknesses - over-confidence and per-locus annotation
+  # over-fitting - via feature-sparsity (lambda_l1), shrink-to-BEATRICE
+  # (prior_regularisation), fewer causal components (n_caus), softer posteriors
+  # (sparse_concrete) and effect-variance (sigma_sq).
+  fb_l1hi         = "run_functional_beatrice_region",   # lambda_l1 x10
+  fb_l1vhi        = "run_functional_beatrice_region",   # lambda_l1 x50
+  fb_prreg5       = "run_functional_beatrice_region",   # prior_regularisation 5
+  fb_prreg20      = "run_functional_beatrice_region",   # prior_regularisation 20
+  fb_ncaus2       = "run_functional_beatrice_region",   # n_caus 2
+  fb_concrete     = "run_functional_beatrice_region",   # sparse_concrete 200
+  fb_sigma_hi     = "run_functional_beatrice_region",   # sigma_sq 0.2
+  fb_reg_combo    = "run_functional_beatrice_region",   # combined regularisation
+  beatrice_ncaus2 = "run_beatrice_region",              # BEATRICE n_caus 2
+  beatrice_sigma_hi = "run_beatrice_region"             # BEATRICE sigma_sq 0.2
 )
 
 
