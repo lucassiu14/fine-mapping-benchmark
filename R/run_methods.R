@@ -73,7 +73,15 @@
   fb_sigma_hi     = "run_functional_beatrice_region",   # sigma_sq 0.2
   fb_reg_combo    = "run_functional_beatrice_region",   # combined regularisation
   beatrice_ncaus2 = "run_beatrice_region",              # BEATRICE n_caus 2
-  beatrice_sigma_hi = "run_beatrice_region"             # BEATRICE sigma_sq 0.2
+  beatrice_sigma_hi = "run_beatrice_region",            # BEATRICE sigma_sq 0.2
+
+  # --- Iteration 003: FB cross-region JOINT prior models (Track B) -----------
+  # A shared annotation prior head trained JOINTLY across all regions of a
+  # scenario (not per-locus, not sequential). Each has a scenario_setup hook
+  # (run_<method>_scenario_setup) that runs the joint Python trainer once per
+  # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
+  fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
+  fb_xregion      = "run_fb_xregion_region"    # idea #2: shared LassoNet head
 )
 
 
