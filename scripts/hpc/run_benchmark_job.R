@@ -123,6 +123,24 @@ METHOD_ARGS <- list(
   funmap              = list(python = PY_VENV, max_iter = 100, tol = 5e-5)
 )
 
+# --- Iteration 003: FB / BEATRICE hyperparameter variants --------------------
+# Reuse the tested FB / BEATRICE wrappers with one knob changed each. Run
+# supplementally (FMB_METHODS="fb_l1hi,fb_prreg5,...") against the cached row
+# sims so the 14 baselines (already collected) are not re-run.
+.FBv <- METHOD_ARGS$functional_beatrice
+.BEv <- METHOD_ARGS$beatrice
+METHOD_ARGS$fb_l1hi           <- modifyList(.FBv, list(lambda_l1 = 0.1))          # feature sparsity x10
+METHOD_ARGS$fb_l1vhi          <- modifyList(.FBv, list(lambda_l1 = 0.5))          # feature sparsity x50
+METHOD_ARGS$fb_prreg5         <- modifyList(.FBv, list(prior_regularisation = 5.0))   # shrink toward BEATRICE
+METHOD_ARGS$fb_prreg20        <- modifyList(.FBv, list(prior_regularisation = 20.0))  # strong shrink
+METHOD_ARGS$fb_ncaus2         <- modifyList(.FBv, list(n_caus = 2))               # less mass inflation
+METHOD_ARGS$fb_concrete       <- modifyList(.FBv, list(sparse_concrete = 200))    # softer posteriors
+METHOD_ARGS$fb_sigma_hi       <- modifyList(.FBv, list(sigma_sq = 0.2))           # larger effect prior
+METHOD_ARGS$fb_reg_combo      <- modifyList(.FBv, list(lambda_l1 = 0.1,
+                                            prior_regularisation = 5.0, n_caus = 3))  # combined
+METHOD_ARGS$beatrice_ncaus2   <- modifyList(.BEv, list(n_caus = 2))
+METHOD_ARGS$beatrice_sigma_hi <- modifyList(.BEv, list(sigma_sq = 0.2))
+
 # -----------------------------------------------------------------------------
 # Parse array index
 # -----------------------------------------------------------------------------
