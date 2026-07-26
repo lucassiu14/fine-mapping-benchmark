@@ -16,30 +16,18 @@ baselines already collected.
 
 ---
 
-## Track A — hyperparameter variants (READY to submit)
+## Track A — hyperparameter variants (DROPPED 2026-08 — do not resubmit)
 
-Each reuses the *tested* `run_functional_beatrice_region` / `run_beatrice_region`
-wrapper with one knob changed (`.FM_REGISTRY` entries + worker `METHOD_ARGS`).
-Verified locally: every variant dispatches and forwards its overridden flag to
-`beatrice_annot.py` (capture test — e.g. `fb_l1hi` → `--lambda_l1 0.1`). No new
-model code, so these are safe to run now.
-
-| method | change vs FB/BEATRICE default | targets |
-|---|---|---|
-| `fb_l1hi` | `lambda_l1` 0.01 → 0.1 (feature sparsity ×10) | ignore noisy annotations |
-| `fb_l1vhi` | `lambda_l1` → 0.5 | strong feature selection |
-| `fb_prreg5` | `prior_regularisation` 1 → 5 (shrink prior → uniform) | harm-under-noise |
-| `fb_prreg20` | `prior_regularisation` → 20 | strong shrink toward BEATRICE |
-| `fb_ncaus2` | `n_caus` 5 → 2 | mass inflation at low S |
-| `fb_concrete` | `sparse_concrete` 50 → 200 (more Concrete samples) | softer, less over-confident PIPs |
-| `fb_sigma_hi` | `sigma_sq` 0.05 → 0.2 | effect-variance / calibration |
-| `fb_reg_combo` | `lambda_l1` 0.1 + `prior_regularisation` 5 + `n_caus` 3 | combined "regularised FB" |
-| `beatrice_ncaus2` | BEATRICE `n_caus` 5 → 2 | BEATRICE mass at low S |
-| `beatrice_sigma_hi` | BEATRICE `sigma_sq` → 0.2 | BEATRICE calibration |
-
-Note: the 8 `fb_*` variants only differ from each other on the **annotated** arms;
-on the `none` arm they reduce to BEATRICE (no annotations → the LassoNet prior is
-inert), so their `none`-arm results are expected to duplicate `beatrice`.
+Originally 10 methods (`fb_l1hi`, `fb_l1vhi`, `fb_prreg5`, `fb_prreg20`, `fb_ncaus2`,
+`fb_concrete`, `fb_sigma_hi`, `fb_reg_combo`, `beatrice_ncaus2`, `beatrice_sigma_hi`)
+that reused the FB/BEATRICE wrappers with a single knob changed each. **Abandoned:**
+a hand-picked knob grid is the wrong tool for tuning — a principled hyperparameter
+search (e.g. Optuna) in a dedicated study is the right approach, and these were
+also ~4/5 of the per-scenario compute cost for little expected gain. The methods
+have been removed from `.FM_REGISTRY` and the worker `METHOD_ARGS`; any partial
+Track A results already on disk (rows ~1–81 of the interrupted supplemental run)
+are simply ignored at collect/analysis time. **Only the Track B joint-prior models
+are carried forward.**
 
 ## Track B — model changes (BUILT + LOCALLY VALIDATED 2026-07-22; ready to submit)
 
@@ -183,22 +171,22 @@ causals, 500 iters, ~6 s):
 
 ## How to run (supplemental, reuses cached sims)
 
-Register the variants (package change → reinstall on the cluster), then run only
-the new methods against the cached Iteration 002 sims:
-
-Per the user's choice (b) — build the model changes first — the Track B joint
-methods (`fb_pooled`, `fb_xregion`) go in the **same array** as the Track A
-hyperparameter variants:
+Run only the two joint-prior models against the cached Iteration 002 sims. This
+resumes: scenarios already carrying an `evaluation_supp.rds` (from the interrupted
+12-method run) are skipped, so only the not-yet-done scenarios are computed, and
+now only for the 2 joint methods (~1/5 the per-scenario cost of the old 12-method
+job).
 
 ```bash
-git pull && Rscript -e 'install.packages(".", repos=NULL, type="source")'
-export FMB_SCRATCH=$EPHEMERAL/fmbench_iter002          # SAME root -> reuse sim.rds + write *_supp
-# Track B (model changes) + Track A (hyperparameter screen) in one array:
-export FMB_METHODS="fb_pooled,fb_xregion,fb_l1hi,fb_l1vhi,fb_prreg5,fb_prreg20,fb_ncaus2,fb_concrete,fb_sigma_hi,fb_reg_combo,beatrice_ncaus2,beatrice_sigma_hi"
-export FMB_SCENARIOS_PER_TASK=5                        # ~500 FB-family fits/scenario-chunk -> smaller chunk
+export FMB_SCRATCH=$EPHEMERAL/fmbench_iter002          # SAME root -> reuse sim.rds + evaluation_supp.rds
+export FMB_METHODS="fb_pooled,fb_xregion"
+export FMB_SCENARIOS_PER_TASK=25                       # only 2 methods/scenario now -> larger chunk is fine
 bash scripts/hpc/submit_benchmark_pbs.sh
-# To run ONLY the flagship model changes first: FMB_METHODS="fb_pooled,fb_xregion"
 ```
+
+Reinstalling the package first is optional here — `fb_pooled`/`fb_xregion` are
+already registered; a reinstall is only needed to pick up the Track A *removal*
+above, which does not affect these two methods.
 
 - The worker reuses `job_*/sim.rds` if present (deterministic seed, so if the
   ephemeral cache was purged it re-simulates identical data — one-off cost).
