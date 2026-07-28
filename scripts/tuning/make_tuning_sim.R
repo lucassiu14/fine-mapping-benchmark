@@ -52,8 +52,18 @@ N_REGIONS   <- geti("regions", 4L)
 N_ANNOT     <- geti("n_annotations", 10L)
 N_SUB       <- geti("n", 1000L)
 SEED        <- geti("seed", 20260801L)
-VCF_DIR     <- gets("vcf_dir", Sys.getenv("FMB_VCF_DIR", unset = ""))
-MAP_DIR     <- gets("genetic_map_dir", Sys.getenv("FMB_GENETIC_MAP_DIR", unset = ""))
+# Default to the SAME genotype source as the benchmark worker (data/vcf,
+# data/genetic_maps relative to the project root) so the tuning set is drawn from
+# the same distribution as the grid FB will ultimately be judged on. Falls back
+# to synthetic genotypes if the directories are absent.
+VCF_DIR     <- gets("vcf_dir", Sys.getenv("FMB_VCF_DIR", unset = "data/vcf"))
+MAP_DIR     <- gets("genetic_map_dir", Sys.getenv("FMB_GENETIC_MAP_DIR",
+                                                 unset = "data/genetic_maps"))
+if (nzchar(VCF_DIR) && !dir.exists(VCF_DIR)) {
+  message("NOTE: vcf_dir '", VCF_DIR, "' not found - using synthetic genotypes.")
+  VCF_DIR <- ""
+}
+if (nzchar(MAP_DIR) && !dir.exists(MAP_DIR)) MAP_DIR <- ""
 
 S_vec   <- as.integer(strsplit(N_SCEN_S,   ",")[[1]])
 phi_vec <- as.numeric(strsplit(N_SCEN_PHI, ",")[[1]])
