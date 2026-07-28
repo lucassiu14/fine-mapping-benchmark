@@ -210,3 +210,63 @@ baselines within each cell. The never-pool rule is unchanged: do NOT aggregate
 their metrics across model (sparse vs sparse_inf) or annotation type
 (none/binary/continuous). The `joint_fallback` flag lets analysis separate genuine
 joint results (annotated arms) from the BEATRICE-equivalent `none`-arm fallback.
+
+---
+
+# RESULTS (collected 2026-07-28, analysed 2026-07-29)
+
+Full report: **`results/iteration-003-joint-prior-analysis.pdf`** (10 pp).
+
+## Provenance — what was run and where it lives
+
+| item | location |
+|---|---|
+| Array | PBS `3449477[]`, 1350 tasks (chunk=25), `FMB_METHODS="fb_pooled,fb_xregion"` |
+| Scratch root | `$EPHEMERAL/fmbench_iter002` (SAME root as Iteration 002 → reused `job_*/sim.rds`) |
+| Per-scenario outputs | `job_*/scenario_*/{results_supp.rds, evaluation_supp.rds}` — 33,750/33,750 complete |
+| Collect job | PBS `3470549`, `FMB_DUMP_FDR_CURVES=1` (first iteration to dump the true FDR curves) |
+| Collected locally | `results/iter003/` — `combined_scenario_metrics.{rds,csv}` (367,025 cells), `combined_pip_calibration.rds`, `combined_fdr_curves.rds`, `combined_evaluation.{rds,csv}`, `run_summary.csv` |
+| Analysis scripts | scratchpad (`i3_analyse.R`, `i3_figs*.R`, `i3_tabs.R`, `build_pdf_i3.py`) |
+
+⚠️ Ephemeral auto-purges ~30 days from 2026-07-23. The `results/iter003/` copy is the durable one.
+
+**Run history note.** The first submission (`3391109`, 12 methods incl. Track A) reached ~55 % (18,693/33,750)
+over 5 days before Track A was dropped; it was cancelled and re-submitted as the 2-method job above, which
+resumed on the existing checkpoints and finished in hours. Track A metrics survive in `evaluation_supp.rds`
+for rows ~1–81 and are simply ignored at analysis time (9,890 cells each vs 16,875 for the real methods).
+
+## Validity
+
+- **Full coverage**: 16,875 scenario cells for each of `fb_pooled` / `fb_xregion` — identical to every baseline.
+- **Fallback correct**: 100.0 % identical to `functional_beatrice` on the `none` arm (where a joint annotation
+  prior is meaningless); differ in >99 % of annotated cells → real cross-region training, not silent degradation.
+- NA rates 0.0 % for AUPRC / FDR-violation / mass ratio; 26 % for high-PIP reliability (cells where nothing
+  reached the top PIP bin — the usual abstention signal).
+
+## Findings
+
+1. **The diagnosis was right and the fix works, partially.** Sharing the prior across regions removes roughly
+   half of FB's excess posterior mass (continuous / n_ref=200: **11.45 → 5.04**; binary: 9.02 → 5.41) and
+   improves FDR control at every threshold.
+2. **Systematic, not an averaging artefact** — paired within-cell, the joint models improve mass calibration in
+   **68–94 %** of cells. `fb_xregion` is above 50 % on essentially every metric × LD × annotation combination.
+3. **The LassoNet head beats the linear head (idea #2 > idea #1).** `fb_xregion` wins AUPRC in **62–97 %** of
+   cells vs `fb_pooled`. `fb_pooled` improves calibration but **loses ranking on binary annotations** (AUPRC
+   better in only 6–23 % of cells) — the linear head is too weak. **Recommend dropping `fb_pooled`.**
+4. **No ranking cost for `fb_xregion`** — matches or beats per-locus FB, and is the best deployable method on
+   continuous annotations under in-sample LD (AUPRC 0.539).
+5. **Better annotation use** — enrichment slope 0.0085/fold vs FB's 0.0070 (binary, in-sample); both → ~0 under
+   panel LD while the oracle keeps 0.017–0.022.
+6. **NOT sufficient.** Still worse calibrated than plain BEATRICE under panel LD (5–7× vs ~3.5×), and beats
+   finemap in only 2–10 % of cells off in-sample LD (<2 % on FDR anywhere). **LD mis-specification, not the
+   annotation prior, is the binding constraint** — per-locus over-fitting was a real cause, not the only one.
+7. **Residual inflation is concentrated at low S** (S=1: fb_xregion 6.37, FB 9.96, finemap 2.23), implicating
+   the fixed causal-count prior `n_caus=5` rather than the annotation prior → directly motivates the Optuna
+   search over `n_caus` / `sigma_sq` / `prior_regularisation`.
+
+## Next steps
+
+1. Tune `n_caus` + effect-variance prior via the Optuna harness (running) — targets finding 7.
+2. Adopt `fb_xregion` as the Functional BEATRICE default; drop `fb_pooled`.
+3. Re-prioritise ideas #3 (confidence-gated prior) and #4 (cross-region consistency regulariser) *behind*
+   attacking LD mis-specification, which binds for every annotation-using method.
