@@ -56,7 +56,12 @@ Every knob `beatrice_annot.py` actually consumes:
 
 `max_iter` is deliberately **not** tuned: it trades compute for convergence, so
 including it would let the search buy objective value with runtime and make
-trials incomparable. Fixed at the production value (1500).
+trials incomparable. Fixed at **2000** (the `run_functional_beatrice()` default).
+
+> Note: the Iteration 002 benchmark ran Functional BEATRICE at `max_iter = 1500`
+> (set in `scripts/hpc/run_benchmark_job.R`). Hyperparameters tuned at 2000 are
+> optimal *for 2000*, so the validation run should use `max_iter = 2000` too —
+> otherwise the tuned configuration is being judged under a different model.
 
 ## How it runs continually and survives walltime
 

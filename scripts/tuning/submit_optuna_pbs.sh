@@ -36,7 +36,7 @@ OBJECTIVE="${OBJECTIVE:-multi}"        # multi | scalar
 PENALTY="${PENALTY:-0.5}"              # scalar mode only
 SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
 REGIONS="${REGIONS:-4}"                # regions per scenario
-MAX_ITER="${MAX_ITER:-1500}"           # FB max_iter (fixed, never tuned)
+MAX_ITER="${MAX_ITER:-2000}"           # FB max_iter (fixed, never tuned)
 
 # --- cluster resources -------------------------------------------------------
 WORKERS="${WORKERS:-10}"               # parallel array elements sharing the study

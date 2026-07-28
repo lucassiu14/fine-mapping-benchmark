@@ -191,7 +191,7 @@ def main():
                     help="scalar mode only: weight on the FDR violation")
     ap.add_argument("--scenarios", type=int, default=4, help="scenarios per trial")
     ap.add_argument("--regions", type=int, default=4, help="regions per scenario (0 = all)")
-    ap.add_argument("--max_iter", type=int, default=1500, help="FB max_iter (fixed, not tuned)")
+    ap.add_argument("--max_iter", type=int, default=2000, help="FB max_iter (fixed, not tuned)")
     ap.add_argument("--tune-gamma-coverage", action="store_true",
                     help="also tune the credible-set coverage threshold")
     ap.add_argument("--n-trials", type=int, default=None, help="stop after this many trials")

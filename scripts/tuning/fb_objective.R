@@ -26,7 +26,7 @@
 # Usage:
 #   Rscript scripts/tuning/fb_objective.R --sim <tuning_sim.rds> --scenario 1 \
 #       --regions 4 --beatrice_dir BEATRICE_annot_sparse --python ~/tools/py-venv-runner.sh \
-#       --max_iter 1500 --lambda_l1 0.01 --prior_regularisation 1.0 --n_caus 5 \
+#       --max_iter 2000 --lambda_l1 0.01 --prior_regularisation 1.0 --n_caus 5 \
 #       --sigma_sq 0.05 --sparse_concrete 50 --hierarchy_M 10
 # =============================================================================
 
@@ -90,7 +90,7 @@ if (N_REGIONS > 0L && N_REGIONS < length(mini$genotypes)) {
 fb_args <- list(
   beatrice_dir         = gets("beatrice_dir", normalizePath("BEATRICE_annot_sparse", mustWork = FALSE)),
   python               = gets("python", "python"),
-  max_iter             = geti("max_iter", 1500L),
+  max_iter             = geti("max_iter", 2000L),
   n_caus               = geti("n_caus", 5L),
   sigma_sq             = getn("sigma_sq", 0.05),
   gamma_coverage       = getn("gamma_coverage", 0.95),
