@@ -57,25 +57,11 @@
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region",
 
-  # --- Iteration 003: FB / BEATRICE hyperparameter variants ------------------
-  # Each reuses the tested run_functional_beatrice_region / run_beatrice_region
-  # wrapper; only the per-method args differ (set in the worker's METHOD_ARGS).
-  # Targets FB's diagnosed weaknesses - over-confidence and per-locus annotation
-  # over-fitting - via feature-sparsity (lambda_l1), shrink-to-BEATRICE
-  # (prior_regularisation), fewer causal components (n_caus), softer posteriors
-  # (sparse_concrete) and effect-variance (sigma_sq).
-  fb_l1hi         = "run_functional_beatrice_region",   # lambda_l1 x10
-  fb_l1vhi        = "run_functional_beatrice_region",   # lambda_l1 x50
-  fb_prreg5       = "run_functional_beatrice_region",   # prior_regularisation 5
-  fb_prreg20      = "run_functional_beatrice_region",   # prior_regularisation 20
-  fb_ncaus2       = "run_functional_beatrice_region",   # n_caus 2
-  fb_concrete     = "run_functional_beatrice_region",   # sparse_concrete 200
-  fb_sigma_hi     = "run_functional_beatrice_region",   # sigma_sq 0.2
-  fb_reg_combo    = "run_functional_beatrice_region",   # combined regularisation
-  beatrice_ncaus2 = "run_beatrice_region",              # BEATRICE n_caus 2
-  beatrice_sigma_hi = "run_beatrice_region",            # BEATRICE sigma_sq 0.2
-
-  # --- Iteration 003: FB cross-region JOINT prior models (Track B) -----------
+  # --- Iteration 003: FB cross-region JOINT prior models ---------------------
+  # (The manual FB/BEATRICE hyperparameter-variant methods that lived here -
+  # fb_l1hi, fb_prreg5, beatrice_ncaus2, etc. - were dropped: a hand-picked knob
+  # grid is the wrong tool for tuning; principled search, e.g. Optuna, belongs in
+  # a separate study. Only the genuinely new joint-prior models are kept.)
   # A shared annotation prior head trained JOINTLY across all regions of a
   # scenario (not per-locus, not sequential). Each has a scenario_setup hook
   # (run_<method>_scenario_setup) that runs the joint Python trainer once per
