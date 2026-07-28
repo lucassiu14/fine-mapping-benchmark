@@ -88,11 +88,18 @@ with no lost or corrupted writes.
 
 ## Running it
 
-One-off: install Optuna into the cluster Python venv.
+One-off: install Optuna into the cluster Python venv. The venv python is
+dynamically linked against the module's libpython, so **load the Python module
+first** or it fails with `error while loading shared libraries:
+libpython3.12.so.1.0`.
 
 ```bash
+module load Python/3.12.3-GCCcore-13.3.0
 ~/tools/fmpy-venv/bin/python -m pip install optuna
 ```
+
+(The submit script loads both the R and Python modules inside the job, so this
+is only needed for the interactive install and the `--report` command.)
 
 Build the fixed tuning set for the stratum (once per stratum):
 

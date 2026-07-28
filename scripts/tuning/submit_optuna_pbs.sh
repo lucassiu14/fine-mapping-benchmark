@@ -44,6 +44,10 @@ PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
 PBS_WALLTIME="${PBS_WALLTIME:-24:00:00}"
 PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=16gb}"
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
+# The venv python is dynamically linked against the module's libpython, so the
+# Python module MUST be loaded before calling it - otherwise it dies with
+# "error while loading shared libraries: libpython3.12.so.1.0".
+PY_MODULE="${PY_MODULE:-Python/3.12.3-GCCcore-13.3.0}"
 # Python that has optuna installed (see the doc for the one-off pip install).
 PY="${PY:-$HOME/tools/fmpy-venv/bin/python}"
 # Python that runs BEATRICE itself (torch); the R wrapper shells out to this.
@@ -92,6 +96,7 @@ cat > "$JOB_SCRIPT" <<PBS_EOF
 set -euo pipefail
 cd "${PROJECT_ROOT}"
 module load ${R_MODULE}
+module load ${PY_MODULE}
 
 echo "[worker \${PBS_ARRAY_INDEX} on \$(hostname)] start \$(date)"
 ${PY} scripts/tuning/optuna_fb.py \
