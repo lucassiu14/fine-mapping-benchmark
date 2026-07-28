@@ -38,6 +38,17 @@ SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
 REGIONS="${REGIONS:-4}"                # regions per scenario
 MAX_ITER="${MAX_ITER:-2000}"           # FB max_iter (fixed, never tuned)
 
+# --- stratum for the tuning sim (used only when SIM has to be built) ---------
+# These must describe the SAME stratum that STUDY names.
+ANNOTATIONS="${ANNOTATIONS:-binary}"   # none | binary | continuous
+ENRICHMENT="${ENRICHMENT:-10.8}"
+N_REF="${N_REF:-500}"                  # "NA" for in-sample LD
+MODEL="${MODEL:-sparse}"               # sparse | sparse_inf
+P_CAUSAL="${P_CAUSAL:-}"               # sparse_inf only
+SIM_WALLTIME="${SIM_WALLTIME:-04:00:00}"
+SIM_SELECT="${SIM_SELECT:-1:ncpus=1:mem=32gb}"
+SIM_QUEUE="${SIM_QUEUE:-v1_small24}"
+
 # --- cluster resources -------------------------------------------------------
 WORKERS="${WORKERS:-10}"               # parallel array elements sharing the study
 PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
@@ -68,12 +79,45 @@ if (( TIMEOUT < 300 )); then
   exit 1
 fi
 
-if [[ ! -f "$SIM" ]]; then
-  echo "ERROR: tuning sim not found: $SIM" >&2
-  echo "  Build it first, e.g.:" >&2
-  echo "    Rscript scripts/tuning/make_tuning_sim.R --out $SIM \\" >&2
-  echo "        --annotations binary --enrichment 10.8 --n_ref 500 --regions $REGIONS" >&2
-  exit 1
+# --- bootstrap: build the tuning sim if it is missing ------------------------
+# Submitted as its own job, with the worker array made dependent on it
+# (-W depend=afterok), so ONE invocation of this script does the whole thing:
+# build-if-needed, then tune. If the sim already exists the build is skipped and
+# the array starts immediately - which is also what happens on every resume.
+DEPEND=""
+if [[ -f "$SIM" ]]; then
+  echo "Tuning sim: $SIM (exists - reusing)"
+else
+  echo "Tuning sim: $SIM (missing - submitting a build job first)"
+  SIM_SCRIPT="$(mktemp -t fmbtunesim_XXXXXX.sh)"
+  PC_ARG=""
+  [[ -n "$P_CAUSAL" ]] && PC_ARG="--p_causal ${P_CAUSAL}"
+  cat > "$SIM_SCRIPT" <<SIM_EOF
+#!/bin/bash
+#PBS -N fbtunesim
+#PBS -q ${SIM_QUEUE}
+#PBS -l select=${SIM_SELECT}
+#PBS -l walltime=${SIM_WALLTIME}
+#PBS -o ${LOG_DIR}/
+#PBS -e ${LOG_DIR}/
+set -euo pipefail
+cd "${PROJECT_ROOT}"
+module load ${R_MODULE}
+echo "[sim build on \$(hostname)] start \$(date)"
+Rscript scripts/tuning/make_tuning_sim.R \
+    --out "${SIM}" \
+    --annotations "${ANNOTATIONS}" \
+    --enrichment ${ENRICHMENT} \
+    --n_ref "${N_REF}" \
+    --model "${MODEL}" \
+    --regions ${REGIONS} ${PC_ARG}
+echo "[sim build] done \$(date)"
+SIM_EOF
+  SIM_JOBID="$(qsub "$SIM_SCRIPT")"
+  echo "  sim build job: ${SIM_JOBID}"
+  # afterok: the workers only start if the build SUCCEEDS. If it fails they stay
+  # held and can be deleted - they never run against a missing/partial sim.
+  DEPEND="-W depend=afterok:${SIM_JOBID}"
 fi
 
 echo "Study:     $STUDY   (objective=$OBJECTIVE)"
@@ -114,9 +158,15 @@ echo "[worker \${PBS_ARRAY_INDEX}] done \$(date)"
 PBS_EOF
 
 echo "Job script: $JOB_SCRIPT"
-qsub "$JOB_SCRIPT"
+# ${DEPEND} is intentionally unquoted: it is either empty or "-W depend=afterok:ID".
+# shellcheck disable=SC2086
+qsub ${DEPEND} "$JOB_SCRIPT"
 echo
-echo "Track with:   qstat -tan -u \$USER | grep fbtune"
+if [[ -n "$DEPEND" ]]; then
+  echo "NOTE: the worker array is HELD until the sim build finishes successfully"
+  echo "      (shows as state H in qstat, then switches to Q/R by itself)."
+fi
+echo "Track with:   qstat -tan -u \$USER | grep -E 'fbtune|fbtunesim'"
 echo "Progress:     ${PY} scripts/tuning/optuna_fb.py --sim ${SIM} --study ${STUDY} \\"
 echo "                  --storage ${STORAGE} --objective ${OBJECTIVE} --report"
 echo "Resume later: re-run this exact script (continues the same study)"

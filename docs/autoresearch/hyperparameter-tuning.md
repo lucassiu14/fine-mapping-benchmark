@@ -101,20 +101,27 @@ module load Python/3.12.3-GCCcore-13.3.0
 (The submit script loads both the R and Python modules inside the job, so this
 is only needed for the interactive install and the `--report` command.)
 
-Build the fixed tuning set for the stratum (once per stratum):
+Then submit — **one command does everything**. If the tuning sim does not exist
+yet it is built as its own job first, and the worker array is submitted with
+`-W depend=afterok:<build job>` so it starts automatically once the build
+succeeds (and never runs against a missing or partial sim). If the sim already
+exists the build is skipped and the workers start immediately — which is also
+what happens on every resume.
+
+```bash
+STUDY=fb_binary_ref500 SIM=tuning/sim_binary_ref500.rds \
+WORKERS=20 PBS_WALLTIME=72:00:00 \
+bash scripts/tuning/submit_optuna_pbs.sh
+```
+
+The stratum used to build the sim is set by `ANNOTATIONS` / `ENRICHMENT` /
+`N_REF` / `MODEL` / `P_CAUSAL` (defaults: binary, 10.8, 500, sparse) and must
+describe the same stratum `STUDY` names. To build the sim by hand instead:
 
 ```bash
 module load R/4.5.2-gfbf-2025b
 Rscript scripts/tuning/make_tuning_sim.R --out tuning/sim_binary_ref500.rds \
     --annotations binary --enrichment 10.8 --n_ref 500 --model sparse --regions 4
-```
-
-Submit the workers:
-
-```bash
-STUDY=fb_binary_ref500 SIM=tuning/sim_binary_ref500.rds \
-WORKERS=10 PBS_WALLTIME=24:00:00 \
-bash scripts/tuning/submit_optuna_pbs.sh
 ```
 
 **To continue after walltime, run that exact command again.** Nothing is
