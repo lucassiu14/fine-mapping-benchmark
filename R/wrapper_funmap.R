@@ -322,7 +322,17 @@ run_funmap <- function(z,
 #' @export
 run_funmap_region <- function(region_geno, region_pheno, ...) {
 
-  if (is.null(region_pheno$annotations_matrix)) {
+  # Prefer region_geno$annotations_matrix, falling back to region_pheno's copy.
+  # Both simulators populate the geno-side matrix; the locus pipeline
+  # additionally copies it onto the pheno object, but simulate_gwfm_data() does
+  # NOT - so reading only from the pheno side silently drops annotations under
+  # the genome-wide simulator and Funmap (which REQUIRES annotations) would
+  # return an error result for every region. This is the same bug fixed for
+  # Functional BEATRICE in PR #19; Funmap had it too.
+  annotations <- region_geno$annotations_matrix
+  if (is.null(annotations)) annotations <- region_pheno$annotations_matrix
+
+  if (is.null(annotations)) {
     p <- length(region_pheno$z)
     return(.funmap_error_result(
       p     = p,
@@ -341,7 +351,7 @@ run_funmap_region <- function(region_geno, region_pheno, ...) {
     z           = region_pheno$z,
     LD          = region_geno$LD,
     n           = region_geno$n,
-    annotations = region_pheno$annotations_matrix,
+    annotations = annotations,
     ...
   )
 }

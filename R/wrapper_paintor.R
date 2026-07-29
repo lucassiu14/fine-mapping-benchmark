@@ -378,20 +378,173 @@ run_paintor <- function(z,
 #'
 #' @return The output of \code{\link{run_paintor}}.
 #' @export
-run_paintor_region <- function(region_geno, region_pheno, ...) {
-  run_paintor(
+run_paintor_region <- function(region_geno, region_pheno,
+                               .paintor_cache = NULL, ...) {
+  # Prefer the cross-loci result computed once per scenario by
+  # run_paintor_scenario_setup() - that is how PAINTOR is designed to be run
+  # (its EM learns annotation enrichment ACROSS loci). Fall back to a
+  # single-locus run if the pooled call was unavailable or failed.
+  if (!is.null(.paintor_cache)) {
+    hit <- .paintor_cache[[.paintor_fingerprint(region_pheno$z)]]
+    if (!is.null(hit)) return(hit)
+  }
+  out <- run_paintor(
     z           = region_pheno$z,
     LD          = region_geno$LD,
-    annotations = region_pheno$annotations_matrix,   # NULL if not simulated
+    annotations = .paintor_extract_annotations(region_geno, region_pheno),
     variant_ids = region_geno$variant_ids,
     ...
   )
+  out$additional$pooled_across_loci <- FALSE
+  out
+}
+
+
+# =============================================================================
+# Scenario-level setup: pool annotation enrichment across ALL loci
+# =============================================================================
+
+#' Run PAINTOR once across every locus in a scenario
+#'
+#' PAINTOR's EM algorithm estimates annotation enrichment weights from ALL loci
+#' listed in its \code{-input} file; this is how it is run on real data and is
+#' the point of the method. Running it one locus at a time - as this wrapper
+#' originally did - estimates the enrichment from a single locus, which both
+#' wastes the cross-loci information PAINTOR is built to exploit and makes the
+#' enrichment estimate extremely noisy.
+#'
+#' This hook is called once per scenario by \code{\link{run_methods}}. It writes
+#' every region as its own locus, lists them all in one \code{input.txt}, makes a
+#' single PAINTOR call, and returns the per-region results keyed by a
+#' fingerprint of the region's z-vector. \code{run_paintor_region()} then looks
+#' up its own region.
+#'
+#' @param genotypes List. \code{simulation$genotypes}.
+#' @param regions List. One scenario's \code{regions}.
+#' @param user_args List. The user's method_args for paintor.
+#'
+#' @return A list with \code{.paintor_cache}, or an empty list if the pooled run
+#'   could not be performed (callers then fall back to per-locus runs).
+#' @export
+run_paintor_scenario_setup <- function(genotypes, regions, user_args) {
+
+  n_regions <- length(regions)
+  if (n_regions < 2L) return(list())    # nothing to pool
+
+  gv <- function(k, d) { v <- user_args[[k]]; if (is.null(v)) d else v }
+  paintor_path <- gv("paintor_path", "PAINTOR")
+  max_causal   <- gv("max_causal", 2)
+  mcmc         <- gv("mcmc", FALSE)
+  coverage     <- gv("coverage", 0.95)
+
+  # ---- collect the loci ------------------------------------------------------
+  specs <- vector("list", n_regions)
+  keys  <- character(n_regions)
+  n_ann <- NULL
+  for (i in seq_len(n_regions)) {
+    z  <- regions[[i]]$z
+    LD <- genotypes[[i]]$LD
+    A  <- .paintor_extract_annotations(genotypes[[i]], regions[[i]])
+    if (is.null(z) || is.null(LD) || nrow(LD) != length(z)) return(list())
+    # every locus must expose the same annotation columns for a joint fit
+    k <- if (is.null(A)) 0L else ncol(A)
+    if (is.null(n_ann)) n_ann <- k else if (k != n_ann) return(list())
+    ids <- genotypes[[i]]$variant_ids
+    if (is.null(ids)) ids <- paste0("SNP_", seq_along(z))
+    specs[[i]] <- list(z = z, LD = LD, A = A, ids = ids, p = length(z))
+    keys[i] <- .paintor_fingerprint(z)
+  }
+
+  work_dir <- tempfile(pattern = "paintor_pool_")
+  in_dir   <- file.path(work_dir, "input")
+  out_dir  <- file.path(work_dir, "output")
+  dir.create(in_dir, recursive = TRUE); dir.create(out_dir, recursive = TRUE)
+  on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
+
+  annot_names <- if (n_ann > 0L) paste0("ANNOT", seq_len(n_ann)) else NULL
+  locus_names <- sprintf("locus%d", seq_len(n_regions))
+
+  for (i in seq_len(n_regions)) {
+    s <- specs[[i]]; ln <- locus_names[i]
+    writeLines(c("Zscore", as.character(s$z)), file.path(in_dir, ln))
+    utils::write.table(round(s$LD, 8), file.path(in_dir, paste0(ln, ".LD")),
+                       quote = FALSE, row.names = FALSE, col.names = FALSE, sep = " ")
+    adf <- if (n_ann > 0L) {
+      x <- as.data.frame(s$A); names(x) <- annot_names; x
+    } else data.frame(Enrich = rep(1L, s$p))
+    utils::write.table(adf, file.path(in_dir, paste0(ln, ".annotations")),
+                       quote = FALSE, row.names = FALSE, col.names = TRUE, sep = " ")
+  }
+  # THE fix: every locus is listed, so PAINTOR's EM pools across all of them.
+  input_file <- file.path(work_dir, "input.txt")
+  writeLines(locus_names, input_file)
+
+  args <- c("-input", input_file, "-in", paste0(in_dir, "/"),
+            "-out", paste0(out_dir, "/"), "-Zhead", "Zscore", "-LDname", "LD")
+  if (n_ann > 0L) args <- c(args, "-annotations", paste(annot_names, collapse = ","))
+  args <- if (mcmc) c(args, "-mcmc") else c(args, "-enumerate", as.character(as.integer(max_causal)))
+
+  run_output <- tryCatch(system2(paintor_path, args = args, stdout = TRUE, stderr = TRUE),
+                         error = function(e) structure(conditionMessage(e), class = "paintor_error"))
+  if (inherits(run_output, "paintor_error")) return(list())
+
+  # ---- parse each locus ------------------------------------------------------
+  cache <- list()
+  for (i in seq_len(n_regions)) {
+    rp <- file.path(out_dir, paste0(locus_names[i], ".results"))
+    if (!file.exists(rp)) next
+    df <- tryCatch(utils::read.table(rp, header = TRUE, stringsAsFactors = FALSE),
+                   error = function(e) NULL)
+    if (is.null(df) || !"Posterior_Prob" %in% names(df)) next
+    s <- specs[[i]]
+    ord <- if ("rsid" %in% names(df)) {
+      o <- match(s$ids, df$rsid); if (anyNA(o)) seq_len(s$p) else o
+    } else seq_len(s$p)
+    pip <- pmax(0, pmin(1, as.numeric(df$Posterior_Prob[ord])))
+    if (length(pip) != s$p) next
+    op <- order(pip, decreasing = TRUE)
+    n_cs <- which(cumsum(pip[op]) >= coverage)[1L]
+    if (is.na(n_cs)) n_cs <- s$p
+    cache[[keys[i]]] <- list(
+      pip = pip, credible_sets = list(sort(op[seq_len(n_cs)])),
+      method = "paintor", input_type = "summary",
+      params = list(max_causal = max_causal, mcmc = mcmc, coverage = coverage,
+                    paintor_path = paintor_path, n_annotations = n_ann),
+      runtime_seconds = NA_real_,
+      additional = list(annotations_used = n_ann,
+                        log_bayes_factor = if ("log_BF" %in% names(df))
+                          as.numeric(df$log_BF[ord]) else NULL,
+                        pooled_across_loci = TRUE,
+                        n_loci_pooled = n_regions))
+  }
+  if (length(cache) == 0L) return(list())
+  list(.paintor_cache = cache)
 }
 
 
 # =============================================================================
 # Internal helpers
 # =============================================================================
+
+# Prefer region_geno$annotations_matrix, falling back to region_pheno's copy.
+# Both simulators populate the geno-side matrix; the locus pipeline additionally
+# copies it onto the pheno object, but simulate_gwfm_data() does NOT - so reading
+# only from the pheno side silently drops annotations under the genome-wide
+# simulator, which is exactly the bug fixed for Functional BEATRICE in PR #19.
+# PAINTOR had the same latent bug.
+.paintor_extract_annotations <- function(region_geno, region_pheno) {
+  A <- region_geno$annotations_matrix
+  if (is.null(A)) A <- region_pheno$annotations_matrix
+  A
+}
+
+# Deterministic per-region key from the z vector, used to hand a pooled result
+# back to the right region. Same construction as R/wrapper_fb_joint.R.
+.paintor_fingerprint <- function(z) {
+  z <- as.numeric(z)
+  paste(length(z), format(sum(z), digits = 15), format(sum(z * z), digits = 15),
+        format(z[1], digits = 15), format(z[length(z)], digits = 15), sep = "|")
+}
 
 .paintor_error_result <- function(p, params, elapsed, error_msg) {
   list(
