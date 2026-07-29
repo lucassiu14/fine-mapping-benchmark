@@ -192,6 +192,10 @@ run_sbayesrc <- function(z, LD, n,
     gamma <- matrix(0, nrow = 0L, ncol = K)
   }
 
+  # Silent-degradation guard: with annotations but no pooled gamma we fall back
+  # to the unstable in-loop refit (see the WARNING in the Gibbs loop below).
+  if (has_annot && is.null(pooled_gamma)) .sbayesrc_warn_no_pooled()
+
   # Prior mixture proportions per SNP: pi[j, ] over (0, 1, ..., K)
   pi_mat <- .sbayesrc_priors_from_gamma(A, alpha, gamma, K, p = p)
 
@@ -215,6 +219,15 @@ run_sbayesrc <- function(z, LD, n,
     # Update annotation regression periodically (only when pooled_gamma is NULL
     # and we have annotations). Under run_methods()/scenario_setup the pooled
     # coefficients are supplied and this branch is skipped.
+    #
+    # WARNING (verified empirically 2026-07-29): this in-loop refit path is
+    # UNSTABLE. On a benchmark-like locus (p=300, n=1000, phi=0.05, S=3) it
+    # inflates total posterior mass ~15x relative to the pooled-gamma path
+    # (mass ratio ~55 vs ~3.7) EVEN WITH THE TRUE LD - so the inflation is
+    # caused by the annotation refit, not by LD mis-specification. It is only
+    # reached when run_sbayesrc_scenario_setup() returned nothing (fewer than 2
+    # regions, absent/ragged annotations, or a failed pilot), which previously
+    # degraded results silently. It now warns; see .sbayesrc_warn_no_pooled().
     if (has_annot && is.null(pooled_gamma) &&
         (it %% gamma_update_every == 0L)) {
       fit <- tryCatch(.sbayesrc_fit_gamma(comp, A, K), error = function(e) NULL)
@@ -552,4 +565,23 @@ run_sbayesrc_scenario_setup <- function(genotypes, regions, user_args) {
   alpha <- as.numeric(full[, 1L])
   gamma <- t(full[, -1L, drop = FALSE])
   list(alpha = alpha, gamma = gamma)
+}
+
+
+# Warn (once per session) that sbayesrc is running WITHOUT pooled annotation
+# coefficients and has therefore fallen back to the unstable in-loop refit.
+# Verified 2026-07-29: that path inflates posterior mass ~15x relative to the
+# pooled path even under the true LD, so a silent fallback would corrupt any
+# annotated-arm result without producing an error.
+.sbayesrc_warned <- new.env(parent = emptyenv())
+.sbayesrc_warn_no_pooled <- function() {
+  if (isTRUE(.sbayesrc_warned$done)) return(invisible(NULL))
+  .sbayesrc_warned$done <- TRUE
+  warning("sbayesrc: annotations supplied but pooled_gamma is NULL, so the ",
+          "unstable in-loop annotation refit is being used (empirically ~15x ",
+          "posterior-mass inflation vs the pooled path). This happens when ",
+          "run_sbayesrc_scenario_setup() returned nothing - check that the ",
+          "scenario has >=2 regions with consistent annotation matrices.",
+          call. = FALSE)
+  invisible(NULL)
 }
