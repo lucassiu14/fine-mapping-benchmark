@@ -270,3 +270,115 @@ for rows ~1–81 and are simply ignored at analysis time (9,890 cells each vs 16
 2. Adopt `fb_xregion` as the Functional BEATRICE default; drop `fb_pooled`.
 3. Re-prioritise ideas #3 (confidence-gated prior) and #4 (cross-region consistency regulariser) *behind*
    attacking LD mis-specification, which binds for every annotation-using method.
+
+---
+
+# METHOD AUDIT + NEW METHODS (2026-07-29/30)
+
+## PAINTOR was being run incorrectly — its Iterations 001–003 numbers are invalid
+
+PAINTOR's EM estimates annotation enrichment across **all** loci in its `-input`
+file; that is the method's central mechanism and how it is run on real data. Our
+wrapper ran it **one locus at a time**, and on the annotated arms it *did* receive
+annotations, so it was estimating enrichment from a single locus in every fit.
+
+It never errored — it produced numbers — so this is not a crash but a
+mis-configuration that handicapped the method. **Every PAINTOR result and verdict
+in the Iteration 001–003 reports should be treated as invalid** (FDR 0.35
+in-sample, "worst in the field", its variance-decomposition row, its entries in
+the guidance table). Group-level claims averaging over the six
+functionally-informed methods are mildly affected too.
+
+Ironically this is the same pathology we diagnosed in functional BEATRICE —
+learning an annotation→prior map from one locus. The difference: FB does it *by
+design* (so that finding stands), whereas we *imposed* it on PAINTOR.
+
+Fixed by `run_paintor_scenario_setup()`: all regions → one `input.txt` → one
+PAINTOR call → per-region results keyed by z-fingerprint, with per-locus
+fallback and an `additional$pooled_across_loci` tag.
+
+## Wrapper audit — all 16 checked
+
+| finding | status |
+|---|---|
+| **polyfun_oracle** π reconstruction | **verified identical** to the simulator's causal-selection probability (`exp(A %*% log(enrichment))`, normalised). Our ceiling is trustworthy — every "captured fraction" claim rests on this. |
+| **ABF** | matches Wakefield's closed form to 8e-17 |
+| **FINEMAP** | real `beta_hat`/`se`/`maf` passed; rsid matching for PIPs and credible sets |
+| **SparsePro** | `.cs` holds rsids, correctly mapped via `match()` |
+| **susie / susie_inf** | `n` passed to `susie_rss`; `unmappable_effects = "inf"` with a version guard |
+| **polyfun_est/ldsc** | `.tau_to_prior_weights` normalises to sum 1 — correct for susieR's prior *probability* semantics |
+| **funmap** | **BUG FIXED** — read annotations only from `region_pheno`, which drops them under `simulate_gwfm_data`. Latent only; iters 001–003 used the locus pipeline, so results unaffected. |
+| **sbayesrc** | sampler core **verified correct** (log-BF algebra, residual update, `beta_hat = z/sqrt(n)` scale). But see below. |
+
+### sbayesrc: a latent 15× failure, now guarded
+
+sbayesrc has two annotation paths. Measured on a benchmark-like locus (p=300,
+n=1000, φ=0.05, S=3), same data and seed:
+
+| path | mass ratio |
+|---|---|
+| `pooled_gamma` from `scenario_setup` (intended) | **3.6–3.8** |
+| in-loop refit fallback | **55** |
+
+The fallback inflates posterior mass ~15× **even under the true LD**, so the
+inflation is caused by the annotation refit, not LD. `scenario_setup` returns
+`list()` in four situations and pooled_gamma then silently became NULL. Now warns.
+
+**Iterations 002/003 took the good path** — confirmed by reproducing the observed
+in-sample mass ratio (~3–6). Those results are unaffected.
+
+## Four methods added; three kept
+
+Selected against the deep-dive finding that **LD mis-specification is the binding
+constraint**.
+
+| method | status |
+|---|---|
+| **CARMA** | installed and **PASSES** (sum PIP 2.03 for S=2, both causals at 1.00). Registered since Iteration 001 but **never installed** → 100% NA for three iterations. Cause: `LinkingTo: RcppGSL` needs the GSL module at build time. |
+| **FiniMOM** | installed, **PASSES** (2.00) |
+| **FINEMAP-inf** | installed, **PASSES** (2.53) |
+| ~~CAVIAR~~ | **dropped on cost** — enumeration is combinatorial in region size; already too slow at p=150 and the grid runs to p=1000. Wrapper retained. |
+
+### Fidelity fixes — deviations the planted-causal test could NOT catch
+
+All three still recovered the causals; they change the configuration, not the
+ability to run. Found by reading each package's source against our call sites.
+
+1. **CARMA wrote four files per locus into the current working directory**
+   (`output.labels` defaults to `'.'`). Under the array that is the project root
+   with ~500 concurrent tasks sharing one label → repo pollution **and a race**.
+   Now a per-fit temp dir.
+2. **CARMA `num.causal` was 5**; CARMA's default is 10 and the grid's max S is 10,
+   so every S=10 scenario was under-modelled. Set to 10.
+3. **FiniMOM was double-standardising.** Its `standardize=TRUE` default rescales
+   beta/se by `sqrt(2f(1-f))` to move *per-allele* effects onto the standardised
+   scale — but `simulate_genotypes(standardise=TRUE)` means our `beta_hat` is
+   already per-SD. Now `standardize=FALSE`. Ranking was unaffected (both beta and
+   se scale together, so z is preserved); the *prior's* effect-size scale was
+   wrong, which matters most at weak signal. Measured impact on a strong locus:
+   0.007 — which is exactly why testing could not find it.
+4. **FINEMAP-inf ran a non-default configuration.** `--method finemapinf` alone
+   takes the cold-start branch (σ²=1, τ²=0); the authors' default
+   `susieinf,finemapinf` has FINEMAP-inf **inherit SuSiE-inf's** τ²/σ². Now runs
+   the default pipeline.
+
+Verified clean: CARMA's `outlier.switch = TRUE` (the LD-discrepancy detection we
+added it for) is on by default. FiniMOM's `insampleLD` is auto-detected from the
+presence of `X_ref`.
+
+**Recorded deviation:** CARMA accepts annotations via `w.list`; we pass none, so
+it runs annotation-free even on the annotated arms.
+
+## Not yet run
+
+The canary was deliberately **not** fired — the Optuna tuning has the queue.
+Untested at scale: PAINTOR's pooling, CARMA's runtime on p=1000 regions,
+FiniMOM's `insampleLD` against a real reference-panel sim, FINEMAP-inf's
+credible-set branch, and full `run_methods` → `evaluate` → `collect` integration.
+
+```bash
+export FMB_SCRATCH=$EPHEMERAL/fmbench_iter004     # NEW root
+export FMB_METHODS="carma,finimom,finemap_inf,paintor"
+export FMB_SCENARIOS_PER_TASK=25
+ARRAY_RANGE=1-2 bash scripts/hpc/submit_benchmark_pbs.sh
+```
