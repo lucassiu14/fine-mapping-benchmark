@@ -35,6 +35,33 @@ Two objective modes:
 All four metrics are stored on every trial as user attributes, so either
 objective can be re-derived from a finished study without re-running trials.
 
+**`multi` degenerated on `fb_binary_ref500` (observed 2026-07-30, 1586 trials).**
+The Pareto front collapsed to a *single distinct parameter set* — the two front
+entries, trials #1356 and #1566, carry identical parameters (NSGA-II re-evaluated
+its own optimum). Every point on the front had `viol = 0.0000`, which implies no
+trial anywhere in the study beat AP = 0.8089 at *any* violation level: a trial
+that did would be non-dominated and would appear on the front. So the second
+objective exerted no trade-off pressure at all and the study was effectively
+single-objective on AP already.
+
+That is not free. Because `multi` disables the MedianPruner, all 1586 trials ran
+all four scenarios, where `scalar` would have abandoned most of them after the
+first — up to ~4× the cost per trial for an objective that returned no
+information on this stratum. **Prefer `scalar` on any stratum where violation
+saturates at 0.** `--report` now prints the fraction of trials at exactly zero
+violation and flags the degenerate case, so this is visible before a long run
+rather than after it.
+
+**Mass ratio is deliberately absent from both objective modes**, and the v1
+optimum has `mass = 2.00` — total PIP mass twice the true causal count. Since
+Iteration 003's central Functional BEATRICE result was mass inflation (3.06 →
+2.70 via the joint prior), tuning purely on AP can return a configuration that
+wins on ranking while remaining globally over-confident. `reliab = 1.00` and
+`viol = 0` say the *top* of the ranking is clean, so the excess mass sits in the
+tail, where neither objective looks. `--report` now prints the mass ratio of the
+top 5 trials by AP so this stays in view; folding it into the `scalar` penalty is
+an open option, not yet taken.
+
 **One study per stratum.** The never-pool rule applies: a prior tuned on binary
 annotations under in-sample LD has no reason to be optimal for continuous
 annotations under a reference panel. `STUDY` names the stratum and the tuning sim
@@ -48,11 +75,39 @@ Every knob `beatrice_annot.py` actually consumes:
 |---|---|---|
 | `lambda_l1` | 1e-4 – 1.0 | log |
 | `prior_regularisation` | 0.1 – 50 | log |
-| `sigma_sq` | 5e-3 – 0.5 | log |
+| `sigma_sq` | **1e-4** – 0.5 | log |
 | `hierarchy_M` | 1 – 100 | log |
 | `n_caus` | 1 – 10 | int |
-| `sparse_concrete` | 10 – 300 (step 10) | int |
+| `sparse_concrete` | **1 – 300** | int, **log** |
 | `gamma_coverage` | 0.8 – 0.99 (opt-in `--tune-gamma-coverage`) | float |
+
+**Bounds revision, 2026-07-30** (bolded rows above). Study `fb_binary_ref500`
+v1 reached 1586 completed trials, and its optimum sat *on* two of the original
+bounds:
+
+| parameter | v1 optimum | v1 floor | position in range |
+|---|---|---|---|
+| `sigma_sq` | 0.005323 | 5e-3 | 1.4% into a 2-decade log range |
+| `sparse_concrete` | 10 | 10 (step 10) | exactly on the floor |
+
+An optimum on a bound means the *bound* chose the value, not the objective, so
+both floors were opened: `sigma_sq` to 1e-4, and `sparse_concrete` to the
+package's own declared `lower_bound=1` (`beatrice_annot.py`). `sparse_concrete`
+also switched from `step=10` to log-uniform, which puts sampling density at the
+low end where the optimum lives rather than spreading it evenly over 10–300.
+BEATRICE's README examples all use `--sparse_concrete 10`, so v1 did rediscover
+the authors' value — but standing on a floor is not evidence that it is optimal.
+
+`lambda_l1`, `prior_regularisation` and `n_caus` all found interior optima in v1
+(0.1223, 8.61, 4), so their ranges are doing their job and are unchanged.
+
+**`hierarchy_M` is under suspicion.** Its v1 optimum, 10.15, is almost exactly
+the geometric centre of its [1, 100] log range — which is what a parameter the
+objective does not respond to looks like. `--report` now prints an fANOVA param
+importance for AP; if `hierarchy_M` comes out near zero it should be *fixed*
+rather than tuned, since tuning an inert knob spends search budget for no
+return. This is a hypothesis to test against the existing trials, not yet a
+finding.
 
 `max_iter` is deliberately **not** tuned: it trades compute for convergence, so
 including it would let the search buy objective value with runtime and make

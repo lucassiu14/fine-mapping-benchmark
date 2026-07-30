@@ -119,13 +119,25 @@ def suggest_params(trial, args):
     including it would let the search buy objective value with runtime and make
     trials incomparable. It is fixed at the production value.
     """
+    # BOUNDS REVISION (2026-07-30), after study fb_binary_ref500 v1 (1586 trials).
+    # The v1 optimum sat ON two of these bounds, which means the bound - not the
+    # objective - was choosing the value:
+    #   sigma_sq        0.005323 against a 5e-3 floor  (1.4% into a 2-decade range)
+    #   sparse_concrete 10       against a 10 floor    (exactly on it)
+    # Both floors are now opened up. sparse_concrete goes to the package's own
+    # declared lower_bound=1 and switches to a log-uniform integer, which puts the
+    # sampling density where the optimum actually lives instead of spreading it
+    # evenly over 10..300. (BEATRICE's README examples all use 10, so v1 landed on
+    # the authors' value - but standing on a floor is not evidence it is optimal.)
+    # Kept as-is: lambda_l1, prior_regularisation and n_caus all found interior
+    # optima in v1, so their ranges are doing their job.
     p = {
         "lambda_l1":            trial.suggest_float("lambda_l1", 1e-4, 1.0, log=True),
         "prior_regularisation": trial.suggest_float("prior_regularisation", 0.1, 50.0, log=True),
-        "sigma_sq":             trial.suggest_float("sigma_sq", 5e-3, 0.5, log=True),
+        "sigma_sq":             trial.suggest_float("sigma_sq", 1e-4, 0.5, log=True),
         "hierarchy_M":          trial.suggest_float("hierarchy_M", 1.0, 100.0, log=True),
         "n_caus":               trial.suggest_int("n_caus", 1, 10),
-        "sparse_concrete":      trial.suggest_int("sparse_concrete", 10, 300, step=10),
+        "sparse_concrete":      trial.suggest_int("sparse_concrete", 1, 300, log=True),
     }
     if args.tune_gamma_coverage:
         p["gamma_coverage"] = trial.suggest_float("gamma_coverage", 0.8, 0.99)
@@ -250,11 +262,60 @@ def main():
     report(study, args)
 
 
+def _trial_ap(t):
+    """Mean AP of a completed trial, however the study was scored.
+
+    'multi' studies return (AP, violation) so AP is values[0]; 'scalar' studies
+    return a penalised scalar, so AP has to come from the user attribute. Both
+    modes set mean_ap, so prefer it and fall back to values[0].
+    """
+    v = t.user_attrs.get("mean_ap")
+    if isinstance(v, float) and v == v:
+        return v
+    return t.values[0] if t.values else float("nan")
+
+
 def report(study, args):
     complete = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    by_state = {}
+    for t in study.trials:
+        by_state[t.state.name] = by_state.get(t.state.name, 0) + 1
     print(f"\n=== study '{study.study_name}': {len(complete)} completed trials ===")
+    print("  states: " + ", ".join(f"{k}={v}" for k, v in sorted(by_state.items())))
     if not complete:
         return
+
+    # Is the FDR-violation objective actually doing anything? If (nearly) every
+    # trial achieves violation 0 it exerts no trade-off pressure, the Pareto
+    # front degenerates to argmax(AP), and 'multi' is costing us the pruner
+    # (Optuna supports pruners only for single-objective studies) for nothing.
+    viols = [t.user_attrs.get("mean_fdr_violation_n20") for t in complete]
+    viols = [v for v in viols if isinstance(v, float) and v == v]
+    if viols:
+        n_zero = sum(1 for v in viols if v <= 1e-12)
+        print(f"  FDR-violation objective: {n_zero}/{len(viols)} trials at exactly 0 "
+              f"({100.0 * n_zero / len(viols):.0f}%)"
+              + ("  <- degenerate; prefer --objective scalar" if n_zero > 0.9 * len(viols) else ""))
+
+    # Mass ratio is recorded but NOT optimised, so the search is free to inflate
+    # it. Show its spread among the strongest trials so that stays visible.
+    ranked = sorted(complete, key=lambda t: -_trial_ap(t))
+    print("  top 5 by AP (mass ratio is NOT an objective - watch it):")
+    for t in ranked[:5]:
+        print(f"    AP={_trial_ap(t):.4f}  viol={t.user_attrs.get('mean_fdr_violation_n20', float('nan')):.4f}"
+              f"  mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}"
+              f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}  #{t.number}")
+
+    # Which knobs actually move AP? A parameter whose importance is ~0 is worth
+    # FIXING rather than tuning - it spends search budget for no return.
+    try:
+        imp = optuna.importance.get_param_importances(study, target=_trial_ap)
+        print("  param importance for AP (fANOVA):")
+        for k, v in imp.items():
+            print(f"    {v:6.3f}  {k}")
+    except Exception as e:                       # too few trials, missing sklearn, ...
+        print(f"  (param importance unavailable: {e})")
+
     if args.objective == "multi":
         print("Pareto front (AP up, FDR violation down):")
         for t in sorted(study.best_trials, key=lambda x: -x.values[0]):
