@@ -67,7 +67,22 @@
   # (run_<method>_scenario_setup) that runs the joint Python trainer once per
   # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
   fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
-  fb_xregion      = "run_fb_xregion_region"    # idea #2: shared LassoNet head
+  fb_xregion      = "run_fb_xregion_region",   # idea #2: shared LassoNet head
+
+  # --- Iteration 004 additions: summary-statistic methods ---------------------
+  # Chosen to target the constraint the Iteration 003 deep dive identified as
+  # binding (LD mis-specification) and to resolve an open question about the
+  # infinitesimal model.
+  #   caviar      exhaustive configuration enumeration under an MVN z model
+  #   finimom     non-local product inverse-moment prior + beta-binomial
+  #               model-size prior; has an explicit in-sample-LD switch
+  #   finemap_inf the infinitesimal extension on the LD-ROBUST finemap backbone,
+  #               which separates "infinitesimal modelling does not help" from
+  #               "the SuSiE backbone is the problem" (susie_inf trails susie
+  #               everywhere, but susie_inf inherits SuSiE's LD fragility)
+  caviar          = "run_caviar_region",
+  finimom         = "run_finimom_region",
+  finemap_inf     = "run_finemap_inf_region"
 )
 
 

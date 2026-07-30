@@ -136,6 +136,23 @@ METHOD_ARGS <- list(
 METHOD_ARGS$fb_pooled         <- .FBv
 METHOD_ARGS$fb_xregion        <- .FBv
 
+# --- Iteration 004: additional summary-statistic methods ---------------------
+# CARMA is registered in .FM_REGISTRY already but has never been installed, so
+# it produced 100% NA in Iterations 001-003. Install it (see
+# docs/autoresearch/adding-methods.md) before including it in FMB_METHODS.
+METHOD_ARGS$carma       <- list(num.causal = 5)
+# CAVIAR: enumeration is combinatorial in max_causal, so 2-3 is the practical
+# ceiling for p up to 1000.
+METHOD_ARGS$caviar      <- list(caviar_path = file.path(TOOLS_ROOT, "caviar/CAVIAR-C++/CAVIAR"),
+                                max_causal = 2L, rho = 0.95)
+# FiniMOM: insample_ld is auto-detected per region from the presence of X_ref,
+# so it is deliberately NOT set here.
+METHOD_ARGS$finimom     <- list(maxsize = 10L, niter = 12500L, burnin = 2500L,
+                                cs_level = 0.95)
+METHOD_ARGS$finemap_inf <- list(finemap_inf_dir = file.path(TOOLS_ROOT, "fine-mapping-inf"),
+                                python = PY_VENV, num_sparse_effects = 10L,
+                                coverage = 0.95, purity = 0.5)
+
 # -----------------------------------------------------------------------------
 # Parse array index
 # -----------------------------------------------------------------------------
