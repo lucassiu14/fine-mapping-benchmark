@@ -45,8 +45,12 @@ cat(sprintf("\nSynthetic locus: p=%d n=%d, causal at %s\n\n",
 report <- function(name, fit, dep_ok = TRUE, dep_msg = "") {
   if (!dep_ok) { cat(sprintf("  SKIP  %-14s %s\n", name, dep_msg)); return(invisible(NULL)) }
   if (!is.null(fit$error)) {
-    cat(sprintf("  FAIL  %-14s error: %s\n", name,
-                substr(gsub("[\r\n]+", " ", fit$error), 1, 90))); return(invisible(NULL))
+    # Show the TAIL of the message: for external tools the real cause (a Python
+    # traceback, a linker error) is at the end, and an earlier version of this
+    # truncated to the first 90 characters and hid it.
+    msg <- gsub("[\r\n]+", " | ", fit$error)
+    msg <- if (nchar(msg) > 300) paste0("...", substr(msg, nchar(msg) - 299, nchar(msg))) else msg
+    cat(sprintf("  FAIL  %-14s %s\n", name, msg)); return(invisible(NULL))
   }
   pip <- fit$pip
   if (length(pip) != p)      { cat(sprintf("  FAIL  %-14s pip length %d, expected %d\n", name, length(pip), p)); return(invisible(NULL)) }

@@ -115,16 +115,23 @@ run_finemap_inf <- function(z,
   on.exit(unlink(work_dir, recursive = TRUE), add = TRUE)
 
   ss_path <- file.path(work_dir, "sumstats.tsv")
-  ld_path <- file.path(work_dir, "region.ld")
+  # VERIFIED 2026-07-30: run_fine_mapping.py's read_large_file() dispatches on the
+  # FILE EXTENSION and accepts only .npy / .npz / .gz / .bgz - a plain-text matrix
+  # (e.g. "region.ld") is rejected with
+  #   ValueError: File extension .ld of file region.ld currently not supported
+  # .gz is the one we can write directly from R (numpy reads it via np.loadtxt).
+  ld_path <- file.path(work_dir, "region.ld.gz")
   prefix  <- file.path(work_dir, "out")
 
   # --sumstats is a table with a named z column (--z-col-name).
   utils::write.table(data.frame(SNP = variant_ids, Z = as.numeric(z)),
                      ss_path, quote = FALSE, row.names = FALSE,
                      col.names = TRUE, sep = "\t")
-  # --ld-file: full (lower-triangular-compatible) numeric matrix.
-  utils::write.table(round(LD, 8), ld_path, quote = FALSE,
+  # --ld-file: full numeric matrix, gzip-compressed (see the note above).
+  ld_con <- gzfile(ld_path, "w")
+  utils::write.table(round(LD, 8), ld_con, quote = FALSE,
                      row.names = FALSE, col.names = FALSE, sep = " ")
+  close(ld_con)
 
   args <- c(script,
             "--sumstats",           ss_path,
