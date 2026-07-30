@@ -9,7 +9,7 @@ model.
 | method | why it was added |
 |---|---|
 | **CARMA** | Its defining feature is **LD-discrepancy outlier detection** — exactly the failure mode we identified. Already wrapped since Iteration 001 but **never installed**, so it has contributed 100% NA to every run so far. |
-| **CAVIAR** | The original enumeration-based summary-stat method; a distinct algorithmic family from everything in the benchmark, and the ancestor of PAINTOR/FINEMAP. |
+| ~~**CAVIAR**~~ | **DROPPED 2026-07-29 on cost.** Built and working, but its enumeration is combinatorial in region size: already too slow on the p=150 verification locus, and the grid runs to p=1000 (~45x the configuration space) across 337,500 fits. It is also the least informative addition - the 2014 ancestor of FINEMAP and PAINTOR, both already present and both using smarter search over the same model class. Wrapper retained for possible use on small regions only. |
 | **FiniMOM** | Non-local (product inverse-moment) prior + beta-binomial model-size prior, designed to separate **multiple causal variants in high LD**. Uniquely, it has an explicit `insampleLD` switch that maps directly onto our LD arm. |
 | **FINEMAP-inf** | susie_inf trails plain susie in *every* stratum — but it inherits SuSiE's LD fragility (LD explains 56% of its reliability variance vs **<1%** of finemap's AUPRC variance). FINEMAP-inf puts the same infinitesimal extension on the **LD-robust finemap backbone**, separating "infinitesimal modelling doesn't help" from "the SuSiE backbone is the problem". |
 
@@ -165,7 +165,7 @@ export FMB_SCRATCH=$EPHEMERAL/fmbench_iter004     # NEW root: the iter002 root
                                                   # already has evaluation_supp.rds
                                                   # for every scenario, so resume
                                                   # would skip everything
-export FMB_METHODS="carma,caviar,finimom,finemap_inf,paintor"
+export FMB_METHODS="carma,finimom,finemap_inf,paintor"   # caviar deliberately excluded
 export FMB_SCENARIOS_PER_TASK=25
 bash scripts/hpc/submit_benchmark_pbs.sh
 ```
@@ -177,8 +177,10 @@ method works.
 
 ### Cost warning
 
-CAVIAR and CARMA are both **combinatorial in the number of causal variants**.
-CAVIAR is capped at `max_causal = 2` and CARMA at `num.causal = 5` for that
-reason. On the 1000-SNP regions these will be the slowest methods in the
-benchmark — fire an `ARRAY_RANGE=1-2` canary and check the per-scenario timing
-in the log before releasing the full array.
+**CARMA is combinatorial in the number of causal variants** (capped at
+`num.causal = 5`) and will be the slowest method in the benchmark on the
+1000-SNP regions. Fire an `ARRAY_RANGE=1-2` canary and read the per-scenario
+timing in the log before releasing the full array.
+
+CAVIAR was dropped for exactly this reason after measuring it — see the method
+table above.

@@ -17,6 +17,22 @@
 #   <prefix>_post : per-variant posterior probabilities (header + one row/SNP)
 #   <prefix>_set  : the variant names in the rho-level causal set, one per line
 #
+# STATUS: BUILT AND WORKING, BUT NOT RUN IN THE BENCHMARK (decision 2026-07-29).
+# CAVIAR enumerates causal configurations, so its cost is combinatorial in the
+# region size: C(p, c) configurations each carrying matrix operations. On the
+# verification locus (p = 150, c = 2, ~11k configurations) it was already too
+# slow to finish comfortably; the benchmark's regions run to p = 1000, where the
+# configuration space is ~45x larger. Across 337,500 fits that would dominate the
+# entire allocation for one method.
+#
+# It is also the least informative addition: CAVIAR (2014) is the direct ancestor
+# of FINEMAP and PAINTOR, both already in the benchmark, both using smarter search
+# over the same model class.
+#
+# The wrapper is kept because it is written and structurally correct - if CAVIAR
+# is ever wanted on the small (100-200 SNP) regions only, it is ready. It simply
+# is not included in FMB_METHODS for the full grid.
+#
 # This file provides:
 #   - setup_caviar()      : verifies the CAVIAR binary is reachable
 #   - run_caviar()        : runs CAVIAR on a single region (explicit inputs)

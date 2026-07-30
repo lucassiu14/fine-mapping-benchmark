@@ -68,15 +68,10 @@ if (!requireNamespace("CARMA", quietly = TRUE)) {
                            error = function(e) list(error = conditionMessage(e))))
 }
 
-cat("\n=== CAVIAR ===\n")
-cav <- file.path(TOOLS, "caviar/CAVIAR-C++/CAVIAR")
-if (!file.exists(cav) && nchar(Sys.which("CAVIAR")) == 0) {
-  report("caviar", NULL, FALSE, "CAVIAR binary not found")
-} else {
-  cp <- if (file.exists(cav)) cav else "CAVIAR"
-  report("caviar", tryCatch(run_caviar_region(geno, phen, caviar_path = cp, max_causal = 2L),
-                            error = function(e) list(error = conditionMessage(e))))
-}
+# CAVIAR is intentionally NOT verified or run: it was dropped on cost 2026-07-29
+# (enumeration is combinatorial in region size - too slow already at p=150, and
+# the grid runs to p=1000). The wrapper is retained; see R/wrapper_caviar.R.
+cat("\n=== CAVIAR ===\n  SKIP  caviar         dropped on cost; see R/wrapper_caviar.R\n")
 
 cat("\n=== FiniMOM ===\n")
 if (!requireNamespace("finimom", quietly = TRUE)) {
