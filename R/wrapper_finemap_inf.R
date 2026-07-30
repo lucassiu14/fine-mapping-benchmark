@@ -18,8 +18,17 @@
 # against run_fine_mapping.py's argparse definitions:
 #   python run_fine_mapping.py \
 #     --sumstats <file> --z-col-name <col> --ld-file <file> --n <int> \
-#     --method finemapinf --num-sparse-effects <int> --coverage <num> \
+#     --method susieinf,finemapinf --num-sparse-effects <int> --coverage <num> \
 #     --purity <num> --save-tsv --output-prefix <prefix>
+#
+# NOTE on --method (verified in run_fine_mapping.py, 2026-07-30). The script's
+# own default is 'susieinf,finemapinf' and it branches on
+#   if 'susieinf' not in methods or args.est_finemapinf_tausq:
+# so running FINEMAP-inf ALONE cold-starts it from sigmasq=1, tausq=0 and makes
+# it estimate its own variance components, whereas the default path has it
+# INHERIT SuSiE-inf's tau^2 / sigma^2. Both are supported, but only the latter is
+# the configuration the method is distributed to run, so we use it and parse the
+# .finemapinf output. This costs a SuSiE-inf fit per region.
 #
 # Output: <prefix>.finemapinf.bgz - the input sumstats plus columns
 #   prob, post_mean_cond, post_sd_cond, alpha, post_mean, tausq, sigmasq
@@ -74,10 +83,20 @@ setup_finemap_inf <- function(finemap_inf_dir, python = "python") {
 #'   (\code{--num-sparse-effects}). Default 10, matching upstream.
 #' @param coverage Numeric. Credible-set coverage. Default 0.95.
 #' @param purity Numeric. Credible-set purity threshold. Default 0.5.
-#' @param method Character. "finemapinf" (default) or "susieinf" - the same
-#'   script implements both.
-#' @param est_tausq Logical. Estimate tau^2 for FINEMAP-inf independently rather
-#'   than reusing SuSiE-inf's (\code{--est-finemapinf-tausq}). Default FALSE.
+#' @param method Character. Which method's OUTPUT to return: "finemapinf"
+#'   (default) or "susieinf". This is the file that gets parsed; it is not what
+#'   is passed to \code{--method} (see \code{run_methods_str}).
+#' @param run_methods_str Character. The value passed to \code{--method}.
+#'   Defaults to \code{"susieinf,finemapinf"}, which is the SCRIPT'S OWN
+#'   DEFAULT and the authors' intended pipeline: run_fine_mapping.py branches on
+#'   \code{if 'susieinf' not in methods or args.est_finemapinf_tausq}, so with
+#'   FINEMAP-inf alone it cold-starts from \code{sigmasq=1, tausq=0} and
+#'   estimates its own variance components, whereas the default path has
+#'   FINEMAP-inf INHERIT SuSiE-inf's tau^2 and sigma^2. Running FINEMAP-inf on
+#'   its own is supported but is a different configuration from the one the
+#'   method is distributed to run.
+#' @param est_tausq Logical. Force FINEMAP-inf to estimate tau^2 itself even
+#'   when SuSiE-inf is in the run (\code{--est-finemapinf-tausq}). Default FALSE.
 #'
 #' @return A list in the benchmark's standard fine-mapping output format.
 #' @export
@@ -91,11 +110,13 @@ run_finemap_inf <- function(z,
                             coverage           = 0.95,
                             purity             = 0.5,
                             method             = "finemapinf",
+                            run_methods_str    = "susieinf,finemapinf",
                             est_tausq          = FALSE) {
 
   p <- length(z)
   params <- list(num_sparse_effects = num_sparse_effects, coverage = coverage,
-                 purity = purity, method = method, est_tausq = est_tausq,
+                 purity = purity, method = method, run_methods_str = run_methods_str,
+                 est_tausq = est_tausq,
                  n = n, finemap_inf_dir = finemap_inf_dir, python = python)
 
   stopifnot("LD must be a p x p matrix" = is.matrix(LD) && nrow(LD) == p && ncol(LD) == p,
@@ -138,7 +159,7 @@ run_finemap_inf <- function(z,
             "--z-col-name",         "Z",
             "--ld-file",            ld_path,
             "--n",                  as.character(as.integer(n)),
-            "--method",             method,
+            "--method",             run_methods_str,
             "--num-sparse-effects", as.character(as.integer(num_sparse_effects)),
             "--coverage",           as.character(coverage),
             "--purity",             as.character(purity),

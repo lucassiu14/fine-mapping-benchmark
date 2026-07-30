@@ -91,7 +91,9 @@ METHOD_ARGS <- list(
   susie               = list(L = 10, coverage = 0.95),
   susie_inf           = list(L = 10),
   abf                 = list(prior_variance = 0.04),
-  carma               = list(num.causal = 5),
+  # num.causal = 10 matches CARMA's own default AND the grid's maximum S;
+  # an earlier value of 5 would have under-modelled every S=10 scenario.
+  carma               = list(num.causal = 10),
   marginal_z          = list(coverage = 0.95),
   polyfun_oracle      = list(L = 10),
   polyfun_est         = list(L = 10),
@@ -140,7 +142,6 @@ METHOD_ARGS$fb_xregion        <- .FBv
 # CARMA is registered in .FM_REGISTRY already but has never been installed, so
 # it produced 100% NA in Iterations 001-003. Install it (see
 # docs/autoresearch/adding-methods.md) before including it in FMB_METHODS.
-METHOD_ARGS$carma       <- list(num.causal = 5)
 # CAVIAR: enumeration is combinatorial in max_causal, so 2-3 is the practical
 # ceiling for p up to 1000.
 METHOD_ARGS$caviar      <- list(caviar_path = file.path(TOOLS_ROOT, "caviar/CAVIAR-C++/CAVIAR"),

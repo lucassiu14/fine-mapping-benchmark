@@ -160,6 +160,12 @@ run_carma <- function(z,
   # lambda = 1/sqrt(p) is the standard CARMA default for the logistic prior
   lambda <- 1 / sqrt(p)
 
+  # Per-fit scratch directory for CARMA's side-effect output files (see the
+  # output.labels note at the call below).
+  out_dir <- tempfile(pattern = "carma_out_")
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
   # --- Run CARMA --------------------------------------------------------------
 
   start_time <- proc.time()
@@ -177,6 +183,15 @@ run_carma <- function(z,
         effect.size.prior = effect.size.prior,
         outlier.switch    = outlier.switch,
         all.iter          = as.integer(all.iter),
+        # CRITICAL: output.labels defaults to '.', i.e. the CURRENT WORKING
+        # DIRECTORY, and CARMA writes four files per locus into it
+        # (post_<label>.txt, post_<label>_poi_likeli.txt,
+        #  post_<label>_poi_gamma.mtx, post_<label>_outliers.rds).
+        # Under the PBS array the cwd is the project root and ~500 tasks run
+        # concurrently with the same default label, so leaving this unset both
+        # pollutes the repo and races on identical filenames. Point it at a
+        # per-fit temp directory that is deleted on exit.
+        output.labels     = out_dir,
         printing.log      = FALSE
       )
     ))

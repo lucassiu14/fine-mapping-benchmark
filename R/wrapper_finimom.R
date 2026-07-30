@@ -74,10 +74,19 @@ setup_finimom <- function() {
 #'   \code{beta = z * se}, i.e. the per-standard-deviation scale the benchmark's
 #'   simulator uses. Verified empirically to recover planted causals with
 #'   FiniMOM's default \code{standardize = TRUE}.
-#' @param eaf Numeric vector or NULL. Effect-allele frequencies. When NULL,
-#'   0.3 is used for every variant. The benchmark passes the region's MAF, which
-#'   equals the effect-allele frequency whenever the effect allele is the minor
-#'   allele; FiniMOM uses it only for effect-size standardisation.
+#' @param eaf Numeric vector or NULL. Effect-allele frequencies. Used by FiniMOM
+#'   ONLY when \code{standardize = TRUE}; with the default
+#'   \code{standardize = FALSE} it is ignored (see below).
+#' @param standardize Logical. FiniMOM's own default is TRUE, which rescales
+#'   \code{beta} and \code{se} by \code{sqrt(2*eaf*(1-eaf))} to convert
+#'   PER-ALLELE effects onto the standardised-genotype scale. This benchmark's
+#'   simulator calls \code{simulate_genotypes(standardise = TRUE)}, so its
+#'   \code{beta_hat} is ALREADY per standardised genotype - applying FiniMOM's
+#'   transform as well would standardise twice. We therefore default to
+#'   \code{FALSE}. (Both beta and se are scaled by the same factor, so the
+#'   z-scores and hence the ranking are unaffected; what shifts is the effect-size
+#'   scale the prior is calibrated against, which matters most at weak signal.)
+#'   Set TRUE only if you are supplying genuinely per-allele effect sizes.
 #' @param variant_ids Character vector or NULL. Unused by FiniMOM (indices are
 #'   positional) but accepted for interface consistency.
 #' @param insample_ld Logical or NULL. Whether \code{LD} is in-sample. NULL lets
@@ -107,12 +116,14 @@ run_finimom <- function(z,
                         purity      = NULL,
                         clump       = TRUE,
                         check_ld    = FALSE,
+                        standardize = FALSE,
                         seed        = 456L) {
 
   p <- length(z)
   params <- list(maxsize = maxsize, niter = niter, burnin = burnin,
                  cs_level = cs_level, purity = purity, clump = clump,
-                 check_ld = check_ld, seed = seed, insample_ld = insample_ld, n = n)
+                 check_ld = check_ld, standardize = standardize,
+                 seed = seed, insample_ld = insample_ld, n = n)
 
   if (!requireNamespace("finimom", quietly = TRUE)) {
     return(.finimom_error_result(p, params, 0,
@@ -132,7 +143,7 @@ run_finimom <- function(z,
   eaf <- pmin(pmax(as.numeric(eaf), 1e-4), 1 - 1e-4)
 
   args <- list(beta = as.numeric(beta), se = as.numeric(se), eaf = eaf,
-               R = LD, n = as.integer(n),
+               R = LD, n = as.integer(n), standardize = standardize,
                pip = TRUE, cs = TRUE, cs_level = cs_level,
                maxsize = as.integer(maxsize),
                niter = as.integer(niter), burnin = as.integer(burnin),
