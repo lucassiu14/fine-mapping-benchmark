@@ -17,90 +17,128 @@ All four are summary-statistic based (z-scores/betas + LD), so they are in scope
 
 ---
 
-## Installation on the HPC
+## Installation on the HPC — VERIFIED RECIPE
 
-Run from a login node with the toolchain modules loaded. `~/tools` is the
-established location (`TOOLS_ROOT` in `scripts/hpc/run_benchmark_job.R`).
+Every step below was executed on Imperial's HPC on 2026-07-29. **Five separate
+environment failures** were hit and fixed; none of them is documented upstream,
+which is why this section is prescriptive rather than a link.
+
+> **Do not run `module purge`.** This cluster has `LMOD_SYSTEM_DEFAULT_MODULES`
+> empty, so `module purge` (and `module reset`) leaves an empty hierarchy in
+> which `R/4.5.2-gfbf-2025b` cannot even be found. If that happens, start a
+> fresh login shell.
 
 ```bash
-module load R/4.5.2-gfbf-2025b
-module load GSL/2.8-GCC-14.3.0
-module load Python/3.12.3-GCCcore-13.3.0
-mkdir -p ~/tools && cd ~/tools
+module load R/4.5.2-gfbf-2025b GSL/2.8-GCC-14.3.0
+cd ~/fine-mapping-benchmark          # ESSENTIAL for the R packages: this project
+                                     # uses renv, and only here is the library
+                                     # writable. Installing from ~/tools fails
+                                     # with "lib = ... is not writable".
 ```
 
-### 1. CARMA — why it failed before
+`R/4.5.2-gfbf-2025b` is on the **GCCcore/14.3.0** lineage, so `GSL/2.8-GCC-14.3.0`
+is the matching GSL. Lmod prints a long "dependent module(s) not currently
+loaded" warning when these load together — it is narrating module swaps and is
+**benign**.
 
-CARMA is an R package (`ZikunY/CARMA`) built on Rcpp/RcppArmadillo/RcppGSL. It
-needs **GSL headers** at compile time, which is almost certainly why the
-Iteration 001 install failed silently and left the method at 100% NA. Load the
-GSL module *before* installing:
+### 1. CARMA — needs GSL at build time
+
+`LinkingTo: Rcpp, RcppArmadillo, RcppGSL`, so the GSL module must be loaded
+*before* installing. This is why the Iteration 001 install failed and CARMA sat
+at 100% NA for three iterations.
 
 ```bash
-module load GSL/2.8-GCC-14.3.0
+cd ~/fine-mapping-benchmark
 Rscript -e 'remotes::install_github("ZikunY/CARMA")'
 Rscript -e 'library(CARMA); cat("CARMA", as.character(packageVersion("CARMA")), "OK\n")'
 ```
 
-If it still fails, capture the real error (the default install is quiet about
-compile failures):
+`RcppGSL` does not need to remain installed afterwards — `LinkingTo` packages are
+compile-time only.
 
-```bash
-Rscript -e 'remotes::install_github("ZikunY/CARMA", quiet = FALSE)' 2>&1 | tail -40
-```
+### 2. FiniMOM — two traps
 
-Common causes: missing `gsl/gsl_*.h` (GSL module not loaded), or an
-RcppArmadillo C++ standard mismatch — the same class of problem as FiniMOM
-below, fixed the same way.
-
-### 2. FiniMOM — the C++ standard trap (verified 2026-07-29)
-
-A plain `remotes::install_github("vkarhune/finimom")` **fails**:
-
-```
-error: "*** C++14 compiler required; enable C++14 mode in your compiler"
-```
-
-The package's own `src/Makevars` pins `CXX_STD = CXX11`, while current
-RcppArmadillo requires C++14 or later. **Setting `CXX_STD` in `~/.R/Makevars`
-does not help — the package's own Makevars wins.** Patch the source:
+**(a) C++ standard.** The package pins `CXX_STD = CXX11` in `src/Makevars`, but
+current RcppArmadillo needs C++14+. Setting `CXX_STD` in `~/.R/Makevars` does
+**not** help — the package's own Makevars wins. **(b)** it needs `roptim`, which
+is not pulled in automatically by a local source install.
 
 ```bash
 cd ~/tools
 git clone --depth 1 https://github.com/vkarhune/finimom.git
 sed -i 's/^CXX_STD = CXX11/CXX_STD = CXX17/' finimom/src/Makevars
+cd ~/fine-mapping-benchmark
+Rscript -e 'install.packages("roptim")'
 Rscript -e 'install.packages("~/tools/finimom", repos = NULL, type = "source")'
-Rscript -e 'library(finimom); cat("finimom", as.character(packageVersion("finimom")), "OK\n")'
+Rscript -e 'library(finimom); cat("finimom OK\n")'
 ```
 
-Verified working locally with this fix (finimom 0.2.0).
+### 3. CAVIAR — pre-C++17 code, and no generic BLAS
 
-### 3. CAVIAR
+Two problems: its `struct data` / `size()` collide with `std::data` / `std::size`
+once compiled as C++17 (GCC's default), and it links `-llapack -lblas`, which
+this cluster does not provide — the gfbf toolchain ships **FlexiBLAS**. Editing
+the Makefile is not enough (it sets `CC=g++` and compiles via `$(CC)`); link
+explicitly:
 
 ```bash
 cd ~/tools
 git clone https://github.com/fhormoz/caviar.git
-cd caviar/CAVIAR-C++ && make
-./CAVIAR 2>&1 | head -5      # prints usage if the build succeeded
+cd caviar/CAVIAR-C++
+g++ -std=gnu++11 caviar.cpp PostCal.cpp Util.cpp TopKSNP.cpp \
+    -I armadillo/include/ -DARMA_DONT_USE_WRAPPER \
+    -L$EBROOTFLEXIBLAS/lib -lflexiblas \
+    -L$EBROOTGSL/lib -lgsl -lgslcblas \
+    -o CAVIAR
+./CAVIAR 2>&1 | head -3      # usage text = success
 ```
 
-The worker expects the binary at `~/tools/caviar/CAVIAR-C++/CAVIAR`; override
-with `METHOD_ARGS$caviar$caviar_path` if you put it elsewhere.
+### 4. FINEMAP-inf — three traps
 
-### 4. FINEMAP-inf
+There is **no `requirements.txt`**; it is two sub-packages installed separately.
+The venv python also needs the Python module loaded (it is linked against the
+module's libpython), the `finemapinf` build imports numpy so pip's **build
+isolation must be disabled**, and `run_fine_mapping.py` imports `pkg_resources`,
+which setuptools >= 81 removed.
 
 ```bash
-cd ~/tools
-git clone https://github.com/FinucaneLab/fine-mapping-inf.git
-cd fine-mapping-inf
-~/tools/fmpy-venv/bin/python -m pip install -r requirements.txt
-~/tools/fmpy-venv/bin/python run_fine_mapping.py -h | head -20
+module load Python/3.12.3-GCCcore-13.3.0     # else: libpython3.12.so.1.0 not found
+PY=~/tools/fmpy-venv/bin/python
+cd ~/tools && git clone https://github.com/FinucaneLab/fine-mapping-inf.git
+$PY -m pip install setuptools wheel numpy pandas scipy bgzip
+$PY -m pip install ~/tools/fine-mapping-inf/susieinf
+$PY -m pip install --no-build-isolation ~/tools/fine-mapping-inf/finemapinf
 ```
 
-The worker expects `~/tools/fine-mapping-inf` and calls it through the existing
-`py-venv-runner.sh`.
+`pkg_resources` is used only to log a version string (lines 106/113), so shim it
+rather than downgrading setuptools in a venv shared with torch and optuna:
 
----
+```bash
+$PY - <<'EOF'
+p = "/rds/general/user/<you>/home/tools/fine-mapping-inf/run_fine_mapping.py"
+s = open(p).read()
+if "_PkgShim" not in s:
+    shim = """try:
+    import pkg_resources
+except ImportError:
+    class _PkgShim:
+        @staticmethod
+        def require(name):
+            class _V: version = "unknown"
+            return [_V()]
+    pkg_resources = _PkgShim()"""
+    open(p, "w").write(s.replace("import pkg_resources", shim, 1))
+EOF
+$PY ~/tools/fine-mapping-inf/run_fine_mapping.py -h | head -5
+```
+
+> **Author caveat worth carrying into the analysis.** The FINEMAP-inf README
+> states that it and SuSiE-inf "are developed for use in single-cohort
+> fine-mapping with **in-sample LD**; for fine-mapping of meta-analyzed GWAS with
+> reference panel LD, please see methods like SLALOM or **CARMA**". So
+> FINEMAP-inf's n_ref arms are outside its intended use and must be reported with
+> that flag — and the authors independently point at CARMA for the
+> reference-panel regime, which is where our own deep dive landed.
 
 ## Verifying before you commit compute
 
