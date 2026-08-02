@@ -34,6 +34,8 @@ STORAGE="${STORAGE:-${PROJECT_ROOT}/tuning/${STUDY}.journal}"
 # --- search configuration ----------------------------------------------------
 OBJECTIVE="${OBJECTIVE:-multi}"        # multi | scalar
 PENALTY="${PENALTY:-0.5}"              # scalar mode only
+MASS_PENALTY="${MASS_PENALTY:-0}"      # scalar mode only; x |mass_ratio - 1|
+FIX="${FIX:-}"                         # e.g. "hierarchy_M=10.15 lambda_l1=0.1223"
 SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
 REGIONS="${REGIONS:-4}"                # regions per scenario
 MAX_ITER="${MAX_ITER:-2000}"           # FB max_iter (fixed, never tuned)
@@ -149,6 +151,8 @@ ${PY} scripts/tuning/optuna_fb.py \
     --storage "${STORAGE}" \
     --objective "${OBJECTIVE}" \
     --penalty ${PENALTY} \
+    --mass-penalty ${MASS_PENALTY} \
+    ${FIX:+--fix ${FIX}} \
     --scenarios ${SCENARIOS} \
     --regions ${REGIONS} \
     --max_iter ${MAX_ITER} \

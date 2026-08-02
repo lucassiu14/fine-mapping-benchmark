@@ -131,16 +131,24 @@ def suggest_params(trial, args):
     # the authors' value - but standing on a floor is not evidence it is optimal.)
     # Kept as-is: lambda_l1, prior_regularisation and n_caus all found interior
     # optima in v1, so their ranges are doing their job.
+    fixed = args.fix or {}
+
+    def sfloat(name, lo, hi, log=True):
+        return fixed[name] if name in fixed else trial.suggest_float(name, lo, hi, log=log)
+
+    def sint(name, lo, hi, log=False):
+        return fixed[name] if name in fixed else trial.suggest_int(name, lo, hi, log=log)
+
     p = {
-        "lambda_l1":            trial.suggest_float("lambda_l1", 1e-4, 1.0, log=True),
-        "prior_regularisation": trial.suggest_float("prior_regularisation", 0.1, 50.0, log=True),
-        "sigma_sq":             trial.suggest_float("sigma_sq", 1e-4, 0.5, log=True),
-        "hierarchy_M":          trial.suggest_float("hierarchy_M", 1.0, 100.0, log=True),
-        "n_caus":               trial.suggest_int("n_caus", 1, 10),
-        "sparse_concrete":      trial.suggest_int("sparse_concrete", 1, 300, log=True),
+        "lambda_l1":            sfloat("lambda_l1", 1e-4, 1.0),
+        "prior_regularisation": sfloat("prior_regularisation", 0.1, 50.0),
+        "sigma_sq":             sfloat("sigma_sq", 1e-4, 0.5),
+        "hierarchy_M":          sfloat("hierarchy_M", 1.0, 100.0),
+        "n_caus":               sint("n_caus", 1, 10),
+        "sparse_concrete":      sint("sparse_concrete", 1, 300, log=True),
     }
     if args.tune_gamma_coverage:
-        p["gamma_coverage"] = trial.suggest_float("gamma_coverage", 0.8, 0.99)
+        p["gamma_coverage"] = sfloat("gamma_coverage", 0.8, 0.99, log=False)
     return p
 
 
@@ -164,9 +172,14 @@ def build_objective(args):
             # Pruning only applies to single-objective studies; Optuna does not
             # support pruners for multi-objective optimisation.
             if args.objective == "scalar":
+                # Must use the SAME formula as the final score below, or the
+                # pruner ranks trials on a different quantity than the one the
+                # study is optimising.
                 running = sum(aps) / len(aps)
                 if viols:
                     running -= args.penalty * (sum(viols) / len(viols))
+                if args.mass_penalty and masses:
+                    running -= args.mass_penalty * abs(sum(masses) / len(masses) - 1.0)
                 trial.report(running, s)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
@@ -185,7 +198,17 @@ def build_objective(args):
 
         if args.objective == "multi":
             return mean_ap, mean_viol            # maximise AP, minimise violation
-        return mean_ap - args.penalty * mean_viol
+
+        # Optional calibration term. Study fb_binary_ref500 (3102 trials) found
+        # AP saturated at 0.809 while the mass ratio sat at ~2.0 in EVERY top
+        # trial - i.e. the only metric with room left to improve is the one no
+        # objective could see. |mass - 1| is symmetric because both directions
+        # are miscalibration: >1 is over-confident (Iteration 002's 9-11x
+        # failure mode), <1 leaves detectable mass on the table.
+        score = mean_ap - args.penalty * mean_viol
+        if args.mass_penalty and mean_mass == mean_mass:
+            score -= args.mass_penalty * abs(mean_mass - 1.0)
+        return score
 
     return objective
 
@@ -199,6 +222,16 @@ def main():
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
+    ap.add_argument("--mass-penalty", type=float, default=0.0,
+                    help="scalar mode only: subtract this x |total_mass_ratio - 1| "
+                         "from the score. 0 (default) reproduces the old objective. "
+                         "Use when AP has saturated and calibration is the "
+                         "remaining headroom.")
+    ap.add_argument("--fix", nargs="*", default=None, metavar="NAME=VALUE",
+                    help="remove parameters from the search space and hold them at "
+                         "VALUE, e.g. --fix hierarchy_M=10.15 lambda_l1=0.1223. Use "
+                         "for knobs an importance analysis shows are inert: tuning "
+                         "them spends budget without moving the objective.")
     ap.add_argument("--penalty", type=float, default=0.5,
                     help="scalar mode only: weight on the FDR violation")
     ap.add_argument("--scenarios", type=int, default=4, help="scenarios per trial")
@@ -220,6 +253,23 @@ def main():
     ap.add_argument("--report", action="store_true",
                     help="print the study's best trials and exit (no optimisation)")
     args = ap.parse_args()
+
+    # --fix NAME=VALUE ... -> {name: value}. n_caus and sparse_concrete are
+    # integer flags in beatrice_annot.py, so they must not be coerced to float.
+    if args.fix:
+        int_params = {"n_caus", "sparse_concrete"}
+        fixed = {}
+        for item in args.fix:
+            if "=" not in item:
+                ap.error(f"--fix expects NAME=VALUE, got '{item}'")
+            k, _, v = item.partition("=")
+            k = k.strip()
+            try:
+                fixed[k] = int(v) if k in int_params else float(v)
+            except ValueError:
+                ap.error(f"--fix {k}: '{v}' is not a number")
+        args.fix = fixed
+        print(f"[fix] held out of the search: {fixed}")
 
     storage = make_storage(args.storage)
     sampler = (optuna.samplers.NSGAIISampler(seed=None) if args.objective == "multi"

@@ -35,32 +35,82 @@ Two objective modes:
 All four metrics are stored on every trial as user attributes, so either
 objective can be re-derived from a finished study without re-running trials.
 
-**`multi` degenerated on `fb_binary_ref500` (observed 2026-07-30, 1586 trials).**
-The Pareto front collapsed to a *single distinct parameter set* — the two front
-entries, trials #1356 and #1566, carry identical parameters (NSGA-II re-evaluated
-its own optimum). Every point on the front had `viol = 0.0000`, which implies no
-trial anywhere in the study beat AP = 0.8089 at *any* violation level: a trial
-that did would be non-dominated and would appear on the front. So the second
-objective exerted no trade-off pressure at all and the study was effectively
-single-objective on AP already.
+**The `multi` front collapsed on `fb_binary_ref500` (final: 3102 trials,
+2026-08-02).** The Pareto front is a *single distinct parameter set*, re-found by
+the sampler over and over — the top five trials by AP (#2024, #2143, #2174,
+#2236, #2241) all carry AP = 0.8091 to four decimals. Every front point has
+`viol = 0.0000`.
 
-That is not free. Because `multi` disables the MedianPruner, all 1586 trials ran
-all four scenarios, where `scalar` would have abandoned most of them after the
-first — up to ~4× the cost per trial for an objective that returned no
-information on this stratum. **Prefer `scalar` on any stratum where violation
-saturates at 0.** `--report` now prints the fraction of trials at exactly zero
-violation and flags the degenerate case, so this is visible before a long run
-rather than after it.
+The reason is **not** that violation is degenerate: 51% of trials (1577/3102)
+have nonzero violation, so it is a genuinely varying quantity. It is that
+violation never *conflicts* with AP — configurations that rank well also control
+FDR well, so the frontier has no trade-off to trace and the multi-objective
+formulation returns one point.
 
-**Mass ratio is deliberately absent from both objective modes**, and the v1
-optimum has `mass = 2.00` — total PIP mass twice the true causal count. Since
-Iteration 003's central Functional BEATRICE result was mass inflation (3.06 →
-2.70 via the joint prior), tuning purely on AP can return a configuration that
-wins on ranking while remaining globally over-confident. `reliab = 1.00` and
-`viol = 0` say the *top* of the ranking is clean, so the excess mass sits in the
-tail, where neither objective looks. `--report` now prints the mass ratio of the
-top 5 trials by AP so this stays in view; folding it into the `scalar` penalty is
-an open option, not yet taken.
+That costs something. `multi` disables the MedianPruner, so all 3102 trials ran
+all four scenarios where `scalar` would have abandoned most after the first —
+several times the cost per trial for a second objective that produced a
+single-point front. **Prefer `scalar` unless the front actually spreads.**
+`--report` prints the zero-violation fraction and the front, so this is
+checkable early rather than after 72h.
+
+### AP is saturated; calibration is the remaining headroom
+
+v1 went from 1586 → 3102 trials and moved AP from **0.8089 → 0.8091**. 1516
+additional trials bought +0.0002, with the sampler re-finding one point. AP on
+this stratum is exhausted.
+
+Meanwhile **`total_mass_ratio` sat at ~2.0 in every top trial** and is in neither
+objective mode. Total PIP mass is twice the true causal count. Since Iteration
+003's central Functional BEATRICE result was mass inflation (3.06 → 2.70 via the
+joint prior), an AP-only search returns a configuration that wins on ranking
+while staying globally over-confident — and, now that AP has saturated, returns
+*nothing else*. `reliab = 1.00` and `viol = 0` locate the problem: the top of the
+ranking is clean, so the excess mass is in the tail where neither objective
+looks.
+
+`--mass-penalty W` (scalar mode) subtracts `W × |total_mass_ratio − 1|` from the
+score. It defaults to **0**, reproducing the previous objective exactly. `|·|` is
+symmetric because both directions are miscalibration: above 1 is over-confident
+(Iteration 002's 9–11× failure mode), below 1 leaves detectable mass unused. The
+in-loop pruning score uses the identical formula, so the MedianPruner ranks
+trials on the quantity actually being optimised.
+
+### Importance-driven pruning of the search space
+
+`--report`'s fANOVA importances for AP on v1's 3102 trials:
+
+| parameter | importance |
+|---|---|
+| `sparse_concrete` | 0.617 |
+| `sigma_sq` | 0.340 |
+| `prior_regularisation` | 0.031 |
+| `n_caus` | 0.008 |
+| `hierarchy_M` | 0.002 |
+| `lambda_l1` | 0.001 |
+
+The two parameters that were **pinned at their bounds** are the two that carry
+**96% of the variance in AP** — direct confirmation that v1's bounds, not its
+objective, were the binding constraint, and that its 3102 trials were largely
+spent on knobs explaining 4%.
+
+`hierarchy_M` (0.002) is confirmed inert, as its geometric-centre optimum
+predicted. `lambda_l1` (0.001) is inert too — its interior optimum was flat-
+direction noise, not a located optimum.
+
+`--fix NAME=VALUE ...` removes parameters from the search space and holds them
+fixed, so budget concentrates on what moves the objective:
+
+```bash
+FIX="hierarchy_M=10.15 lambda_l1=0.1223" ...
+```
+
+> **Do not use AP importance to fix `n_caus`.** Its AP importance is 0.008, but
+> it is the *prior number of causal variants* — the knob most likely to control
+> `total_mass_ratio`, which is the metric v2 exists to improve and which the AP
+> importance analysis cannot see. Low importance for one objective is not
+> evidence of irrelevance to another. `prior_regularisation` (0.031) is small but
+> non-zero and also stays in.
 
 **One study per stratum.** The never-pool rule applies: a prior tuned on binary
 annotations under in-sample LD has no reason to be optimal for continuous
