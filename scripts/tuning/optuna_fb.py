@@ -455,8 +455,12 @@ def report(study, args):
         med = durs[len(durs) // 2]
         print(f"  trial duration (min): median {med:.1f}  min {durs[0]:.1f}  "
               f"max {durs[-1]:.1f}")
-        print(f"  => {1440.0 / med * 20 / 24:.0f} trials per 72h x 20-worker run "
-              f"(at {med:.0f} min/trial)")
+        # 72h x 20 workers = 86400 core-MINUTES. (An earlier version divided
+        # 1440 core-hours by a duration in minutes, mixing units and
+        # understating throughput by ~70x.)
+        core_minutes = 72 * 60 * 20
+        print(f"  => ~{core_minutes / med:.0f} trials per 72h x 20-worker run "
+              f"(at {med:.0f} min/trial, before any early-abort saving)")
 
     # Is the FDR-violation objective actually doing anything? If (nearly) every
     # trial achieves violation 0 it exerts no trade-off pressure, the Pareto
@@ -484,7 +488,9 @@ def report(study, args):
     # FIXING rather than tuning - it spends search budget for no return.
     try:
         imp = optuna.importance.get_param_importances(study, target=_trial_ap)
-        print("  param importance for AP (fANOVA):")
+        caveat = ("   <- TOO FEW TRIALS TO INTERPRET"
+                  if len(complete) < 50 else "")
+        print(f"  param importance for AP (fANOVA):{caveat}")
         for k, v in imp.items():
             print(f"    {v:6.3f}  {k}")
     except Exception as e:                       # too few trials, missing sklearn, ...
