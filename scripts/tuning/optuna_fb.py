@@ -109,8 +109,8 @@ def run_one_scenario(args, params, scenario):
             return float("nan")
 
     return {k: num(k) for k in
-            ("ap", "max_fdr_violation_n20", "total_mass_ratio", "hi_pip_reliab",
-             "ece_hi", "seconds")}
+            ("ap", "max_fdr_violation_n20", "fdr_at_90", "fdr_at_95",
+             "total_mass_ratio", "hi_pip_reliab", "ece_hi", "seconds")}
 
 
 def suggest_params(trial, args):
@@ -158,7 +158,7 @@ def build_objective(args):
 
     def objective(trial):
         params = suggest_params(trial, args)
-        aps, viols, masses, reliabs, eces = [], [], [], [], []
+        aps, viols, masses, reliabs, eces, fdr95s = [], [], [], [], [], []
 
         for s in range(1, n_scen + 1):
             m = run_one_scenario(args, params, s)
@@ -171,6 +171,8 @@ def build_objective(args):
                 reliabs.append(m["hi_pip_reliab"])
             if m["ece_hi"] == m["ece_hi"]:
                 eces.append(m["ece_hi"])
+            if m["fdr_at_95"] == m["fdr_at_95"]:
+                fdr95s.append(m["fdr_at_95"])
 
             # Pruning only applies to single-objective studies; Optuna does not
             # support pruners for multi-objective optimisation.
@@ -192,6 +194,7 @@ def build_objective(args):
         mean_mass  = sum(masses) / len(masses) if masses else float("nan")
         mean_relb  = sum(reliabs) / len(reliabs) if reliabs else float("nan")
         mean_ece   = sum(eces) / len(eces) if eces else float("nan")
+        mean_fdr95 = sum(fdr95s) / len(fdr95s) if fdr95s else float("nan")
 
         # Record everything, so any objective can be re-derived from the study
         # later without re-running trials.
@@ -200,14 +203,20 @@ def build_objective(args):
         trial.set_user_attr("mean_total_mass_ratio", mean_mass)
         trial.set_user_attr("mean_hi_pip_reliab", mean_relb)
         trial.set_user_attr("mean_ece_hi", mean_ece)
+        trial.set_user_attr("mean_fdr_at_95", mean_fdr95)
 
         if args.objective == "triple":
             # The three quantities that jointly define a usable fine-mapper:
             # ranking (AP, up), selection safety (FDR violation, down) and
             # honesty of the reported probabilities (ece_hi, down). NaN scores
             # as clearly bad so a broken trial is dominated, not unsortable.
+            # Excess FDR over the 0.05 budget promised at PIP >= 0.95. This
+            # replaces max_fdr_violation_n20 as the safety objective: the
+            # guarded max is a mid-range statistic (see fb_objective.R).
+            fdr_excess = (max(0.0, mean_fdr95 - 0.05)
+                          if mean_fdr95 == mean_fdr95 else 1.0)
             return (mean_ap,
-                    mean_viol,
+                    fdr_excess,
                     mean_ece if mean_ece == mean_ece else 1.0)
 
         if args.objective == "multi":
@@ -408,10 +417,10 @@ def report(study, args):
 
     if args.objective == "triple":
         front = sorted(study.best_trials, key=lambda x: -x.values[0])
-        print(f"Pareto front (AP up, FDR violation down, ece_hi down)  "
+        print(f"Pareto front (AP up, FDR-excess@0.95 down, ece_hi down)  "
               f"[{len(front)} points]:")
         for t in front:
-            print(f"  AP={t.values[0]:.4f}  viol={t.values[1]:.4f}  ece_hi={t.values[2]:.4f}"
+            print(f"  AP={t.values[0]:.4f}  fdr_xs={t.values[1]:.4f}  ece_hi={t.values[2]:.4f}"
                   f"  mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}"
                   f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}"
                   f"  #{t.number}  {t.params}")

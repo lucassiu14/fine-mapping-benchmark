@@ -48,6 +48,13 @@ ENRICHMENT="${ENRICHMENT:-10.8}"
 N_REF="${N_REF:-500}"                  # "NA" for in-sample LD
 MODEL="${MODEL:-sparse}"               # sparse | sparse_inf
 P_CAUSAL="${P_CAUSAL:-}"               # sparse_inf only
+# --- the simulation GRID. Design choices - do not change without agreement. ---
+# SCENARIOS below must equal (number of S values) x (number of phi values), or
+# the objective silently scores only the first SCENARIOS cells of the grid.
+SIM_S="${SIM_S:-1,3}"                        # causal variants per region
+SIM_PHI="${SIM_PHI:-0.05,0.2}"               # per-locus heritability
+SIM_N="${SIM_N:-1000}"                       # GWAS sample size
+SIM_REGION_SIZES="${SIM_REGION_SIZES:-100,200,400,500,1000}"   # variants/region
 SIM_WALLTIME="${SIM_WALLTIME:-04:00:00}"
 SIM_SELECT="${SIM_SELECT:-1:ncpus=1:mem=32gb}"
 SIM_QUEUE="${SIM_QUEUE:-v1_small24}"
@@ -113,6 +120,10 @@ Rscript scripts/tuning/make_tuning_sim.R \
     --enrichment ${ENRICHMENT} \
     --n_ref "${N_REF}" \
     --model "${MODEL}" \
+    --S "${SIM_S}" \
+    --phi "${SIM_PHI}" \
+    --n ${SIM_N} \
+    --region_sizes "${SIM_REGION_SIZES}" \
     --regions ${REGIONS} ${PC_ARG}
 echo "[sim build] done \$(date)"
 SIM_EOF
@@ -123,7 +134,20 @@ SIM_EOF
   DEPEND="-W depend=afterok:${SIM_JOBID}"
 fi
 
+# A trial scores scenarios 1..SCENARIOS. If the sim holds more cells than that,
+# the extra cells are silently never evaluated - the exact class of error that
+# made the v1 study blind to most of the grid.
+N_CELLS=$(( $(tr -cd ',' <<< "$SIM_S" | wc -c) + 1 ))
+N_CELLS=$(( N_CELLS * ($(tr -cd ',' <<< "$SIM_PHI" | wc -c) + 1) ))
+if (( SCENARIOS != N_CELLS )); then
+  echo "ERROR: SCENARIOS=${SCENARIOS} but the grid S={${SIM_S}} x phi={${SIM_PHI}} has ${N_CELLS} cells." >&2
+  echo "       Set SCENARIOS=${N_CELLS}, or the search scores only the first ${SCENARIOS}." >&2
+  exit 1
+fi
+
 echo "Study:     $STUDY   (objective=$OBJECTIVE)"
+echo "Grid:      S={${SIM_S}}  phi={${SIM_PHI}}  n=${SIM_N}  p={${SIM_REGION_SIZES}}"
+echo "           ${N_CELLS} scenarios x ${REGIONS} regions = $(( N_CELLS * REGIONS )) fits per trial"
 echo "Sim:       $SIM"
 echo "Storage:   $STORAGE"
 echo "Workers:   $WORKERS x ${PBS_WALLTIME}  (worker timeout ${TIMEOUT}s)"

@@ -67,8 +67,21 @@ if (nzchar(MAP_DIR) && !dir.exists(MAP_DIR)) MAP_DIR <- ""
 
 S_vec   <- as.integer(strsplit(N_SCEN_S,   ",")[[1]])
 phi_vec <- as.numeric(strsplit(N_SCEN_PHI, ",")[[1]])
-# region sizes: spread across the benchmark's length classes, truncated to N_REGIONS
-p_vec <- rep(c(100L, 200L, 400L, 500L, 1000L), length.out = N_REGIONS)
+
+# Region sizes. Recycled to N_REGIONS, so --region_sizes "500,1000,2000" with
+# --regions 3 gives one region of each size per scenario.
+#
+# The default was c(100, 200, 400, 500, 1000), which against the old n = 1000
+# put the largest cells at p = n, where the in-sample LD matrix is rank
+# deficient - a regime the literature avoids (BEATRICE: n = 5000, m = 1000;
+# CARMA: n = 10000, 1500-4000 variants). Keep p/n well below 1.
+REGION_SIZES <- gets("region_sizes", "100,200,400,500,1000")
+p_vec <- rep(as.integer(strsplit(REGION_SIZES, ",")[[1]]), length.out = N_REGIONS)
+if (max(p_vec) >= N_SUB) {
+  warning(sprintf(
+    "region size %d >= n = %d: the in-sample LD matrix will be rank deficient.",
+    max(p_vec), N_SUB), call. = FALSE, immediate. = TRUE)
+}
 
 # Half the annotations enriched, matching the Iteration 002 grid convention.
 enrich_vec <- if (identical(ANNOT, "none")) NULL else
@@ -100,6 +113,10 @@ cat(sprintf("Building tuning sim: model=%s annot=%s enrich=%s LD=%s regions=%d S
             ifelse(nzchar(N_REF) && !identical(toupper(N_REF), "NA"),
                    paste0("n_ref=", N_REF), "in-sample"),
             N_REGIONS, N_SCEN_S, N_SCEN_PHI))
+cat(sprintf("  n=%d  region sizes={%s}  scenarios=%d (S x phi)  fits/trial=%d\n",
+            N_SUB, paste(p_vec, collapse = ","),
+            length(S_vec) * length(phi_vec),
+            length(S_vec) * length(phi_vec) * N_REGIONS))
 
 t0 <- Sys.time()
 sim <- do.call(run_simulation, sim_args)

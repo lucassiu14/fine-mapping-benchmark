@@ -126,12 +126,31 @@ if (is.null(g)) {
 ap <- g$ap %||% NA_real_
 
 max_fdr_violation_n20 <- NA_real_
+fdr_at_90 <- NA_real_
+fdr_at_95 <- NA_real_
 fpc <- g$fdr_power_curve
 if (!is.null(fpc) && nrow(fpc) > 0) {
   viol <- pmax(0, fpc$fdr - (1 - fpc$threshold))
   nsel <- fpc$tp + fpc$fp
   ok <- is.finite(viol) & nsel >= 20L
   if (any(ok)) max_fdr_violation_n20 <- max(viol[ok])
+
+  # FDR at the thresholds people actually act on.
+  #
+  # max_fdr_violation_n20 is a MAX over every threshold surviving an n >= 20
+  # guard. Measured on Iteration 003 (fb_xregion, in-sample) that max is
+  # attained at threshold 0.64, the median surviving threshold is 0.40, and
+  # only 4% of surviving points sit at threshold >= 0.90 - so it is a mid-range
+  # statistic, not a statement about the decision range. These two report the
+  # decision range directly, pooled over the scenario's regions. NA when
+  # nothing is selected at that threshold, which is itself informative.
+  fdr_at <- function(t) {
+    i <- which.min(abs(fpc$threshold - t))
+    if (!length(i) || (fpc$tp[i] + fpc$fp[i]) == 0) return(NA_real_)
+    fpc$fp[i] / (fpc$tp[i] + fpc$fp[i])
+  }
+  fdr_at_90 <- fdr_at(0.90)
+  fdr_at_95 <- fdr_at(0.95)
 }
 
 total_mass_ratio <- NA_real_
@@ -167,9 +186,11 @@ n_failed <- res[["functional_beatrice"]]$n_failed %||% NA_integer_
 elapsed  <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
 cat(sprintf(
-  "status=ok\nap=%.6f\nmax_fdr_violation_n20=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
+  "status=ok\nap=%.6f\nmax_fdr_violation_n20=%s\nfdr_at_90=%s\nfdr_at_95=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
   ap,
   ifelse(is.na(max_fdr_violation_n20), "NA", sprintf("%.6f", max_fdr_violation_n20)),
+  ifelse(is.na(fdr_at_90), "NA", sprintf("%.6f", fdr_at_90)),
+  ifelse(is.na(fdr_at_95), "NA", sprintf("%.6f", fdr_at_95)),
   ifelse(is.na(total_mass_ratio),      "NA", sprintf("%.6f", total_mass_ratio)),
   ifelse(is.na(hi_pip_reliab),         "NA", sprintf("%.6f", hi_pip_reliab)),
   ifelse(is.na(ece_hi),                "NA", sprintf("%.6f", ece_hi)),
