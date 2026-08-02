@@ -117,6 +117,45 @@ annotations under in-sample LD has no reason to be optimal for continuous
 annotations under a reference panel. `STUDY` names the stratum and the tuning sim
 is built for that stratum only.
 
+
+## Grid design is a user decision (2026-08-02)
+
+The v1 grid (S ∈ {1,3}, phi ∈ {0.05,0.2}, p ≤ 500, n = 1000, 4 regions) was chosen by
+Claude for trial cost, without checking that the reduction preserved the failure being
+tuned against. Measured on Iteration 003 in its own stratum, it contained **9% of the
+high-PIP calls and 4% of the high-PIP errors** — the study reported `hi_pip_reliab = 1.00`
+where the benchmark measures 0.52, and 3102 trials moved AP by 0.0002.
+
+**Do not set, thin or extend a grid axis without agreement, including "just for tuning".**
+`submit_optuna_pbs.sh` now aborts when `SCENARIOS != |S| x |phi|`, because a trial scores
+scenarios `1..SCENARIOS` and a mismatch silently drops cells.
+
+### Agreed v2 grid — study `fb_insample_v2`
+
+| axis | value | rationale |
+|---|---|---|
+| S | 1, 2, 3, 5, 10 | the dominant axis in-sample: `ece_hi` 0.189 → 0.033 and mass ratio 3.66 → 0.51 across it |
+| phi | 0.05, 0.1, 0.2, 0.4 | 0.0075 dropped (4 high-PIP calls, pure noise); `ece_hi` is near-flat 0.082–0.097 over the rest |
+| n | 5000 | matches BEATRICE's own paper; the old n = 1000 put p = 1000 regions at p = n, where in-sample LD is rank deficient |
+| region sizes | 500, 1000, 2000 | one per scenario, **rotating**; cost is quadratic in p and p = 2000 alone is 76% of a 3-region trial |
+| LD | in-sample | the regime FB is competitive in; ref500 deferred |
+| model | sparse | sparse_inf out of scope by decision |
+
+Rotation does not alias: `run_simulation` builds scenarios with `expand.grid(S, phi, iter)`
+so S cycles with period 5 while the rotation has period 3, and gcd(5,3) = 1.
+
+### Field practice, for reference
+
+| study | causals/locus | per-locus h² | n | variants/region | LD |
+|---|---|---|---|---|---|
+| BEATRICE | 1, 4, 8, 12 | ω² = 0.1–0.8 | 5,000 | 1,000 | in-sample |
+| CARMA | — | — | 10,000 | 1,500–4,000 | reference |
+| SuSiE 2.0 | — | — | 1,000 | 5,000 | in-sample |
+| ours (v2) | 1, 2, 3, 5, 10 | 0.05–0.4 | 5,000 | 500–2,000 | in-sample |
+
+Open gap, deferred to Iteration 004: our phi tops out at 0.4 where BEATRICE's own paper
+goes to 0.8, so we test our base method below the signal range its authors used.
+
 ## Search space
 
 Every knob `beatrice_annot.py` actually consumes:
