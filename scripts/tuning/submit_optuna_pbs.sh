@@ -37,6 +37,7 @@ PENALTY="${PENALTY:-0.5}"              # scalar mode only
 MULTI_SECOND="${MULTI_SECOND:-violation}"  # multi mode only: violation | mass | reliab
 MASS_PENALTY="${MASS_PENALTY:-0}"      # scalar mode only; x |mass_ratio - 1|
 FIX="${FIX:-}"                         # e.g. "hierarchy_M=10.15 lambda_l1=0.1223"
+ABORT_QUANTILE="${ABORT_QUANTILE:-0}"  # 0 = off; 0.25 aborts the worst quarter early
 SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
 REGIONS="${REGIONS:-4}"                # regions per scenario
 MAX_ITER="${MAX_ITER:-2000}"           # FB max_iter (fixed, never tuned)
@@ -178,6 +179,7 @@ ${PY} scripts/tuning/optuna_fb.py \
     --penalty ${PENALTY} \
     --multi-second "${MULTI_SECOND}" \
     --mass-penalty ${MASS_PENALTY} \
+    --abort-quantile ${ABORT_QUANTILE} \
     ${FIX:+--fix ${FIX}} \
     --scenarios ${SCENARIOS} \
     --regions ${REGIONS} \

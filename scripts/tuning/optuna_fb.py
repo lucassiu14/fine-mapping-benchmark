@@ -153,11 +153,43 @@ def suggest_params(trial, args):
     return p
 
 
+
+def _abort_thresholds(study, n_scen, args):
+    """Per-stage AP cut-offs, from trials that have already completed.
+
+    Optuna supports pruners only for single-objective studies, and Trial.report()
+    raises for multi-objective ones - but with a 20-cell grid a trial is 60
+    BEATRICE fits, so running every hopeless configuration to completion is the
+    dominant cost. We keep our own per-stage record (ap_after_<k> user attrs) and
+    abort a trial whose running AP is below the `--abort-quantile` of what
+    completed trials had at the SAME stage.
+
+    Deliberately conservative: no aborting until `--abort-min-trials` trials have
+    finished, and never before `--abort-after` scenarios, so a configuration that
+    starts slow on the easy cells still gets a hearing.
+    """
+    if args.abort_quantile <= 0:
+        return {}
+    done = [t for t in study.get_trials(deepcopy=False)
+            if t.state == optuna.trial.TrialState.COMPLETE]
+    if len(done) < args.abort_min_trials:
+        return {}
+    cuts = {}
+    for k in range(args.abort_after, n_scen):
+        vals = sorted(v for v in (t.user_attrs.get(f"ap_after_{k}") for t in done)
+                      if isinstance(v, float) and v == v)
+        if len(vals) >= args.abort_min_trials:
+            idx = int(args.abort_quantile * (len(vals) - 1))
+            cuts[k] = vals[idx]
+    return cuts
+
+
 def build_objective(args):
     n_scen = args.scenarios
 
     def objective(trial):
         params = suggest_params(trial, args)
+        cuts = _abort_thresholds(trial.study, n_scen, args)
         aps, viols, masses, reliabs, eces, fdr95s = [], [], [], [], [], []
 
         for s in range(1, n_scen + 1):
@@ -173,6 +205,13 @@ def build_objective(args):
                 eces.append(m["ece_hi"])
             if m["fdr_at_95"] == m["fdr_at_95"]:
                 fdr95s.append(m["fdr_at_95"])
+
+            # Record the running AP so later trials can be compared against this
+            # one at the same stage, then abort if we are already clearly behind.
+            running_ap = sum(aps) / len(aps)
+            trial.set_user_attr(f"ap_after_{s}", running_ap)
+            if s in cuts and running_ap < cuts[s]:
+                raise optuna.TrialPruned()
 
             # Pruning only applies to single-objective studies; Optuna does not
             # support pruners for multi-objective optimisation.
@@ -258,6 +297,16 @@ def main():
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
+    ap.add_argument("--abort-quantile", type=float, default=0.0,
+                    help="abort a trial whose running AP falls below this quantile "
+                         "of completed trials at the same scenario index. 0 (default) "
+                         "disables. 0.25 aborts the worst quarter. Works in every "
+                         "objective mode, including multi-objective, where Optuna "
+                         "has no pruner of its own.")
+    ap.add_argument("--abort-after", type=int, default=3,
+                    help="never abort before this many scenarios have been scored.")
+    ap.add_argument("--abort-min-trials", type=int, default=30,
+                    help="never abort until this many trials have completed.")
     ap.add_argument("--multi-second", choices=["violation", "mass", "reliab"],
                     default="violation",
                     help="multi mode only: the second (minimised) objective. "
