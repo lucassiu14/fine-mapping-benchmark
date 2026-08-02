@@ -197,7 +197,18 @@ def build_objective(args):
         trial.set_user_attr("mean_hi_pip_reliab", mean_relb)
 
         if args.objective == "multi":
-            return mean_ap, mean_viol            # maximise AP, minimise violation
+            # Second objective, always minimised. 'violation' produced a
+            # single-point front on fb_binary_ref500 because it never conflicts
+            # with AP. 'mass' targets the trade-off that IS real once AP
+            # saturates, and needs no weight chosen up front.
+            # NaN would make the trial unsortable against the front, so a
+            # mass ratio that could not be computed scores as clearly bad
+            # rather than poisoning the study.
+            if args.multi_second == "mass":
+                second = abs(mean_mass - 1.0) if mean_mass == mean_mass else 10.0
+            else:
+                second = mean_viol
+            return mean_ap, second
 
         # Optional calibration term. Study fb_binary_ref500 (3102 trials) found
         # AP saturated at 0.809 while the mass ratio sat at ~2.0 in EVERY top
@@ -222,6 +233,11 @@ def main():
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
+    ap.add_argument("--multi-second", choices=["violation", "mass"], default="violation",
+                    help="multi mode only: the second (minimised) objective. "
+                         "'violation' = max_fdr_violation_n20 (the original); "
+                         "'mass' = |total_mass_ratio - 1|, which trades against AP "
+                         "and so yields a front with actual spread.")
     ap.add_argument("--mass-penalty", type=float, default=0.0,
                     help="scalar mode only: subtract this x |total_mass_ratio - 1| "
                          "from the score. 0 (default) reproduces the old objective. "
@@ -367,9 +383,11 @@ def report(study, args):
         print(f"  (param importance unavailable: {e})")
 
     if args.objective == "multi":
-        print("Pareto front (AP up, FDR violation down):")
+        second = getattr(args, "multi_second", "violation")
+        label = "|mass-1|" if second == "mass" else "FDR violation"
+        print(f"Pareto front (AP up, {label} down)  [{len(study.best_trials)} points]:")
         for t in sorted(study.best_trials, key=lambda x: -x.values[0]):
-            print(f"  AP={t.values[0]:.4f}  viol={t.values[1]:.4f}  "
+            print(f"  AP={t.values[0]:.4f}  obj2={t.values[1]:.4f}  "
                   f"mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}  "
                   f"reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}  "
                   f"#{t.number}  {t.params}")
