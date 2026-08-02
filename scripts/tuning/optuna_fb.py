@@ -192,6 +192,7 @@ def build_objective(args):
     def objective(trial):
         params = suggest_params(trial, args)
         cuts = _abort_thresholds(trial.study, n_scen, args)
+        t_trial = time.time()
         aps, viols, masses, reliabs, eces, fdr95s = [], [], [], [], [], []
 
         for s in range(1, n_scen + 1):
@@ -210,6 +211,14 @@ def build_objective(args):
 
             # Record the running AP so later trials can be compared against this
             # one at the same stage, then abort if we are already clearly behind.
+            # Emit timing to OUR stdout (the PBS log). fb_objective.R's own
+            # `seconds=` goes to a captured pipe, so without this line a trial
+            # killed at walltime leaves no timing evidence whatsoever - which is
+            # exactly the case a short canary run is trying to measure.
+            print(f"[trial {trial.number}] scenario {s}/{n_scen} "
+                  f"seconds={m['seconds']:.1f} ap={m['ap']:.4f} "
+                  f"cum_min={(time.time() - t_trial) / 60:.1f}", flush=True)
+
             running_ap = sum(aps) / len(aps)
             trial.set_user_attr(f"ap_after_{s}", running_ap)
             if s in cuts and running_ap < cuts[s]:
@@ -438,6 +447,16 @@ def report(study, args):
     print("  states: " + ", ".join(f"{k}={v}" for k, v in sorted(by_state.items())))
     if not complete:
         return
+
+    durs = sorted((t.datetime_complete - t.datetime_start).total_seconds() / 60.0
+                  for t in complete
+                  if t.datetime_start is not None and t.datetime_complete is not None)
+    if durs:
+        med = durs[len(durs) // 2]
+        print(f"  trial duration (min): median {med:.1f}  min {durs[0]:.1f}  "
+              f"max {durs[-1]:.1f}")
+        print(f"  => {1440.0 / med * 20 / 24:.0f} trials per 72h x 20-worker run "
+              f"(at {med:.0f} min/trial)")
 
     # Is the FDR-violation objective actually doing anything? If (nearly) every
     # trial achieves violation 0 it exerts no trade-off pressure, the Pareto
