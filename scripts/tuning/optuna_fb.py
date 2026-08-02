@@ -206,6 +206,8 @@ def build_objective(args):
             # rather than poisoning the study.
             if args.multi_second == "mass":
                 second = abs(mean_mass - 1.0) if mean_mass == mean_mass else 10.0
+            elif args.multi_second == "reliab":
+                second = (1.0 - mean_relb) if mean_relb == mean_relb else 1.0
             else:
                 second = mean_viol
             return mean_ap, second
@@ -233,11 +235,15 @@ def main():
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
-    ap.add_argument("--multi-second", choices=["violation", "mass"], default="violation",
+    ap.add_argument("--multi-second", choices=["violation", "mass", "reliab"],
+                    default="violation",
                     help="multi mode only: the second (minimised) objective. "
                          "'violation' = max_fdr_violation_n20 (the original); "
-                         "'mass' = |total_mass_ratio - 1|, which trades against AP "
-                         "and so yields a front with actual spread.")
+                         "'mass' = |total_mass_ratio - 1|; "
+                         "'reliab' = 1 - hi_pip_reliab, i.e. the error rate among "
+                         "PIP>=0.9 calls. 'reliab' is the one that matches the "
+                         "measured Iteration 003 failure - but only if the tuning "
+                         "sim spans phi=0.4, where that failure lives.")
     ap.add_argument("--mass-penalty", type=float, default=0.0,
                     help="scalar mode only: subtract this x |total_mass_ratio - 1| "
                          "from the score. 0 (default) reproduces the old objective. "
@@ -384,7 +390,7 @@ def report(study, args):
 
     if args.objective == "multi":
         second = getattr(args, "multi_second", "violation")
-        label = "|mass-1|" if second == "mass" else "FDR violation"
+        label = {"mass": "|mass-1|", "reliab": "1-hi_pip_reliab"}.get(second, "FDR violation")
         print(f"Pareto front (AP up, {label} down)  [{len(study.best_trials)} points]:")
         for t in sorted(study.best_trials, key=lambda x: -x.values[0]):
             print(f"  AP={t.values[0]:.4f}  obj2={t.values[1]:.4f}  "

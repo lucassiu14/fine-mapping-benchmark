@@ -34,7 +34,7 @@ STORAGE="${STORAGE:-${PROJECT_ROOT}/tuning/${STUDY}.journal}"
 # --- search configuration ----------------------------------------------------
 OBJECTIVE="${OBJECTIVE:-multi}"        # multi | scalar
 PENALTY="${PENALTY:-0.5}"              # scalar mode only
-MULTI_SECOND="${MULTI_SECOND:-violation}"  # multi mode only: violation | mass
+MULTI_SECOND="${MULTI_SECOND:-violation}"  # multi mode only: violation | mass | reliab
 MASS_PENALTY="${MASS_PENALTY:-0}"      # scalar mode only; x |mass_ratio - 1|
 FIX="${FIX:-}"                         # e.g. "hierarchy_M=10.15 lambda_l1=0.1223"
 SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
