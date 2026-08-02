@@ -32,7 +32,7 @@ SIM="${SIM:-tuning/sim_binary_ref500.rds}"
 STORAGE="${STORAGE:-${PROJECT_ROOT}/tuning/${STUDY}.journal}"
 
 # --- search configuration ----------------------------------------------------
-OBJECTIVE="${OBJECTIVE:-multi}"        # multi | scalar
+OBJECTIVE="${OBJECTIVE:-multi}"        # multi | scalar | triple
 PENALTY="${PENALTY:-0.5}"              # scalar mode only
 MULTI_SECOND="${MULTI_SECOND:-violation}"  # multi mode only: violation | mass | reliab
 MASS_PENALTY="${MASS_PENALTY:-0}"      # scalar mode only; x |mass_ratio - 1|

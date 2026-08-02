@@ -109,7 +109,8 @@ def run_one_scenario(args, params, scenario):
             return float("nan")
 
     return {k: num(k) for k in
-            ("ap", "max_fdr_violation_n20", "total_mass_ratio", "hi_pip_reliab", "seconds")}
+            ("ap", "max_fdr_violation_n20", "total_mass_ratio", "hi_pip_reliab",
+             "ece_hi", "seconds")}
 
 
 def suggest_params(trial, args):
@@ -157,7 +158,7 @@ def build_objective(args):
 
     def objective(trial):
         params = suggest_params(trial, args)
-        aps, viols, masses, reliabs = [], [], [], []
+        aps, viols, masses, reliabs, eces = [], [], [], [], []
 
         for s in range(1, n_scen + 1):
             m = run_one_scenario(args, params, s)
@@ -168,6 +169,8 @@ def build_objective(args):
                 masses.append(m["total_mass_ratio"])
             if m["hi_pip_reliab"] == m["hi_pip_reliab"]:
                 reliabs.append(m["hi_pip_reliab"])
+            if m["ece_hi"] == m["ece_hi"]:
+                eces.append(m["ece_hi"])
 
             # Pruning only applies to single-objective studies; Optuna does not
             # support pruners for multi-objective optimisation.
@@ -188,6 +191,7 @@ def build_objective(args):
         mean_viol  = sum(viols) / len(viols) if viols else 1.0
         mean_mass  = sum(masses) / len(masses) if masses else float("nan")
         mean_relb  = sum(reliabs) / len(reliabs) if reliabs else float("nan")
+        mean_ece   = sum(eces) / len(eces) if eces else float("nan")
 
         # Record everything, so any objective can be re-derived from the study
         # later without re-running trials.
@@ -195,6 +199,16 @@ def build_objective(args):
         trial.set_user_attr("mean_fdr_violation_n20", mean_viol)
         trial.set_user_attr("mean_total_mass_ratio", mean_mass)
         trial.set_user_attr("mean_hi_pip_reliab", mean_relb)
+        trial.set_user_attr("mean_ece_hi", mean_ece)
+
+        if args.objective == "triple":
+            # The three quantities that jointly define a usable fine-mapper:
+            # ranking (AP, up), selection safety (FDR violation, down) and
+            # honesty of the reported probabilities (ece_hi, down). NaN scores
+            # as clearly bad so a broken trial is dominated, not unsortable.
+            return (mean_ap,
+                    mean_viol,
+                    mean_ece if mean_ece == mean_ece else 1.0)
 
         if args.objective == "multi":
             # Second objective, always minimised. 'violation' produced a
@@ -231,7 +245,7 @@ def main():
     ap.add_argument("--sim", required=True, help="fixed tuning sim .rds (make_tuning_sim.R)")
     ap.add_argument("--study", required=True, help="study name (one per stratum)")
     ap.add_argument("--storage", required=True, help="journal file path (persists the study)")
-    ap.add_argument("--objective", choices=["multi", "scalar"], default="multi",
+    ap.add_argument("--objective", choices=["multi", "scalar", "triple"], default="multi",
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
@@ -294,7 +308,8 @@ def main():
         print(f"[fix] held out of the search: {fixed}")
 
     storage = make_storage(args.storage)
-    sampler = (optuna.samplers.NSGAIISampler(seed=None) if args.objective == "multi"
+    multi_obj = args.objective in ("multi", "triple")
+    sampler = (optuna.samplers.NSGAIISampler(seed=None) if multi_obj
                else optuna.samplers.TPESampler(n_startup_trials=args.startup_trials))
     pruner = (optuna.pruners.MedianPruner(n_startup_trials=args.startup_trials,
                                           n_warmup_steps=1)
@@ -302,7 +317,9 @@ def main():
 
     kwargs = dict(study_name=args.study, storage=storage,
                   load_if_exists=True, sampler=sampler)
-    if args.objective == "multi":
+    if args.objective == "triple":
+        kwargs["directions"] = ["maximize", "minimize", "minimize"]
+    elif args.objective == "multi":
         kwargs["directions"] = ["maximize", "minimize"]
     else:
         kwargs["direction"] = "maximize"
@@ -376,7 +393,8 @@ def report(study, args):
     for t in ranked[:5]:
         print(f"    AP={_trial_ap(t):.4f}  viol={t.user_attrs.get('mean_fdr_violation_n20', float('nan')):.4f}"
               f"  mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}"
-              f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}  #{t.number}")
+              f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}"
+              f"  ece_hi={t.user_attrs.get('mean_ece_hi', float('nan')):.3f}  #{t.number}")
 
     # Which knobs actually move AP? A parameter whose importance is ~0 is worth
     # FIXING rather than tuning - it spends search budget for no return.
@@ -387,6 +405,17 @@ def report(study, args):
             print(f"    {v:6.3f}  {k}")
     except Exception as e:                       # too few trials, missing sklearn, ...
         print(f"  (param importance unavailable: {e})")
+
+    if args.objective == "triple":
+        front = sorted(study.best_trials, key=lambda x: -x.values[0])
+        print(f"Pareto front (AP up, FDR violation down, ece_hi down)  "
+              f"[{len(front)} points]:")
+        for t in front:
+            print(f"  AP={t.values[0]:.4f}  viol={t.values[1]:.4f}  ece_hi={t.values[2]:.4f}"
+                  f"  mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}"
+                  f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}"
+                  f"  #{t.number}  {t.params}")
+        return
 
     if args.objective == "multi":
         second = getattr(args, "multi_second", "violation")

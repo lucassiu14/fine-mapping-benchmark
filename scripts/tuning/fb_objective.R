@@ -136,6 +136,7 @@ if (!is.null(fpc) && nrow(fpc) > 0) {
 
 total_mass_ratio <- NA_real_
 hi_pip_reliab    <- NA_real_
+ece_hi           <- NA_real_
 pc <- g$pip_calibration
 if (!is.null(pc) && nrow(pc) > 0) {
   sp <- pc$n * pc$mean_pip                       # sum of PIPs in the bin
@@ -143,16 +144,34 @@ if (!is.null(pc) && nrow(pc) > 0) {
   total_mass_ratio <- sum(sp, na.rm = TRUE) / denom
   top <- nrow(pc)                                # highest PIP bin ([0.9, 1.0])
   if (isTRUE(pc$n[top] > 0)) hi_pip_reliab <- pc$n_causal[top] / pc$n[top]
+
+  # ece_hi: expected calibration error over the INFORMATIVE range (PIP >= 0.1).
+  # Formula copied from scripts/hpc/collect_results.R so the tuning objective
+  # and the benchmark report the same number. Plain ECE is n-weighted and ~94%
+  # of variant-observations sit in bin 1, so it mostly measures how well
+  # near-zero PIPs are calibrated and can rank a badly-calibrated method well.
+  keep <- pc$n > 0
+  if (any(keep)) {
+    mp  <- sp[keep] / pc$n[keep]                 # mean predicted PIP per bin
+    fc  <- pc$n_causal[keep] / pc$n[keep]        # observed frequency per bin
+    idx <- which(keep)
+    hi  <- idx > 1L                              # bin 1 is [0, 0.1)
+    if (any(hi) && sum(pc$n[idx][hi]) > 0) {
+      wh <- pc$n[idx][hi] / sum(pc$n[idx][hi])
+      ece_hi <- sum(wh * abs(mp[hi] - fc[hi]))
+    }
+  }
 }
 
 n_failed <- res[["functional_beatrice"]]$n_failed %||% NA_integer_
 elapsed  <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
 cat(sprintf(
-  "status=ok\nap=%.6f\nmax_fdr_violation_n20=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nn_failed=%s\nseconds=%.1f\n",
+  "status=ok\nap=%.6f\nmax_fdr_violation_n20=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
   ap,
   ifelse(is.na(max_fdr_violation_n20), "NA", sprintf("%.6f", max_fdr_violation_n20)),
   ifelse(is.na(total_mass_ratio),      "NA", sprintf("%.6f", total_mass_ratio)),
   ifelse(is.na(hi_pip_reliab),         "NA", sprintf("%.6f", hi_pip_reliab)),
+  ifelse(is.na(ece_hi),                "NA", sprintf("%.6f", ece_hi)),
   ifelse(is.na(n_failed),              "NA", as.character(n_failed)),
   elapsed))
