@@ -91,6 +91,8 @@ def run_one_scenario(args, params, scenario):
            "--beatrice_dir", args.beatrice_dir,
            "--python", args.python,
            "--max_iter", str(args.max_iter)]
+    if args.rotate_regions:
+        cmd += ["--rotate_regions", "TRUE"]
     for k, v in params.items():
         cmd += ["--" + k, str(v)]
 
@@ -297,6 +299,11 @@ def main():
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
+    ap.add_argument("--rotate-regions", action="store_true",
+                    help="score each scenario on ONE region, rotating which region "
+                         "(and so which region size) across scenarios. Cost is "
+                         "quadratic in p, so this is what makes a grid spanning "
+                         "p=2000 affordable.")
     ap.add_argument("--abort-quantile", type=float, default=0.0,
                     help="abort a trial whose running AP falls below this quantile "
                          "of completed trials at the same scenario index. 0 (default) "

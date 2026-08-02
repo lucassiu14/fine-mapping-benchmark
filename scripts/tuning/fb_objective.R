@@ -80,7 +80,22 @@ if (SCENARIO < 1L || SCENARIO > n_sc) {
 mini <- sim
 mini$scenarios <- sim$scenarios[SCENARIO]
 mini$scenarios[[1]]$scenario_id <- 1L
-if (N_REGIONS > 0L && N_REGIONS < length(mini$genotypes)) {
+ROTATE <- identical(toupper(gets("rotate_regions", "FALSE")), "TRUE")
+if (ROTATE) {
+  # One region per scenario, with the region (and hence the region SIZE) rotating
+  # across scenarios. Cost is quadratic in p, so scoring every scenario on every
+  # region size is unaffordable once the sim spans p = 2000; rotating keeps all
+  # sizes represented across the grid at a third of the cost.
+  #
+  # No aliasing: run_simulation builds scenarios with expand.grid(S, phi, iter),
+  # so S cycles fastest with period length(S) = 5, while the rotation has period
+  # length(genotypes) = 3. gcd(5, 3) = 1, so region size spreads evenly over both
+  # the S and the phi axis rather than pairing with either.
+  n_reg <- length(mini$genotypes)
+  keep  <- ((SCENARIO - 1L) %% n_reg) + 1L
+  mini$genotypes <- mini$genotypes[keep]
+  mini$scenarios[[1]]$regions <- mini$scenarios[[1]]$regions[keep]
+} else if (N_REGIONS > 0L && N_REGIONS < length(mini$genotypes)) {
   keep <- seq_len(N_REGIONS)
   mini$genotypes <- mini$genotypes[keep]
   mini$scenarios[[1]]$regions <- mini$scenarios[[1]]$regions[keep]

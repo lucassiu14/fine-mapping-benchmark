@@ -38,6 +38,7 @@ MULTI_SECOND="${MULTI_SECOND:-violation}"  # multi mode only: violation | mass |
 MASS_PENALTY="${MASS_PENALTY:-0}"      # scalar mode only; x |mass_ratio - 1|
 FIX="${FIX:-}"                         # e.g. "hierarchy_M=10.15 lambda_l1=0.1223"
 ABORT_QUANTILE="${ABORT_QUANTILE:-0}"  # 0 = off; 0.25 aborts the worst quarter early
+ROTATE_REGIONS="${ROTATE_REGIONS:-0}"  # 1 = one region per scenario, size rotates
 SCENARIOS="${SCENARIOS:-4}"            # scenarios per trial
 REGIONS="${REGIONS:-4}"                # regions per scenario
 MAX_ITER="${MAX_ITER:-2000}"           # FB max_iter (fixed, never tuned)
@@ -148,7 +149,11 @@ fi
 
 echo "Study:     $STUDY   (objective=$OBJECTIVE)"
 echo "Grid:      S={${SIM_S}}  phi={${SIM_PHI}}  n=${SIM_N}  p={${SIM_REGION_SIZES}}"
-echo "           ${N_CELLS} scenarios x ${REGIONS} regions = $(( N_CELLS * REGIONS )) fits per trial"
+if [[ "$ROTATE_REGIONS" == "1" ]]; then
+  echo "           ${N_CELLS} scenarios x 1 rotating region = ${N_CELLS} fits per trial"
+else
+  echo "           ${N_CELLS} scenarios x ${REGIONS} regions = $(( N_CELLS * REGIONS )) fits per trial"
+fi
 echo "Sim:       $SIM"
 echo "Storage:   $STORAGE"
 echo "Workers:   $WORKERS x ${PBS_WALLTIME}  (worker timeout ${TIMEOUT}s)"
@@ -180,6 +185,7 @@ ${PY} scripts/tuning/optuna_fb.py \
     --multi-second "${MULTI_SECOND}" \
     --mass-penalty ${MASS_PENALTY} \
     --abort-quantile ${ABORT_QUANTILE} \
+    ${ROTATE_REGIONS:+$([[ "$ROTATE_REGIONS" == "1" ]] && echo --rotate-regions)} \
     ${FIX:+--fix ${FIX}} \
     --scenarios ${SCENARIOS} \
     --regions ${REGIONS} \
