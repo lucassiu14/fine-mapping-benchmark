@@ -425,6 +425,59 @@ def main():
     report(study, args)
 
 
+
+def _rank(xs):
+    order = sorted(range(len(xs)), key=lambda i: xs[i])
+    r = [0.0] * len(xs)
+    for pos, i in enumerate(order):
+        r[i] = float(pos)
+    return r
+
+
+def _corr(a, b):
+    n = len(a)
+    if n < 3:
+        return float("nan")
+    ma, mb = sum(a) / n, sum(b) / n
+    va = sum((x - ma) ** 2 for x in a) ** 0.5
+    vb = sum((y - mb) ** 2 for y in b) ** 0.5
+    if va == 0 or vb == 0:
+        return float("nan")
+    return sum((x - ma) * (y - mb) for x, y in zip(a, b)) / (va * vb)
+
+
+def _compute_confound(complete):
+    """Rank correlation of each hyperparameter with trial WALL-CLOCK time.
+
+    max_iter is excluded from the search space because it trades compute for
+    convergence: tuning it lets the search buy objective value with runtime and
+    makes trials incomparable. Any parameter that strongly predicts runtime is
+    open to the same objection, so it should be visible rather than inferred.
+    """
+    rows = []
+    durs, names = [], set()
+    recs = []
+    for t in complete:
+        if t.datetime_start is None or t.datetime_complete is None:
+            continue
+        d = (t.datetime_complete - t.datetime_start).total_seconds()
+        recs.append((t.params, d, _trial_ap(t)))
+        names.update(t.params.keys())
+    if len(recs) < 10:
+        return rows
+    for nm in sorted(names):
+        pv, dv, av = [], [], []
+        for params, d, ap in recs:
+            if nm in params and isinstance(params[nm], (int, float)):
+                pv.append(float(params[nm])); dv.append(d); av.append(ap)
+        if len(pv) < 10:
+            continue
+        rows.append((nm,
+                     _corr(_rank(pv), _rank(dv)),
+                     _corr(_rank(pv), _rank(av))))
+    return rows
+
+
 def _trial_ap(t):
     """Mean AP of a completed trial, however the study was scored.
 
@@ -483,6 +536,13 @@ def report(study, args):
               f"  mass={t.user_attrs.get('mean_total_mass_ratio', float('nan')):.2f}"
               f"  reliab={t.user_attrs.get('mean_hi_pip_reliab', float('nan')):.2f}"
               f"  ece_hi={t.user_attrs.get('mean_ece_hi', float('nan')):.3f}  #{t.number}")
+
+    conf = _compute_confound(complete)
+    if conf:
+        print("  rank correlation of each parameter with (runtime, AP):")
+        for nm, cd, ca in sorted(conf, key=lambda r: -abs(r[1])):
+            flag = "   <- also predicts RUNTIME: compute confound?" if abs(cd) > 0.5 else ""
+            print(f"    {nm:<22} runtime {cd:+.2f}   AP {ca:+.2f}{flag}")
 
     # Which knobs actually move AP? A parameter whose importance is ~0 is worth
     # FIXING rather than tuning - it spends search budget for no return.
