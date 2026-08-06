@@ -56,11 +56,26 @@ GENETIC_MAP_DIR <- "data/genetic_maps"
 # Methods. Full 15-method benchmark set: 9 Tier-1 (R-only) + 6 Tier-3
 # (external binaries via FINEMAP/PAINTOR, and Python via a venv).
 # Any missing binary degrades to NA fits without breaking the array.
-METHODS <- c("susie", "susie_inf", "abf", "carma",
-             "marginal_z", "polyfun_oracle", "polyfun_est",
-             "polyfun_ldsc", "sbayesrc",
-             "finemap", "paintor", "beatrice",
-             "functional_beatrice", "sparsepro", "funmap")
+# All 19 registered methods except caviar, dropped on measured cost
+# (enumeration is combinatorial in region size; already too slow at p=150, and
+# this grid runs to p=2000).
+#
+# fb_pooled, fb_xregion, finimom and finemap_inf were ABSENT from this list
+# before Iteration 004. fb_pooled and fb_xregion are the cross-region
+# joint-prior models - the project's headline contribution - and had to be
+# requested through FMB_METHODS to run at all, which is exactly the kind of
+# default that silently drops the thing being tested.
+METHODS <- c(
+  # summary-statistic baselines
+  "susie", "susie_inf", "finemap", "finemap_inf", "abf", "marginal_z",
+  # sparse / robust
+  "carma", "finimom", "sparsepro",
+  # annotation-informed
+  "funmap", "paintor", "polyfun_oracle", "polyfun_est", "polyfun_ldsc",
+  "sbayesrc",
+  # BEATRICE family: locus-only, then the two cross-region joint-prior models
+  "beatrice", "functional_beatrice", "fb_pooled", "fb_xregion"
+)
 
 # Supplemental mode: FMB_METHODS="beatrice,sparsepro" re-runs ONLY those
 # methods and writes results_supp.rds / evaluation_supp.rds alongside the

@@ -40,11 +40,15 @@ GSL_MODULE="${GSL_MODULE:-GSL/2.8-GCC-14.3.0}"
 PYTHON_MODULE="${PYTHON_MODULE:-Python/3.12.3-GCCcore-13.3.0}"
 PY_VENV_ACTIVATE="${PY_VENV_ACTIVATE:-$HOME/tools/fmpy-venv/bin/activate}"
 
-# Generate grid if missing
-if [[ ! -f "$PARAMS_CSV" ]]; then
-  echo "Generating params_grid.csv ..."
-  "$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV"
-fi
+# ALWAYS regenerate the grid.
+#
+# This used to be "generate if missing". params_grid.csv is untracked but
+# persists on disk between iterations, so after the Iteration 004 grid revision
+# the stale Iteration 003 file (135 rows, n=1000, regions 100-1000, three LD
+# levels) was silently reused and a whole array was submitted against the wrong
+# simulation design. The generator is deterministic and takes under a second.
+echo "Regenerating params_grid.csv from generate_params_grid.R ..."
+"$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV" >/dev/null
 # The array is subdivided by scenario, with all regions kept together in each
 # task and (by default) several scenarios batched per task. SCENARIOS_PER_ROW =
 # |S| * |phi| * n_iter; the chunk size collapses that to TASKS_PER_ROW tasks.
@@ -78,6 +82,21 @@ if (( SCENARIOS_PER_TASK > SCENARIOS_PER_ROW )); then SCENARIOS_PER_TASK=$SCENAR
 export FMB_SCENARIOS_PER_TASK="${SCENARIOS_PER_TASK}"
 TASKS_PER_ROW=$(( (SCENARIOS_PER_ROW + SCENARIOS_PER_TASK - 1) / SCENARIOS_PER_TASK ))
 N_JOBS=$(( N_ROWS * TASKS_PER_ROW ))
+# Echo the simulation design that will actually run. A grid mismatch is far
+# cheaper to catch here than after 72h of wall-clock. Done in R rather than
+# awk because the CSV is quoted and column lookup by name is trivial there.
+"$RSCRIPT" -e '
+  g <- read.csv(commandArgs(TRUE)[1], stringsAsFactors = FALSE)
+  u <- function(x) paste(sort(unique(x)), collapse = ", ")
+  cat(sprintf("DESIGN: n=%s   regions={%s}\n", u(g$n),
+              gsub("[|]", ",", g$p_values[1])))
+  cat(sprintf("        S={%s}   phi={%s}\n",
+              gsub("[|]", ",", g$S_values[1]), gsub("[|]", ",", g$phi_values[1])))
+  cat(sprintf("        LD: %s\n",
+              u(ifelse(is.na(g$n_ref), "in-sample", paste0("ref", g$n_ref)))))
+  cat(sprintf("        p_causal: %s   annotations: %s\n",
+              u(g$p_causal[!is.na(g$p_causal)]), u(g$annotation_type)))
+' "$PARAMS_CSV"
 echo "Grid: ${N_ROWS} rows x ${SCENARIOS_PER_ROW} scenarios; chunk=${SCENARIOS_PER_TASK} scenario(s)/task"
 echo "      -> ${TASKS_PER_ROW} tasks/row x ${N_ROWS} rows = ${N_JOBS} array tasks"
 
