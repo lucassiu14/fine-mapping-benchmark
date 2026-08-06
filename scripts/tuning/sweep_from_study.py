@@ -45,6 +45,14 @@ def main():
     ap.add_argument("--param", default="sparse_concrete")
     ap.add_argument("--edges", default="1,5,15,40,60,100,160,240,300",
                     help="bin edges, comma separated")
+    ap.add_argument("--min-ap", type=float, default=None,
+                    help="also list the best-CALIBRATED trials (mass ratio closest "
+                         "to 1.0) subject to mean_ap >= this floor. Mass ratio is "
+                         "not one of the objectives, so well-calibrated trials can "
+                         "be dominated on the recorded front while still being the "
+                         "configuration you want.")
+    ap.add_argument("--top", type=int, default=12,
+                    help="how many to list for --min-ap")
     args = ap.parse_args()
 
     storage = make_storage(args.storage)
@@ -101,6 +109,27 @@ def main():
               f"{eces_s[len(eces_s)//2]:>9.4f} "
               f"{(mass_at_best if mass_at_best is not None else float('nan')):>12.2f} "
               f"{closest:>13.2f}")
+
+    if args.min_ap is not None:
+        elig = [t for t in complete
+                if (attr(t, "mean_ap") or -1) >= args.min_ap
+                and attr(t, "mean_total_mass_ratio") is not None]
+        print(f"\n=== best-calibrated trials with AP >= {args.min_ap} "
+              f"({len(elig)} eligible of {len(complete)}) ===")
+        if not elig:
+            print("  none - lower --min-ap")
+        else:
+            print(f"{'AP':>8} {'mass':>7} {'ece_hi':>8} {'reliab':>7} "
+                  f"{'fdr@95':>8} {'trial':>7}  params")
+            elig.sort(key=lambda t: abs(attr(t, "mean_total_mass_ratio") - 1.0))
+            for t in elig[:args.top]:
+                f95 = attr(t, "mean_fdr_at_95")
+                print(f"{attr(t,'mean_ap'):>8.4f} "
+                      f"{attr(t,'mean_total_mass_ratio'):>7.2f} "
+                      f"{(attr(t,'mean_ece_hi') or float('nan')):>8.4f} "
+                      f"{(attr(t,'mean_hi_pip_reliab') or float('nan')):>7.2f} "
+                      f"{(f95 if f95 is not None else float('nan')):>8.4f} "
+                      f"{t.number:>7}  {t.params}")
 
     print("\nRead the last two columns together with bestAP: if a low-K_C bin")
     print("reaches a mass ratio near 1.0 while a high-K_C bin cannot, then K_C is")
