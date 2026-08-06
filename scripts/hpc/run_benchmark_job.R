@@ -107,19 +107,40 @@ METHOD_ARGS <- list(
   paintor             = list(paintor_path = file.path(TOOLS_ROOT,
                                 "PAINTOR_V3.0/PAINTOR"),
                              max_causal = 2, mcmc = FALSE, coverage = 0.95),
-  # BEATRICE / FB: max_iter = 1500 balances convergence against per-task
-  # wall-clock. 500 iters is not enough for the variational objective to
-  # stabilise; 1500 matches BEATRICE's paper experiments. A scenario runs
-  # 20 regions x 2 BEATRICE-family fits; these dominate the per-task time.
+  # BEATRICE / FB, Iteration 004.
+  #
+  # max_iter RAISED 1500 -> 2000. The Optuna study fb_insample_v2 ran every trial
+  # at 2000, so the hyperparameters adopted below are optimal FOR 2000; running
+  # them at 1500 would judge the configuration under a different model. Both
+  # BEATRICE and FB use 2000 so the family comparison is at equal compute.
+  #
+  # functional_beatrice values are study fb_insample_v2 trial #401, chosen from
+  # 962 completed trials as the highest-AP configuration among those reaching a
+  # defensible mass ratio. On the tuning simulation it gave:
+  #   AP 0.7702 | mass ratio 1.73 | hi-PIP reliability 1.00 | FDR@0.95 0.0000
+  #   ece_hi 0.244
+  # against the Pareto front's best-AP point (AP 0.8109) which carried mass
+  # ratio 8.62 and reliability 0.90. We take the 5% AP loss for a 5x reduction
+  # in posterior-mass inflation and zero incorrect high-PIP calls.
+  # hierarchy_M and lambda_l1 were HELD FIXED during that search (v1 fANOVA put
+  # them at 0.002 and 0.001 of AP variance); their values are carried through.
+  #
+  # sparse_concrete is a LIKELIHOOD TRUNCATION, not a prior: it is the working
+  # set retained per Monte Carlo configuration, so it trades bias for cost. The
+  # study's sweep showed AP saturating by ~40 (0.7941 best at [40,60) vs 0.8109
+  # at the [240,300) ceiling, and only +0.012 on the median), so 51 is on the
+  # flat part of that curve. Both methods use the same value.
   beatrice            = list(beatrice_dir = FB_DIR,
-                             python = PY_VENV, max_iter = 1500, n_caus = 5,
+                             python = PY_VENV, max_iter = 2000, n_caus = 5,
                              sigma_sq = 0.05, gamma_coverage = 0.95,
-                             sparse_concrete = 50),
+                             sparse_concrete = 51),
   functional_beatrice = list(beatrice_dir = FB_DIR,
-                             python = PY_VENV, max_iter = 1500, n_caus = 5,
-                             sigma_sq = 0.05, gamma_coverage = 0.95,
-                             sparse_concrete = 50,
-                             prior_regularisation = 1.0),
+                             python = PY_VENV, max_iter = 2000, n_caus = 10,
+                             sigma_sq = 0.0899, gamma_coverage = 0.95,
+                             sparse_concrete = 51,
+                             prior_regularisation = 0.1255,
+                             lambda_l1 = 0.1223,
+                             hierarchy_M = 10.15),
   sparsepro           = list(sparsepro_dir = file.path(TOOLS_ROOT, "SparsePro"),
                              python = PY_VENV, cthres = 0.95),
   funmap              = list(python = PY_VENV, max_iter = 100, tol = 5e-5)

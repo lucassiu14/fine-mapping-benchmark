@@ -27,9 +27,20 @@
 # Row count:
 #   model x p_causal  : sparse (1) + sparse_inf x 4 p_causal (4)   =  5
 #   annotation regime : none (1) + binary x 4 E (4) + cont x 4 E (4) = 9
-#   n_ref             : {in-sample, 500, 200}                       = 3
-#   -> 5 * 9 * 3 = 135 rows
-# Scenarios: 135 * (5 S * 5 phi * 10 iter = 250) = 33,750
+#   n_ref             : {in-sample}                                 = 1
+#   -> 5 * 9 * 1 = 45 rows
+# Scenarios: 45 * (5 S * 5 phi * 10 iter = 250) = 11,250
+#
+# ITERATION 004 GRID REVISION (user-specified 2026-08-06). Iterations 001-003
+# used, and this file previously encoded:
+#   P_VECTOR            2 each of {100, 200, 400, 500, 1000}
+#   n                   1000
+#   phi                 {0.0075, 0.05, 0.1, 0.2, 0.4}
+#   P_CAUSAL_SPARSE_INF {0.5, 0.7, 0.9, 1.0}
+#   N_REF_LEVELS        {in-sample, 500, 200}
+# Reasons for each change are given at the constant concerned. Iteration 004
+# results are NOT comparable to 001-003: n, region sizes, the phi grid and the
+# LD regime all differ.
 #
 # Usage:
 #   Rscript scripts/hpc/generate_params_grid.R [output_path]
@@ -45,11 +56,18 @@ if (is.na(out_path) || !nzchar(out_path)) {
 # Fixed simulation constants
 # -----------------------------------------------------------------------------
 
-# Per-region p vector: 2 regions per size class {100, 200, 400, 500, 1000},
+# Per-region p vector: 2 regions per size class {500, 750, 1000, 1500, 2000},
 # length 10 total. Region length is therefore a within-sim axis with 5 levels
 # and 2 regions each. NOT swept between rows.
-P_VECTOR <- c(rep(100L, 2L), rep(200L, 2L), rep(400L, 2L),
-              rep(500L, 2L), rep(1000L, 2L))
+#
+# Raised from {100..1000} for Iteration 004. The old top class put p = 1000
+# against n = 1000, where the in-sample LD matrix is rank deficient - a regime
+# the literature avoids (BEATRICE n=5000/m=1000; CARMA n=10000/1500-4000
+# variants). With n = 5000 below, p/n now peaks at 0.4.
+# Cost note: per-scenario cost is driven by sum(p^2), which rises from
+# 2.92e6 to 1.61e7, i.e. 5.5x per scenario.
+P_VECTOR <- c(rep(500L, 2L), rep(750L, 2L), rep(1000L, 2L),
+              rep(1500L, 2L), rep(2000L, 2L))
 
 N_ANNOTATIONS <- 10L
 
@@ -67,21 +85,37 @@ ENRICHMENT_NONE <- rep(1, N_ANNOTATIONS)
 
 # Within-job sweep: run_simulation() expands the full grid internally when
 # handed vector S / phi values. p_causal is a scalar per task.
+# phi: 0.0075 dropped - in Iteration 003 it produced almost no high-PIP calls at
+# all (6 across the whole in-sample binary-e10.8 stratum), so it carried no
+# information about calibration. 0.6 added to reach the upper end of the range
+# BEATRICE's own paper uses (omega^2 = 0.1-0.8).
 WITHIN_JOB <- list(
   n_regions = length(P_VECTOR),     # 10
-  n         = 1000L,
+  n         = 5000L,                # was 1000; see P_VECTOR note on p/n
   n_iter    = 10L,
   S         = c(1L, 2L, 3L, 5L, 10L),
-  phi       = c(0.0075, 0.05, 0.1, 0.2, 0.4)
+  phi       = c(0.05, 0.1, 0.2, 0.4, 0.6)
 )
 
-# p_causal only applies to the sparse_inf model.
-P_CAUSAL_SPARSE_INF <- c(0.5, 0.7, 0.9, 1.0)
+# p_causal only applies to the sparse_inf model: it is the proportion of genetic
+# variance carried by the sparse component, so the infinitesimal component gets
+# (1 - p_causal) * phi (R/simulate_phenotypes.R:744-752).
+#
+# 1.0 is DELIBERATELY EXCLUDED. At p_causal = 1 the infinitesimal term is scaled
+# by sqrt(0) and vanishes, making it the sparse model exactly - it is covered by
+# the separate model = "sparse" arm and including it here would duplicate that
+# cell. The range is extended downward instead, so the axis now spans mostly
+# infinitesimal (0.2) to mostly sparse (0.8).
+P_CAUSAL_SPARSE_INF <- c(0.2, 0.4, 0.6, 0.8)
 
 # n_ref: LD reference-panel size. NA = in-sample LD (methods get cor(X) of the
 # GWAS sample itself); 500 / 200 = independent panel of that size, so methods
 # get cor(X_ref) -- a noisier LD estimate. Smaller panel = more noise.
-N_REF_LEVELS <- c(NA_integer_, 500L, 200L)
+# Iteration 004 is IN-SAMPLE ONLY. Iteration 003 found the in-sample/reference
+# split to be the factor separating methods most, so dropping it is a deliberate
+# narrowing of scope, not an oversight: Iteration 004 can support no claim about
+# reference-panel LD, and the paper's claims must be stated as in-sample.
+N_REF_LEVELS <- c(NA_integer_)
 
 # Annotation regimes: (type, enrichment fold). correlation is 0 throughout;
 # none carries NA fold / NA correlation.
