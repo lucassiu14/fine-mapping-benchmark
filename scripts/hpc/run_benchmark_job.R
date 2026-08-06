@@ -130,9 +130,19 @@ METHOD_ARGS <- list(
   # study's sweep showed AP saturating by ~40 (0.7941 best at [40,60) vs 0.8109
   # at the [240,300) ceiling, and only +0.012 on the median), so 51 is on the
   # flat part of that curve. Both methods use the same value.
+  # BEATRICE takes the SAME n_caus, sigma_sq, sparse_concrete and max_iter as FB.
+  # The two share a likelihood, a variational family and the meaning of these
+  # parameters, and differ only in the prior: BEATRICE fixes p0 = 1/p uniform,
+  # FB learns p0 = G(v; psi) from annotations. Holding everything else equal
+  # makes any FB-over-BEATRICE gap attributable to the annotation prior rather
+  # than to one arm being tuned and the other not.
+  # Caveat to state in the paper: these values were selected against FB's
+  # objective, so they may be suboptimal for BEATRICE and could understate it.
+  # The alternative - BEATRICE at its published defaults - confounds the prior
+  # with the tuning, which is the worse of the two problems for an ablation.
   beatrice            = list(beatrice_dir = FB_DIR,
-                             python = PY_VENV, max_iter = 2000, n_caus = 5,
-                             sigma_sq = 0.05, gamma_coverage = 0.95,
+                             python = PY_VENV, max_iter = 2000, n_caus = 10,
+                             sigma_sq = 0.0899, gamma_coverage = 0.95,
                              sparse_concrete = 51),
   functional_beatrice = list(beatrice_dir = FB_DIR,
                              python = PY_VENV, max_iter = 2000, n_caus = 10,
