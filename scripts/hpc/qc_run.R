@@ -152,10 +152,20 @@ for (f in pick) {
       skipped[[m]] <- (skipped[[m]] %||% 0L) + 1L
       next
     }
-    cur <- acc[[m]] %||% c(scen = 0, fits = 0, failed = 0)
-    acc[[m]] <- c(scen   = cur[["scen"]]   + 1,
-                  fits   = cur[["fits"]]   + (v$n_total  %||% 0L),
-                  failed = cur[["failed"]] + (v$n_failed %||% 0L))
+    cur <- acc[[m]] %||% c(scen = 0, fits = 0, failed = 0,
+                           fits_an = 0, failed_an = 0)
+    # Methods that REQUIRE annotations fail every fit on the "none" arm by
+    # construction - funmap was 100% NA there across all of Iteration 003 while
+    # 0% NA on binary and continuous. That is correct behaviour, not a defect,
+    # and since results are never pooled across annotation type it costs the
+    # analysis nothing. Track the annotated-only rate separately so this does
+    # not raise a false alarm on every run.
+    is_none <- grepl("_anNone_", f, fixed = TRUE)
+    acc[[m]] <- c(scen      = cur[["scen"]]      + 1,
+                  fits      = cur[["fits"]]      + (v$n_total  %||% 0L),
+                  failed    = cur[["failed"]]    + (v$n_failed %||% 0L),
+                  fits_an   = cur[["fits_an"]]   + if (is_none) 0L else (v$n_total  %||% 0L),
+                  failed_an = cur[["failed_an"]] + if (is_none) 0L else (v$n_failed %||% 0L))
   }
 }
 if (!is.null(acc[["__unreadable__"]])) {
@@ -175,17 +185,21 @@ tab <- do.call(rbind, lapply(meths, function(m) {
   data.frame(method = m, scenarios = a[["scen"]], fits = a[["fits"]],
              failed = a[["failed"]],
              pct_failed = if (a[["fits"]] > 0) 100 * a[["failed"]] / a[["fits"]] else NA_real_,
+             pct_failed_annot = if (a[["fits_an"]] > 0)
+               100 * a[["failed_an"]] / a[["fits_an"]] else NA_real_,
              stringsAsFactors = FALSE)
 }))
 tab <- tab[order(-tab$pct_failed, tab$method), ]
 
 cat("\n")
-cat(sprintf("%-22s %10s %10s %8s %9s\n",
-            "method", "scenarios", "fits", "failed", "%failed"))
-cat(strrep("-", 63), "\n")
+cat(sprintf("%-22s %10s %10s %8s %9s %16s\n",
+            "method", "scenarios", "fits", "failed", "%failed", "%failed(annot)"))
+cat(strrep("-", 80), "\n")
 for (i in seq_len(nrow(tab))) with(tab[i, ],
-  cat(sprintf("%-22s %10d %10d %8d %8.1f%%\n",
-              method, scenarios, fits, failed, pct_failed)))
+  cat(sprintf("%-22s %10d %10d %8d %8.1f%% %15.1f%%\n",
+              method, scenarios, fits, failed, pct_failed, pct_failed_annot)))
+cat("\n%failed(annot) excludes the anNone arm, where annotation-requiring\n")
+cat("methods fail by construction (funmap: 100% NA on none, 0% elsewhere).\n")
 
 # --- verdict ---------------------------------------------------------------
 cat("\n--- verdict ---------------------------------------------------\n")
@@ -200,13 +214,14 @@ if (length(missing)) {
   cat("  These produced no entry at all - not registered, or the wrapper\n")
   cat("  errored before returning. Investigate before trusting the run.\n")
 }
-dead <- tab$method[!is.na(tab$pct_failed) & tab$pct_failed >= 99.9]
+dead <- tab$method[!is.na(tab$pct_failed_annot) & tab$pct_failed_annot >= 99.9]
 if (length(dead)) {
   cat(sprintf("100%% FAILED (%d): %s\n", length(dead), paste(dead, collapse = ", ")))
   cat("  This is the CARMA failure mode: registered, running, returning\n")
   cat("  nothing usable. Fix the wrapper and re-run with FMB_METHODS.\n")
 }
-degraded <- tab$method[!is.na(tab$pct_failed) & tab$pct_failed > 5 & tab$pct_failed < 99.9]
+degraded <- tab$method[!is.na(tab$pct_failed_annot) &
+                       tab$pct_failed_annot > 5 & tab$pct_failed_annot < 99.9]
 if (length(degraded)) {
   cat(sprintf("PARTIAL FAILURES >5%% (%d): %s\n", length(degraded),
               paste(degraded, collapse = ", ")))
@@ -214,6 +229,8 @@ if (length(degraded)) {
   cat("  the largest regions (p = 2000) before treating the numbers as valid.\n")
 }
 if (!length(missing) && !length(dead) && !length(degraded)) {
-  cat("All expected methods present, none above a 5% failure rate.\n")
+  cat("All expected methods present, none above a 5% failure rate on the\n")
+  cat("annotated arms. Any failures are confined to anNone, where methods that\n")
+  cat("require annotations cannot run.\n")
 }
 cat(sprintf("\nCompletion: %d scenarios evaluated.\n", length(eval_files)))
