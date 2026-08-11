@@ -37,6 +37,12 @@ sample_n <- NA_integer_
 if ("--sample" %in% args) {
   sample_n <- suppressWarnings(as.integer(args[which(args == "--sample") + 1L]))
 }
+# --method NAME: instead of the summary, dig into ONE method's failures and
+# report them by region size with the distinct error messages. A failure rate
+# that concentrates at the largest regions biases that method's numbers rather
+# than merely thinning them, so the breakdown matters more than the rate.
+focus <- NA_character_
+if ("--method" %in% args) focus <- args[which(args == "--method") + 1L]
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 # --- 1. completion ----------------------------------------------------------
@@ -90,6 +96,41 @@ if (!is.na(sample_n) && sample_n > 0 && sample_n < length(res_files)) {
               length(pick), length(res_files)))
 } else {
   cat(sprintf("\nper-method check across all %d scenarios\n", length(pick)))
+}
+
+if (!is.na(focus)) {
+  cat(sprintf("\n=== failure breakdown for '%s' ===\n", focus))
+  by_size <- list(); msgs <- list(); tot_by_size <- list()
+  for (f in pick) {
+    r <- tryCatch(readRDS(f), error = function(e) NULL)
+    if (is.null(r) || is.null(r[[focus]]) || is.null(r[[focus]]$results)) next
+    for (fit in r[[focus]]$results) {
+      psz <- as.character(length(fit$pip %||% numeric(0)))
+      tot_by_size[[psz]] <- (tot_by_size[[psz]] %||% 0L) + 1L
+      if (!is.null(fit$error)) {
+        by_size[[psz]] <- (by_size[[psz]] %||% 0L) + 1L
+        key <- substr(gsub("[\r\n]+", " ", fit$error), 1, 160)
+        msgs[[key]] <- (msgs[[key]] %||% 0L) + 1L
+      }
+    }
+  }
+  if (!length(tot_by_size)) {
+    cat("  no fits found for that method in the sampled scenarios\n")
+  } else {
+    szs <- sort(as.integer(names(tot_by_size)))
+    cat(sprintf("%10s %10s %10s %9s\n", "region p", "fits", "failed", "%failed"))
+    for (z in szs) {
+      k <- as.character(z)
+      tt <- tot_by_size[[k]]; ff <- by_size[[k]] %||% 0L
+      cat(sprintf("%10d %10d %10d %8.1f%%\n", z, tt, ff, 100 * ff / tt))
+    }
+    cat("\ndistinct error messages (most frequent first):\n")
+    o <- order(-unlist(msgs))
+    for (i in head(o, 8)) {
+      cat(sprintf("  [%d x] %s\n", unlist(msgs)[i], names(msgs)[i]))
+    }
+  }
+  quit(save = "no", status = 0)
 }
 
 acc     <- new.env(parent = emptyenv())
