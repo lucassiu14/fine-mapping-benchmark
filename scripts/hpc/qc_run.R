@@ -92,8 +92,9 @@ if (!is.na(sample_n) && sample_n > 0 && sample_n < length(res_files)) {
   cat(sprintf("\nper-method check across all %d scenarios\n", length(pick)))
 }
 
-acc <- new.env(parent = emptyenv())
-n_read <- 0L
+acc     <- new.env(parent = emptyenv())
+skipped <- new.env(parent = emptyenv())
+n_read  <- 0L
 for (f in pick) {
   r <- tryCatch(readRDS(f), error = function(e) NULL)
   if (is.null(r)) {
@@ -103,6 +104,13 @@ for (f in pick) {
   n_read <- n_read + 1L
   for (m in names(r)) {
     v <- r[[m]]
+    # results.rds can carry top-level entries that are not per-method lists
+    # (metadata, timings). Indexing those with $ errors on atomic vectors, so
+    # only count entries that actually look like a method result.
+    if (!is.list(v) || (is.null(v$n_total) && is.null(v$n_failed))) {
+      skipped[[m]] <- (skipped[[m]] %||% 0L) + 1L
+      next
+    }
     cur <- acc[[m]] %||% c(scen = 0, fits = 0, failed = 0)
     acc[[m]] <- c(scen   = cur[["scen"]]   + 1,
                   fits   = cur[["fits"]]   + (v$n_total  %||% 0L),
@@ -112,6 +120,12 @@ for (f in pick) {
 if (!is.null(acc[["__unreadable__"]])) {
   cat(sprintf("\n!! %d results.rds file(s) could not be read (truncated write?)\n",
               acc[["__unreadable__"]]))
+}
+
+sk <- setdiff(ls(skipped), character(0))
+if (length(sk)) {
+  cat(sprintf("\nnon-method top-level entries in results.rds (ignored): %s\n",
+              paste(sk, collapse = ", ")))
 }
 
 meths <- setdiff(ls(acc), "__unreadable__")
