@@ -202,6 +202,46 @@ ok("gate still names a nominal winner when undecided",
    !is.na(toss$winner))
 
 cat("\n=== variance components recover their inputs ===\n")
+# WITH (S,phi) STRUCTURE - the case the POOLED estimator is biased on. The same
+# region-draw difference appears in all K = 25 of a job's (S,phi) pairs, so an
+# uncorrected pooled variance understates sigma^2_u by a factor
+# c = K(J-1)/(JK-1) = 0.758 at J = 4. Again a SINGLE draw cannot test this:
+# var() over 4 jobs is wildly variable, so check the MEAN over replicates.
+s2u_t <- 0.04; s2e_t <- 0.09; JOBS <- 4L
+grid2 <- expand.grid(job = seq_len(JOBS), S = 1:5, phi = 1:5,
+                     region_idx = 1:2, iter = 1:10)
+one_rep <- function() {
+  uj <- matrix(rnorm(JOBS * 2, 0, sqrt(s2u_t)), nrow = JOBS)
+  f <- data.frame(
+    job_dir     = paste0("job_", grid2$job, "_anBinary_e5.4_refInsample"),
+    region_size = 500L, region_idx = grid2$region_idx,
+    S = grid2$S, phi = grid2$phi, iter = grid2$iter,
+    Y = 0.5 + uj[cbind(grid2$job, grid2$region_idx)] +
+        rnorm(nrow(grid2), 0, sqrt(s2e_t)),
+    stringsAsFactors = FALSE)
+  # Corrected estimate, and the uncorrected pooled one for comparison.
+  vc <- variance_components(f, "Y")
+  KEY <- c("job_dir", "region_size", "region_idx", "S", "phi")
+  rm2 <- aggregate(list(ybar = f$Y), by = f[KEY], FUN = mean)
+  w2  <- reshape(rm2, idvar = c("job_dir", "region_size", "S", "phi"),
+                 timevar = "region_idx", direction = "wide")
+  naive <- max(0, 0.5 * var(w2$ybar.1 - w2$ybar.2) - vc$sigma2_eps / 10)
+  c(corrected = vc$sigma2_u_bar, naive = naive)
+}
+set.seed(21)
+reps2 <- replicate(120, one_rep())
+mc <- rowMeans(reps2)
+cat(sprintf("    mean over 120 replicates: corrected %.4f  naive %.4f  (true %.4f)\n",
+            mc[["corrected"]], mc[["naive"]], s2u_t))
+ok("debiased sigma^2_u is unbiased with (S,phi) structure",
+   abs(mc[["corrected"]] - s2u_t) / s2u_t < 0.12,
+   sprintf("ratio %.3f", mc[["corrected"]] / s2u_t))
+ok("the NAIVE pooled estimator is biased LOW, as derived (c = 0.758)",
+   mc[["naive"]] / s2u_t < 0.90,
+   sprintf("ratio %.3f - under-corrects every whole-plot term", mc[["naive"]] / s2u_t))
+ok("job labels containing dots do not break the key",
+   all(is.finite(reps2["corrected", ])))
+
 # Fit-level table: 2 regions per (block), 10 iterations each.
 set.seed(12)
 fits <- do.call(rbind, lapply(1:12, function(j)

@@ -64,6 +64,64 @@ N_FITS    <- N_ITER * N_REGIONS   # = 20 fits per cell
 
 
 # ---------------------------------------------------------------------------
+# Fast grouped aggregation
+# ---------------------------------------------------------------------------
+
+#' Group-and-reduce, built for 2.1 million rows.
+#'
+#' MEASURED at production scale (2,137,500 rows, ~1M groups):
+#'   aggregate()                    did not finish in 120 s
+#'   rowsum()                       0.4 s
+#'   do.call(paste, ...) for the key  601 s   <- the real bottleneck
+#'
+#' So the aggregation was never the problem; building a character key was. This
+#' encodes each grouping column as integer factor codes and folds them into ONE
+#' numeric key by radix, which is vectorised arithmetic and effectively free.
+#' Max distinct groups here is 45 x 5 x 5 x 5 x 19 x 10 = 1,068,750, far inside
+#' a double's exact-integer range, so the encoding is lossless.
+#'
+#' @param d Data frame.
+#' @param by Character vector of grouping column names.
+#' @param vals Character vector of numeric columns to reduce.
+#' @param how "sum" or "mean".
+#' @return Data frame with the `by` columns and the reduced `vals`.
+fast_agg <- function(d, by, vals, how = c("sum", "mean")) {
+  how <- match.arg(how)
+  stopifnot(all(by %in% names(d)), all(vals %in% names(d)))
+  codes <- lapply(by, function(v) {
+    f <- if (is.factor(d[[v]])) d[[v]] else factor(d[[v]])
+    list(i = as.integer(f), lev = levels(f), fac = is.factor(d[[v]]))
+  })
+  key <- rep(0, nrow(d))
+  for (cc in codes) key <- key * length(cc$lev) + (cc$i - 1)
+
+  M <- as.matrix(d[vals])
+  M[!is.finite(M)] <- NA_real_
+  # rowsum() propagates NA; na.rm keeps a single failed fit from voiding a cell.
+  Ssum <- rowsum(ifelse(is.na(M), 0, M), key, reorder = TRUE)
+  Nobs <- rowsum(ifelse(is.na(M), 0, 1), key, reorder = TRUE)
+  out  <- if (how == "sum") Ssum else {
+    z <- Ssum / Nobs; z[!is.finite(z)] <- NA_real_; z
+  }
+
+  # Decode the key back into the grouping columns.
+  k <- as.numeric(rownames(Ssum))
+  dec <- vector("list", length(by))
+  for (j in rev(seq_along(by))) {
+    nl <- length(codes[[j]]$lev)
+    idx <- (k %% nl) + 1
+    k   <- (k - (idx - 1)) / nl
+    lv  <- codes[[j]]$lev[idx]
+    dec[[j]] <- if (codes[[j]]$fac) factor(lv, levels = codes[[j]]$lev) else
+      type.convert(lv, as.is = TRUE)
+  }
+  names(dec) <- by
+  res <- as.data.frame(dec, stringsAsFactors = FALSE)
+  cbind(res, as.data.frame(out))
+}
+
+
+# ---------------------------------------------------------------------------
 # §6 - prepare the analysis table
 # ---------------------------------------------------------------------------
 
@@ -180,6 +238,34 @@ stratum_subset <- function(d, stratum) {
 #' @param response Name of the response column.
 #' @return list(sigma2_eps, sigma2_u (named by size class), sigma2_u_bar,
 #'   sigma2_job, n_pairs)
+
+#' Debias the pooled pair-difference variance (derivation in the comment).
+#'
+#' The SAME region-draw difference D_j appears in all K of a job's (S, phi)
+#' pair-differences, so the pooled sample variance mixes a between-job component
+#' with a within-job one:
+#'
+#'   d_{j,k} = D_j + e_{j,k},   D_j ~ (0, sigD2) iid over J jobs
+#'                              e   ~ (0, sigE2) iid over the K cells
+#'   E[SS]   = K(J-1) sigD2 + (N-1) sigE2 ,   N = JK
+#'   E[s^2]  = sigD2 * K(J-1)/(JK-1) + sigE2
+#'
+#' So the between-job component is shrunk by c = K(J-1)/(JK-1). With J = 4 jobs
+#' per size class (sparse/binary) and K = 25 that is c = 0.758 - a 24%
+#' UNDERESTIMATE of sigma^2_u, hence a 24% under-correction of every whole-plot
+#' term, which inflates exactly the factors carrying the annotation conclusions.
+#' Verified by simulation: pooled estimator returns 0.765x the truth at J = 4.
+#'
+#' Dividing the noise-free part by c removes it exactly and still uses all the
+#' data, unlike collapsing to J job-level means (unbiased but hopeless at J = 4).
+.debias_pair_var <- function(s2_pooled, sigE2, J, K) {
+  if (!is.finite(s2_pooled) || J < 2L || K < 1L) return(NA_real_)
+  cfac <- (K * (J - 1)) / (J * K - 1)
+  if (!is.finite(cfac) || cfac <= 0) return(NA_real_)
+  max(0, (s2_pooled - sigE2) / cfac)
+}
+
+
 variance_components <- function(fits, response) {
   y <- fits[[response]]
   if (is.null(y)) stop("response '", response, "' not in the fit table", call. = FALSE)
@@ -215,12 +301,17 @@ variance_components <- function(fits, response) {
   s2u   <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
   npair <- setNames(rep(0L, length(sizes)), as.character(sizes))
   for (g in sizes) {
-    d <- w$dif[w$region_size == g]
-    d <- d[is.finite(d)]
+    sub <- w[w$region_size == g & is.finite(w$dif), , drop = FALSE]
+    d <- sub$dif
     npair[as.character(g)] <- length(d)
-    # Var(r1 - r2) = 2 sigma^2_u + 2 sigma^2_eps/N_ITER  =>  halve, then subtract.
-    if (length(d) > 1L)
-      s2u[as.character(g)] <- max(0, 0.5 * var(d) - sigma2_eps / N_ITER)
+    if (length(d) > 1L) {
+      # Var(r1 - r2) = 2 sigma^2_u + 2 sigma^2_eps/N_ITER. Debias for the shared
+      # D_j across the K (S,phi) cells of each job before halving.
+      J <- length(unique(sub$job_dir))
+      K <- max(1L, round(nrow(sub) / max(J, 1L)))
+      sigD2 <- .debias_pair_var(var(d), 2 * sigma2_eps / N_ITER, J, K)
+      s2u[as.character(g)] <- if (is.na(sigD2)) NA_real_ else sigD2 / 2
+    }
   }
 
   list(sigma2_eps = sigma2_eps, sigma2_u = s2u,
@@ -283,8 +374,14 @@ variance_components_rate <- function(fits, num_expr, den_expr) {
   sizes <- sort(unique(w$region_size))
   s2u <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
   for (g in sizes) {
-    d <- w$dif[w$region_size == g]; d <- d[is.finite(d)]
-    if (length(d) > 1L) s2u[as.character(g)] <- max(0, 0.5 * var(d) - sampling_var)
+    sub <- w[w$region_size == g & is.finite(w$dif), , drop = FALSE]
+    d <- sub$dif
+    if (length(d) > 1L) {
+      J <- length(unique(sub$job_dir))
+      K <- max(1L, round(nrow(sub) / max(J, 1L)))
+      sigD2 <- .debias_pair_var(var(d), 2 * sampling_var, J, K)
+      s2u[as.character(g)] <- if (is.na(sigD2)) NA_real_ else sigD2 / 2
+    }
   }
   list(sigma2_eps = sampling_var * N_ITER,
        sigma2_u = s2u, sigma2_u_bar = mean(s2u, na.rm = TRUE),

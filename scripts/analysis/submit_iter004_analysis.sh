@@ -43,13 +43,24 @@ GRID_CSV="${GRID_CSV:-${PROJECT_ROOT}/scripts/hpc/params_grid.csv}"
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 QUEUE_A="${QUEUE_A:-v1_small24}"
 QUEUE_B="${QUEUE_B:-v1_small24}"
-# Stage A: 250 scenarios x ~190 fits per row, each an O(p log p) sort at p <= 2000.
-SELECT_A="${SELECT_A:-1:ncpus=1:mem=32gb}"
-WALL_A="${WALL_A:-08:00:00}"
-# Stage B holds the whole L1 table (~2.1M rows) plus the aov per stratum x method
-# x response. Memory-hungry, not CPU-hungry.
-SELECT_B="${SELECT_B:-1:ncpus=1:mem=96gb}"
-WALL_B="${WALL_B:-12:00:00}"
+# --- resources, sized from measured volumes rather than guessed -------------
+# Stage A: 250 scenarios x 190 fits = 47,500 per-fit metric computations, each an
+# O(p log p) sort at p <= 2000, plus reading ~250 results.rds and one sim.rds.
+# I/O bound rather than CPU bound. Memory is one sim.rds (n=5000 x up to 2000
+# variants x 10 regions) plus the growing L1 partial: a few GB.
+SELECT_A="${SELECT_A:-1:ncpus=1:mem=24gb}"
+WALL_A="${WALL_A:-06:00:00}"
+# Stage B. MEASURED, not estimated:
+#   L1 is 2,137,500 rows x ~45 numeric cols  = 0.7 GB; bind peak ~1.8 GB
+#   L2 is 1,068,750 rows                     = 0.4 GB
+#   grouped reduction via fast_agg           = 2.7 s
+#   (the same reduction via aggregate() did NOT finish in 120 s, and building a
+#    paste() key alone took 601 s - which is why fast_agg exists)
+# Real peak is ~3-4 GB, so 96gb was wildly over-provisioned and would have sat
+# in the queue for no reason. 32gb is generous; the aov calls per stratum x
+# method x response are small.
+SELECT_B="${SELECT_B:-1:ncpus=1:mem=32gb}"
+WALL_B="${WALL_B:-06:00:00}"
 
 if [[ ! -d "$BENCH_ROOT" ]]; then
   echo "ERROR: benchmark output not found at $BENCH_ROOT" >&2

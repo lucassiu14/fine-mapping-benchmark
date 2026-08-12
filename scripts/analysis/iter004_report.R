@@ -157,12 +157,16 @@ add_rates <- function(d) {
 
 # --- L2: one row per (cell, replicate). Counts summed over the 2 regions; AP
 #     and the per-locus scalars averaged over them (§5.1b).
+#
+# fast_agg, not aggregate(): MEASURED at this scale, aggregate() did not finish
+# in 120 s and building a character grouping key with paste() took 601 s, while
+# the same reduction via integer keys and rowsum() takes 2.7 s.
 message("building L2 ...")
-by2 <- L1[c(DESIGN, "iter")]
-L2c <- aggregate(L1[CNT_COLS], by = by2, FUN = sum, na.rm = TRUE)
-L2s <- aggregate(L1[SCALAR_COLS], by = by2, FUN = function(v) mean(v, na.rm = TRUE))
-L2h <- aggregate(L1[HIT_COLS], by = by2, FUN = sum, na.rm = TRUE)
-L2  <- merge(merge(L2c, L2s, by = c(DESIGN, "iter")), L2h, by = c(DESIGN, "iter"))
+KEY2 <- c(DESIGN, "iter")
+L2c <- fast_agg(L1, KEY2, CNT_COLS,    "sum")
+L2s <- fast_agg(L1, KEY2, SCALAR_COLS, "mean")
+L2h <- fast_agg(L1, KEY2, HIT_COLS,    "sum")
+L2  <- merge(merge(L2c, L2s, by = KEY2), L2h, by = KEY2)
 L2$p_causal        <- .unsentinel(L2$pc,     "sparse")
 L2$enrichment_fold <- .unsentinel(L2$enrich, "none")
 L2$n_ref <- NA_integer_
@@ -173,12 +177,20 @@ message("  L2: ", nrow(L2), " rows")
 # --- L3: one row per cell. Counts summed over all 20 fits; AP averaged over the
 #     10 L2 values, and its SE taken across those 10 - NOT across 20 fits.
 message("building L3 ...")
-L3c <- aggregate(L1[CNT_COLS], by = L1[DESIGN], FUN = sum, na.rm = TRUE)
-L3s <- aggregate(L2[SCALAR_COLS], by = L2[DESIGN], FUN = function(v) mean(v, na.rm = TRUE))
-L3e <- aggregate(L2["ap"], by = L2[DESIGN],
-                 FUN = function(v) sd(v, na.rm = TRUE) / sqrt(sum(!is.na(v))))
-names(L3e)[ncol(L3e)] <- "ap_se"
-L3h <- aggregate(L1[HIT_COLS], by = L1[DESIGN], FUN = sum, na.rm = TRUE)
+L3c <- fast_agg(L1, DESIGN, CNT_COLS,    "sum")
+# Scalars average the 10 L2 values, not the 20 fits: the 2 regions inside one
+# replicate share a panel, an annotation draw and an enrichment draw (§3.3b).
+L3s <- fast_agg(L2, DESIGN, SCALAR_COLS, "mean")
+L3h <- fast_agg(L1, DESIGN, HIT_COLS,    "sum")
+# SE across the 10 replicate means. sd = sqrt(E[x^2] - E[x]^2) computed from
+# fast_agg sums, so no per-group closure is needed.
+L2$.ap2 <- L2$ap^2
+m1 <- fast_agg(L2, DESIGN, "ap",   "mean")
+m2 <- fast_agg(L2, DESIGN, ".ap2", "mean")
+nn <- fast_agg(transform(L2, .one = as.numeric(is.finite(L2$ap))), DESIGN, ".one", "sum")
+L3e <- m1[DESIGN]
+vv  <- pmax(0, (m2$.ap2 - m1$ap^2) * nn$.one / pmax(nn$.one - 1, 1))
+L3e$ap_se <- sqrt(vv) / sqrt(pmax(nn$.one, 1))
 L3  <- merge(merge(merge(L3c, L3s, by = DESIGN), L3e, by = DESIGN), L3h, by = DESIGN)
 L3$p_causal        <- .unsentinel(L3$pc,     "sparse")
 L3$enrichment_fold <- .unsentinel(L3$enrich, "none")
@@ -186,9 +198,10 @@ L3$n_ref <- NA_integer_
 L3  <- add_rates(L3)
 # Merge rather than assign by position: aggregate() returns its own row order
 # and assuming it matches L3's would silently mis-attach the counts.
-nf <- aggregate(list(n_fits = rep(1L, nrow(L1)),
-                     n_failed = as.integer(L1$failed)),
-                by = L1[DESIGN], FUN = sum)
+L1$.one    <- 1
+L1$.failed <- as.integer(L1$failed)
+nf <- fast_agg(L1, DESIGN, c(".one", ".failed"), "sum")
+names(nf)[match(c(".one", ".failed"), names(nf))] <- c("n_fits", "n_failed")
 L3 <- merge(L3, nf, by = DESIGN, all.x = TRUE)
 saveRDS(L3, file.path(out_dir, "combined_scenario_metrics.rds"))
 message("  L3: ", nrow(L3), " cells")
