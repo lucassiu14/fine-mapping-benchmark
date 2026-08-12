@@ -28,7 +28,7 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 # The three responses. Different factors will top each list, and THAT
 # DISAGREEMENT IS THE FINDING - it is the formal version of "this method's
 # ranking is fine but its calibration is broken" (§7.6).
-RESPONSES <- c("ap", "fdr_at_90", "bss")
+RESPONSES <- c("ap", "fdr_at_90", "total_mass_ratio")
 
 fit_file  <- file.path(collect_dir, "combined_fit_metrics.rds")
 cell_file <- file.path(collect_dir, "combined_scenario_metrics.rds")
@@ -81,7 +81,16 @@ for (st in STRATA) {
     for (resp in RESPONSES) {
       if (!resp %in% names(cm) || all(is.na(cm[[resp]]))) next
 
-      vc <- tryCatch(variance_components(fm, resp), error = function(e) NULL)
+      # AP is a per-fit scalar; FDR and mass ratio are POOLED RATES and need the
+      # count-based estimator (§3.4b) - a per-fit rate on 0-2 selections is
+      # unestimable, so the pair-difference estimator cannot see them.
+      vc <- if (!is.null(RATE_RESPONSES[[resp]])) {
+        tryCatch(variance_components_rate(fm, RATE_RESPONSES[[resp]]$num,
+                                          RATE_RESPONSES[[resp]]$den),
+                 error = function(e) NULL)
+      } else {
+        tryCatch(variance_components(fm, resp), error = function(e) NULL)
+      }
       if (is.null(vc) || !is.finite(vc$sigma2_eps)) {
         message(sprintf("  %-22s %-12s variance components failed - skipped", m, resp))
         next

@@ -36,6 +36,7 @@ args     <- commandArgs(trailingOnly = TRUE)
 l1_dir   <- args[1]
 grid_csv <- args[2] %||% "scripts/hpc/params_grid.csv"
 out_dir  <- args[3] %||% "results/iter004"
+source(file.path("R", "evaluate_extras.R"))
 source(file.path("scripts", "analysis", "iter004_lib.R"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -49,15 +50,29 @@ L1 <- do.call(rbind, lapply(parts, readRDS))
 message("  L1: ", nrow(L1), " fit rows, ", length(unique(L1$method)), " methods")
 
 grid <- read.csv(grid_csv, stringsAsFactors = FALSE)
+# Expected row count comes FROM THE GRID, not a hardcoded 45. The assertion is
+# there to catch a silent NA-drop, and it must not itself break when the grid
+# legitimately changes.
+EXPECT_JOBS <- nrow(grid)
 grid$job_dir <- sprintf("job_%03d_%s", grid$job_id, grid$label)
 keep <- c("job_dir", "model", "p_causal", "annotation_type", "enrichment_fold",
           "n_ref", "n", "n_iter")
+options(fmb.expect_jobs = EXPECT_JOBS)
 L1 <- merge(L1, grid[, intersect(keep, names(grid))], by = "job_dir", all.x = TRUE)
 if (anyNA(L1$model)) {
   stop("some L1 rows did not join to params_grid.csv - the grid used for the run ",
        "differs from the one on disk. Regenerate it or point --grid at the ",
        "version that was actually run.", call. = FALSE)
 }
+# RECODE NA-AS-LEVEL BEFORE ANY GROUPING (§6). aggregate(), split(), table()
+# and sort(unique(.)) all DROP NA GROUPS SILENTLY. p_causal is NA on every
+# sparse row and enrichment_fold is NA on every `none` row, so grouping on the
+# raw columns deletes those arms entirely - verified: grouping 1,152 fit rows on
+# raw p_causal returned ZERO rows. The raw columns are kept for reference; all
+# grouping uses pc / enrich.
+L1$pc     <- ifelse(is.na(L1$p_causal),        "sparse", as.character(L1$p_causal))
+L1$enrich <- ifelse(is.na(L1$enrichment_fold), "none",   as.character(L1$enrichment_fold))
+stopifnot(!anyNA(L1$pc), !anyNA(L1$enrich))
 saveRDS(L1, file.path(out_dir, "combined_fit_metrics.rds"))
 
 THRESH_TAGS <- c("50", "80", "90", "95", "99")
@@ -74,8 +89,21 @@ SCALAR_COLS <- c("ap", "prec_at_1", "prec_at_S", "prec_at_2S",
                  "mass_above_50", "mean_pip_topS")
 HIT_COLS <- c("set_hit_5", "set_hit_95")     # Bernoulli per fit -> SUMMED
 
-DESIGN <- c("job_dir", "model", "p_causal", "annotation_type", "enrichment_fold",
-            "n_ref", "S", "phi", "region_size", "method")
+# n_ref is deliberately ABSENT from the grouping key: it is NA throughout (the
+# grid is in-sample only) and would drop every row. It is re-attached after
+# aggregation so the §11 check and prepare_analysis_table's filter still see it.
+DESIGN <- c("job_dir", "model", "annotation_type", "pc", "enrich",
+            "S", "phi", "region_size", "method")
+
+
+# ifelse() evaluates both branches, so as.numeric() on the sentinel level warns
+# even where the result is discarded. Convert only the convertible entries.
+.unsentinel <- function(x, sentinel) {
+  out <- rep(NA_real_, length(x))
+  ok <- x != sentinel
+  out[ok] <- as.numeric(x[ok])
+  out
+}
 
 #' Form rate metrics from pooled counts. Called at L2 and L3 only - never on a
 #' single fit, where 0-2 selections make every rate unestimable.
@@ -135,6 +163,9 @@ L2c <- aggregate(L1[CNT_COLS], by = by2, FUN = sum, na.rm = TRUE)
 L2s <- aggregate(L1[SCALAR_COLS], by = by2, FUN = function(v) mean(v, na.rm = TRUE))
 L2h <- aggregate(L1[HIT_COLS], by = by2, FUN = sum, na.rm = TRUE)
 L2  <- merge(merge(L2c, L2s, by = c(DESIGN, "iter")), L2h, by = c(DESIGN, "iter"))
+L2$p_causal        <- .unsentinel(L2$pc,     "sparse")
+L2$enrichment_fold <- .unsentinel(L2$enrich, "none")
+L2$n_ref <- NA_integer_
 L2  <- add_rates(L2)
 saveRDS(L2, file.path(out_dir, "combined_replicate_metrics.rds"))
 message("  L2: ", nrow(L2), " rows")
@@ -149,9 +180,16 @@ L3e <- aggregate(L2["ap"], by = L2[DESIGN],
 names(L3e)[ncol(L3e)] <- "ap_se"
 L3h <- aggregate(L1[HIT_COLS], by = L1[DESIGN], FUN = sum, na.rm = TRUE)
 L3  <- merge(merge(merge(L3c, L3s, by = DESIGN), L3e, by = DESIGN), L3h, by = DESIGN)
+L3$p_causal        <- .unsentinel(L3$pc,     "sparse")
+L3$enrichment_fold <- .unsentinel(L3$enrich, "none")
+L3$n_ref <- NA_integer_
 L3  <- add_rates(L3)
-L3$n_fits  <- aggregate(rep(1L, nrow(L1)), by = L1[DESIGN], FUN = sum)$x
-L3$n_failed <- aggregate(as.integer(L1$failed), by = L1[DESIGN], FUN = sum)$x
+# Merge rather than assign by position: aggregate() returns its own row order
+# and assuming it matches L3's would silently mis-attach the counts.
+nf <- aggregate(list(n_fits = rep(1L, nrow(L1)),
+                     n_failed = as.integer(L1$failed)),
+                by = L1[DESIGN], FUN = sum)
+L3 <- merge(L3, nf, by = DESIGN, all.x = TRUE)
 saveRDS(L3, file.path(out_dir, "combined_scenario_metrics.rds"))
 message("  L3: ", nrow(L3), " cells")
 
@@ -169,7 +207,8 @@ chk <- function(name, pass, detail = "") {
 
 chk("in-sample LD only", all(is.na(L3$n_ref)),
     sprintf("%d rows with non-NA n_ref", sum(!is.na(L3$n_ref))))
-chk("45 job rows", length(unique(L3$job_dir)) == 45L,
+chk(sprintf("%d job rows (from params_grid.csv)", EXPECT_JOBS),
+    length(unique(L3$job_dir)) == EXPECT_JOBS,
     paste(length(unique(L3$job_dir)), "found"))
 bal <- table(L3$method)
 chk("balanced cells per method", length(unique(bal)) == 1L,
@@ -201,6 +240,7 @@ message("validity: ", if (ok_all) "passed" else "FAILURES - see validity_checks.
 # ---------------------------------------------------------------------------
 for (script in c("iter004_sense_v.R", "iter004_sense_d.R", "iter004_sense_g.R")) {
   message("\n>>> ", script)
+  Sys.setenv(FMB_EXPECT_JOBS = EXPECT_JOBS)
   st <- system2("Rscript", c(file.path("scripts", "analysis", script), out_dir,
                              file.path(out_dir, sub("\\.R$", "", script))))
   if (st != 0L) message("    (exit ", st, " - see its own output)")

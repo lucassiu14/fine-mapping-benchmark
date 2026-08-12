@@ -53,56 +53,7 @@ reps <- reps[!reps$method %in% EXCLUDE_FROM_DECISION, , drop = FALSE]
 
 cell_key <- function(d) interaction(d$job_dir, d$S, d$phi, d$region_size, drop = TRUE)
 
-#' Decide one cell: who wins, and is the win real?
-#'
-#' Cross-fit exactly as §8.3 requires. Split the 10 replicates into halves A and
-#' B; identify the top two on A and test on B; then swap. The cell is DECIDED
-#' only if both directions decide it AND agree on the winner. The reported effect
-#' size is the full-sample dbar - the split governs only the decided/undecided
-#' call, never the estimate.
-decide_cell <- function(df, response, z = Z_GATE) {
-  w <- reshape(df[, c("method", "iter", response)],
-               idvar = "iter", timevar = "method", direction = "wide")
-  rownames(w) <- NULL
-  ycols <- setdiff(names(w), "iter")
-  if (length(ycols) < 2L) return(NULL)
-  meths <- sub(paste0("^", response, "\\."), "", ycols)
-  Y <- as.matrix(w[, ycols, drop = FALSE]); colnames(Y) <- meths
-  Y <- Y[, colSums(is.finite(Y)) > 0, drop = FALSE]
-  if (ncol(Y) < 2L) return(NULL)
-
-  full_mean <- colMeans(Y, na.rm = TRUE)
-  winner    <- names(which.max(full_mean))
-
-  R <- nrow(Y)
-  if (R < 4L) return(list(winner = winner, decided = FALSE, dbar = NA_real_,
-                          runner_up = NA_character_))
-  idx <- sample(seq_len(R))
-  halves <- list(A = idx[seq_len(floor(R / 2))], B = idx[(floor(R / 2) + 1L):R])
-
-  test_one <- function(sel, oth) {
-    mA <- colMeans(Y[sel, , drop = FALSE], na.rm = TRUE)
-    if (all(is.na(mA))) return(NULL)
-    top2 <- names(sort(mA, decreasing = TRUE))[1:2]
-    if (any(is.na(top2))) return(NULL)
-    d <- Y[oth, top2[1]] - Y[oth, top2[2]]
-    d <- d[is.finite(d)]
-    if (length(d) < 2L) return(NULL)
-    se <- sd(d) / sqrt(length(d))
-    list(winner = top2[1], runner_up = top2[2],
-         decided = is.finite(se) && se > 0 && abs(mean(d)) > z * se)
-  }
-  ab <- test_one(halves$A, halves$B)
-  ba <- test_one(halves$B, halves$A)
-  decided <- !is.null(ab) && !is.null(ba) && ab$decided && ba$decided &&
-             identical(ab$winner, ba$winner)
-
-  ru <- if (!is.null(ab)) ab$runner_up else names(sort(full_mean, decreasing = TRUE))[2]
-  dbar <- if (!is.na(ru) && ru %in% colnames(Y))
-    mean(Y[, winner] - Y[, ru], na.rm = TRUE) else NA_real_
-
-  list(winner = winner, runner_up = ru, decided = decided, dbar = dbar)
-}
+# decide_cell() lives in iter004_lib.R so it can be unit-tested in isolation.
 
 all_flip <- list(); all_map <- list()
 

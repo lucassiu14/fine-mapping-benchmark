@@ -123,6 +123,19 @@ k <- 0L
 n_skipped <- 0L
 
 for (sd in scen_dirs) {
+  # THE SCENARIO INDEX COMES FROM THE DIRECTORY NAME, NOT FROM THE FIT.
+  # run_benchmark_job.R subsets sim to a single scenario and resets
+  # `mini$scenarios[[1]]$scenario_id <- 1L`, because evaluate_methods() uses
+  # scenario_id as a LIST INDEX into the subset. So every saved fit carries
+  # scenario_id = 1 and the true index survives only in scenario_<sc>/.
+  # Indexing sim$scenarios by fit$scenario_id would silently give every fit
+  # scenario 1's truth - wrong S, wrong phi, wrong causal indices.
+  sc_idx <- suppressWarnings(as.integer(sub("^scenario_", "", basename(sd))))
+  if (is.na(sc_idx) || sc_idx < 1L || sc_idx > length(sim$scenarios)) {
+    n_skipped <- n_skipped + 1L; next
+  }
+  sc <- sim$scenarios[[sc_idx]]
+
   rf <- file.path(sd, "results.rds")
   if (!file.exists(rf)) { n_skipped <- n_skipped + 1L; next }
   res <- tryCatch(readRDS(rf), error = function(e) NULL)
@@ -138,8 +151,6 @@ for (sd in scen_dirs) {
       if (is.null(fit$pip) || is.null(fit$scenario_id) || is.null(fit$region_id)) next
       failed <- !is.null(fit$error)
 
-      sc <- sim$scenarios[[fit$scenario_id]]
-      if (is.null(sc)) next
       tr <- sc$regions[[fit$region_id]]$truth
       if (is.null(tr)) next
 
@@ -149,7 +160,7 @@ for (sd in scen_dirs) {
 
       base <- list(
         job_dir     = label,
-        scenario_id = fit$scenario_id,
+        scenario_id = sc_idx,
         S           = tr$S,
         phi         = tr$phi,
         iter        = sc$iter %||% NA_integer_,

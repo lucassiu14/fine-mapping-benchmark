@@ -17,6 +17,12 @@ suppressWarnings(suppressMessages({
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
+# Set by iter004_report.R from nrow(params_grid.csv) so the sense scripts, which
+# run as separate Rscript processes, inherit the same expectation.
+if (nzchar(Sys.getenv("FMB_EXPECT_JOBS"))) {
+  options(fmb.expect_jobs = as.integer(Sys.getenv("FMB_EXPECT_JOBS")))
+}
+
 # The six non-poolable strata (§2.3). p_causal and enrichment_fold are NESTED,
 # not crossed, so a single ANOVA over all the data is not well defined - and the
 # nesting happens to align exactly with the never-pool rule, so one split solves
@@ -75,7 +81,7 @@ N_FITS    <- N_ITER * N_REGIONS   # = 20 fits per cell
 #' @param d Data frame from the collect step, one row per (cell, method) or
 #'   per (cell, method, replicate).
 #' @param expect_jobs Expected number of distinct job_dir values after filtering.
-prepare_analysis_table <- function(d, expect_jobs = 45L) {
+prepare_analysis_table <- function(d, expect_jobs = getOption("fmb.expect_jobs", 45L)) {
   # 1. FILTER on the raw NA.
   if ("n_ref" %in% names(d)) d <- d[is.na(d$n_ref), , drop = FALSE]
   n_jobs <- length(unique(d$job_dir))
@@ -179,48 +185,122 @@ variance_components <- function(fits, response) {
   if (is.null(y)) stop("response '", response, "' not in the fit table", call. = FALSE)
   ok <- is.finite(y)
   f  <- fits[ok, , drop = FALSE]
+  if (!nrow(f)) return(NULL)
   f$.y <- y[ok]
 
-  # sigma^2_eps: variance across the 10 iterations WITHIN one region, pooled.
-  # This is pure replicate error - the region, the loci and the annotations are
-  # all literally identical across those 10 values.
-  reg_key <- interaction(f$job_dir, f$region_size, f$region_idx,
-                         f$S, f$phi, drop = TRUE)
-  within  <- tapply(f$.y, reg_key, function(v) if (length(v) > 1L) var(v) else NA_real_)
-  sigma2_eps <- mean(within, na.rm = TRUE)
+  # NOTE: everything below groups with aggregate() on REAL COLUMNS. An earlier
+  # version built keys with interaction() and split the names back on ".", which
+  # is silently wrong here: job labels contain dots (sparse_anBinary_e5.4_...),
+  # so the fields came apart and sigma^2_u never estimated. Never round-trip a
+  # grouping key through a delimiter that occurs in the data.
+  KEY <- c("job_dir", "region_size", "region_idx", "S", "phi")
+  if (!all(KEY %in% names(f))) return(NULL)
 
-  # Region means over the 10 iterations, then the within-(job, size) pair contrast.
-  rm_key <- interaction(f$job_dir, f$region_size, f$region_idx, drop = TRUE)
-  reg_mean <- tapply(f$.y, rm_key, mean, na.rm = TRUE)
-  meta <- do.call(rbind, strsplit(names(reg_mean), ".", fixed = TRUE))
-  rmdf <- data.frame(job = meta[, 1], size = meta[, 2], idx = meta[, 3],
-                     ybar = as.numeric(reg_mean), stringsAsFactors = FALSE)
+  # sigma^2_eps: variance across iterations WITHIN one region. Pure replicate
+  # error - the region, the loci and the annotations are literally identical
+  # across those values.
+  wv <- aggregate(list(v = f$.y), by = f[KEY],
+                  FUN = function(v) if (length(v) > 1L) var(v) else NA_real_)
+  sigma2_eps <- mean(wv$v, na.rm = TRUE)
 
-  sizes <- sort(unique(rmdf$size))
-  s2u <- setNames(rep(NA_real_, length(sizes)), sizes)
-  npair <- setNames(rep(0L, length(sizes)), sizes)
+  # Region means over iterations, then the within-(job, size, S, phi) pair
+  # contrast between region_idx 1 and 2.
+  rm <- aggregate(list(ybar = f$.y), by = f[KEY], FUN = mean, na.rm = TRUE)
+  w  <- reshape(rm, idvar = c("job_dir", "region_size", "S", "phi"),
+                timevar = "region_idx", direction = "wide")
+  if (!all(c("ybar.1", "ybar.2") %in% names(w))) return(NULL)
+  w$dif <- w$ybar.1 - w$ybar.2
+
+  sizes <- sort(unique(w$region_size))
+  s2u   <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
+  npair <- setNames(rep(0L, length(sizes)), as.character(sizes))
   for (g in sizes) {
-    sub <- rmdf[rmdf$size == g, , drop = FALSE]
-    sp  <- split(sub$ybar, sub$job)
-    dif <- vapply(sp, function(v) if (length(v) == 2L) v[1] - v[2] else NA_real_,
-                  numeric(1))
-    dif <- dif[is.finite(dif)]
-    npair[g] <- length(dif)
-    if (length(dif) > 1L) {
-      # Var(r1 - r2) = 2 sigma^2_u + 2 sigma^2_eps/10  =>  halve, then subtract.
-      s2u[g] <- max(0, 0.5 * var(dif) - sigma2_eps / N_ITER)
-    }
+    d <- w$dif[w$region_size == g]
+    d <- d[is.finite(d)]
+    npair[as.character(g)] <- length(d)
+    # Var(r1 - r2) = 2 sigma^2_u + 2 sigma^2_eps/N_ITER  =>  halve, then subtract.
+    if (length(d) > 1L)
+      s2u[as.character(g)] <- max(0, 0.5 * var(d) - sigma2_eps / N_ITER)
   }
 
-  list(sigma2_eps = sigma2_eps,
-       sigma2_u   = s2u,
-       # Use the MEAN over size classes in lambda_T. Exact for whole-plot terms
-       # that average over region_size, first-order for terms containing it; the
-       # per-class values show how much that approximation matters.
+  list(sigma2_eps = sigma2_eps, sigma2_u = s2u,
        sigma2_u_bar = mean(s2u, na.rm = TRUE),
        sigma2_job   = mean(s2u, na.rm = TRUE) / 2,
        n_pairs      = npair)
 }
+
+
+#' Variance components for a POOLED-RATE response (§3.4b, final paragraph).
+#'
+#' A per-fit rate is unestimable - 0-2 selections - so the pair-difference
+#' estimator cannot be applied to rates the way it is to AP. Instead:
+#'
+#'   1. Pool each REGION's counts over its iterations and form the rate there.
+#'   2. sigma^2_u = (1/2) Var(pair difference of region rates) - (the sampling
+#'      noise of a region-level rate).
+#'   3. The sampling-noise term is NOT sigma^2_eps/10; it is the
+#'      delete-one-iteration JACKKNIFE variance of the region-level rate.
+#'
+#' @param fits Fit-level table carrying the COUNT columns.
+#' @param num,den Column names whose pooled ratio is the rate (e.g. fp and nsel).
+#'   `num` may be an expression evaluated in `fits`.
+variance_components_rate <- function(fits, num_expr, den_expr) {
+  f <- fits
+  f$.num <- eval(parse(text = num_expr), envir = f)
+  f$.den <- eval(parse(text = den_expr), envir = f)
+  f <- f[is.finite(f$.num) & is.finite(f$.den), , drop = FALSE]
+  KEY <- c("job_dir", "region_size", "region_idx", "S", "phi")
+  if (!nrow(f) || !all(KEY %in% names(f))) return(NULL)
+
+  # Region-level rate: pool the region's counts over its iterations, THEN divide.
+  agg <- aggregate(f[c(".num", ".den")], by = f[KEY], FUN = sum, na.rm = TRUE)
+  agg$rate <- ifelse(agg$.den > 0, agg$.num / agg$.den, NA_real_)
+
+  # Sampling noise of a region-level rate is the delete-one-iteration jackknife,
+  # NOT sigma^2_eps/10: a pooled rate is not a mean of per-iteration rates.
+  its <- sort(unique(f$iter))
+  if (length(its) < 2L) return(NULL)
+  jk <- lapply(its, function(u) {
+    g <- f[f$iter != u, , drop = FALSE]
+    a <- aggregate(g[c(".num", ".den")], by = g[KEY], FUN = sum, na.rm = TRUE)
+    a$r <- ifelse(a$.den > 0, a$.num / a$.den, NA_real_)
+    a[c(KEY, "r")]
+  })
+  jkm <- Reduce(function(x, y) merge(x, y, by = KEY, all = TRUE), jk)
+  rcols <- setdiff(names(jkm), KEY)
+  jvar <- apply(jkm[rcols], 1, function(v) {
+    v <- v[is.finite(v)]
+    if (length(v) < 2L) NA_real_ else (length(v) - 1) / length(v) * sum((v - mean(v))^2)
+  })
+  sampling_var <- mean(jvar, na.rm = TRUE)
+
+  w <- reshape(agg[c(KEY, "rate")],
+               idvar = c("job_dir", "region_size", "S", "phi"),
+               timevar = "region_idx", direction = "wide")
+  if (!all(c("rate.1", "rate.2") %in% names(w))) return(NULL)
+  w$dif <- w$rate.1 - w$rate.2
+
+  sizes <- sort(unique(w$region_size))
+  s2u <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
+  for (g in sizes) {
+    d <- w$dif[w$region_size == g]; d <- d[is.finite(d)]
+    if (length(d) > 1L) s2u[as.character(g)] <- max(0, 0.5 * var(d) - sampling_var)
+  }
+  list(sigma2_eps = sampling_var * N_ITER,
+       sigma2_u = s2u, sigma2_u_bar = mean(s2u, na.rm = TRUE),
+       sigma2_job = mean(s2u, na.rm = TRUE) / 2, n_pairs = nrow(w))
+}
+
+
+#' Rate responses and the count expressions they are pooled from.
+RATE_RESPONSES <- list(
+  fdr_at_90 = list(num = "nsel_at_90 - tp_at_90", den = "nsel_at_90"),
+  fdr_at_95 = list(num = "nsel_at_95 - tp_at_95", den = "nsel_at_95"),
+  hi_pip_reliab = list(num = "c_band_top", den = "n_band_top"),
+  total_mass_ratio = list(
+    num = "sum_pip_band_lo + sum_pip_band_mid + sum_pip_band_hi + sum_pip_band_top",
+    den = "n_causal")
+)
 
 
 #' Diagnostic for assumption A2 (§3.4b).
@@ -377,3 +457,60 @@ importance_caveats <- function() {
     "NEGATIVE omega^2 IS NOT CLAMPED: null factors can go below zero. Many strongly negative shares mean lambda-hat is too large - a diagnostic, not an embarrassment."
   )
 }
+
+
+# ---------------------------------------------------------------------------
+# §8.3 - cross-fitted decision gate
+# ---------------------------------------------------------------------------
+
+#' Decide one cell: who wins, and is the win real?
+#'
+#' Cross-fit exactly as §8.3 requires. Split the 10 replicates into halves A and
+#' B; identify the top two on A and test on B; then swap. The cell is DECIDED
+#' only if both directions decide it AND agree on the winner. The reported effect
+#' size is the full-sample dbar - the split governs only the decided/undecided
+#' call, never the estimate.
+decide_cell <- function(df, response, z = 2) {
+  w <- reshape(df[, c("method", "iter", response)],
+               idvar = "iter", timevar = "method", direction = "wide")
+  rownames(w) <- NULL
+  ycols <- setdiff(names(w), "iter")
+  if (length(ycols) < 2L) return(NULL)
+  meths <- sub(paste0("^", response, "\\."), "", ycols)
+  Y <- as.matrix(w[, ycols, drop = FALSE]); colnames(Y) <- meths
+  Y <- Y[, colSums(is.finite(Y)) > 0, drop = FALSE]
+  if (ncol(Y) < 2L) return(NULL)
+
+  full_mean <- colMeans(Y, na.rm = TRUE)
+  winner    <- names(which.max(full_mean))
+
+  R <- nrow(Y)
+  if (R < 4L) return(list(winner = winner, decided = FALSE, dbar = NA_real_,
+                          runner_up = NA_character_))
+  idx <- sample(seq_len(R))
+  halves <- list(A = idx[seq_len(floor(R / 2))], B = idx[(floor(R / 2) + 1L):R])
+
+  test_one <- function(sel, oth) {
+    mA <- colMeans(Y[sel, , drop = FALSE], na.rm = TRUE)
+    if (all(is.na(mA))) return(NULL)
+    top2 <- names(sort(mA, decreasing = TRUE))[1:2]
+    if (any(is.na(top2))) return(NULL)
+    d <- Y[oth, top2[1]] - Y[oth, top2[2]]
+    d <- d[is.finite(d)]
+    if (length(d) < 2L) return(NULL)
+    se <- sd(d) / sqrt(length(d))
+    list(winner = top2[1], runner_up = top2[2],
+         decided = is.finite(se) && se > 0 && abs(mean(d)) > z * se)
+  }
+  ab <- test_one(halves$A, halves$B)
+  ba <- test_one(halves$B, halves$A)
+  decided <- !is.null(ab) && !is.null(ba) && ab$decided && ba$decided &&
+             identical(ab$winner, ba$winner)
+
+  ru <- if (!is.null(ab)) ab$runner_up else names(sort(full_mean, decreasing = TRUE))[2]
+  dbar <- if (!is.na(ru) && ru %in% colnames(Y))
+    mean(Y[, winner] - Y[, ru], na.rm = TRUE) else NA_real_
+
+  list(winner = winner, runner_up = ru, decided = decided, dbar = dbar)
+}
+
