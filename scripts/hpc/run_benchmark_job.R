@@ -68,8 +68,18 @@ GENETIC_MAP_DIR <- "data/genetic_maps"
 METHODS <- c(
   # summary-statistic baselines
   "susie", "susie_inf", "finemap", "finemap_inf", "abf", "marginal_z",
-  # sparse / robust
-  "carma", "finimom", "sparsepro",
+  # sparse / robust.
+  # CARMA DROPPED mid-Iteration-004 (2026-08-09) on measured cost: it was 82.2%
+  # of total runtime at 26,122 s per scenario against 5,667 s for the other 18
+  # methods COMBINED. Its differentiator is LD-discrepancy outlier detection,
+  # which an all-in-sample grid cannot exercise at all, so it was paying MCMC at
+  # p = 2000 for a capability the design cannot test. Removing it cuts the
+  # remaining run from ~3.5 further 72h passes to under one.
+  # Scenarios completed before this change DO contain CARMA fits; they are left
+  # in place (every other method in them is valid) but CARMA must be EXCLUDED
+  # from the analysis - it would otherwise appear in a biased ~28% subset,
+  # namely whichever scenarios happened to finish first.
+  "finimom", "sparsepro",
   # annotation-informed
   "funmap", "paintor", "polyfun_oracle", "polyfun_est", "polyfun_ldsc",
   "sbayesrc",

@@ -29,6 +29,14 @@ if (nzchar(Sys.getenv("FMB_EXPECT_JOBS"))) {
 # both problems. `model` and `annotation_type` can therefore NEVER appear in an
 # importance ranking: you cannot measure the importance of a variable you
 # stratify on. They are the frame, not a result.
+# Methods excluded from the Iteration 004 analysis regardless of what is on disk.
+# CARMA was dropped part-way through the run (see run_benchmark_job.R), so it is
+# present in only the ~28% of scenarios that completed first - a biased subset,
+# not a random one. Partial coverage of a balanced design is worse than absence:
+# it would unbalance every stratum it appears in and silently change the method
+# set per cell.
+EXCLUDE_METHODS <- c("carma")
+
 STRATA <- list(
   list(key = "sparse_none",       model = "sparse",     annot = "none"),
   list(key = "sparse_binary",     model = "sparse",     annot = "binary"),
@@ -140,6 +148,14 @@ fast_agg <- function(d, by, vals, how = c("sum", "mean")) {
 #'   per (cell, method, replicate).
 #' @param expect_jobs Expected number of distinct job_dir values after filtering.
 prepare_analysis_table <- function(d, expect_jobs = getOption("fmb.expect_jobs", 45L)) {
+  # 0. Drop methods with known-partial coverage (see EXCLUDE_METHODS).
+  if ("method" %in% names(d) && length(EXCLUDE_METHODS)) {
+    n0 <- nrow(d)
+    d <- d[!d$method %in% EXCLUDE_METHODS, , drop = FALSE]
+    if (nrow(d) < n0)
+      message(sprintf("  excluded %s (%d rows): partial coverage, see EXCLUDE_METHODS",
+                      paste(EXCLUDE_METHODS, collapse = ", "), n0 - nrow(d)))
+  }
   # 1. FILTER on the raw NA.
   if ("n_ref" %in% names(d)) d <- d[is.na(d$n_ref), , drop = FALSE]
   n_jobs <- length(unique(d$job_dir))
