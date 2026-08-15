@@ -223,10 +223,21 @@ chk("in-sample LD only", all(is.na(L3$n_ref)),
 chk(sprintf("%d job rows (from params_grid.csv)", EXPECT_JOBS),
     length(unique(L3$job_dir)) == EXPECT_JOBS,
     paste(length(unique(L3$job_dir)), "found"))
-bal <- table(L3$method)
-chk("balanced cells per method", length(unique(bal)) == 1L,
+# Check the table that is actually ANALYSED, i.e. after EXCLUDE_METHODS. Every
+# sense script calls prepare_analysis_table(), which drops methods with known
+# partial coverage; testing raw L3 meant Iteration 004 reported
+#   [FAIL] balanced cells per method -- range 1850-5625
+# where 1850 was CARMA, deliberately excluded after being dropped mid-run, and
+# all 18 analysed methods sat at exactly 5625. A check that fails by design on
+# every future run trains you to ignore it, which is worse than not having it.
+bal <- table(L3$method[!L3$method %in% EXCLUDE_METHODS])
+chk("balanced cells per method (after EXCLUDE_METHODS)", length(unique(bal)) == 1L,
     paste0("range ", min(bal), "-", max(bal),
            "; the §7 closed-form correction assumes 20 fits in every cell"))
+if (length(EXCLUDE_METHODS))
+  chk(sprintf("excluded from the analysis: %s",
+              paste(EXCLUDE_METHODS, collapse = ", ")), TRUE,
+      "partial coverage by design - not a defect")
 chk("no all-NA method outside the none arm",
     !any(vapply(split(L3$ap[L3$annotation_type != "none"],
                       L3$method[L3$annotation_type != "none"]),

@@ -95,7 +95,25 @@ for (st in STRATA) {
                     100 * mean(!keep), HEADROOM_EPS))
 
     wk <- w[keep, , drop = FALSE]
-    for (m in intersect(FOCUS, names(wk))) {
+    # A fully-closed gate is not an error to be crashed on. On the `none` arm it
+    # is the EXPECTED answer: with no annotations the ceiling (polyfun_oracle)
+    # and the baseline (susie) reduce to the same method - measured at 0.6819
+    # for both in Iteration 004 - so headroom is identically zero and kappa is
+    # undefined by construction, not by failure. In an annotated stratum a 100%
+    # gate would instead mean the ceiling has collapsed, which is itself a
+    # finding worth reporting. Either way there is nothing to decompose.
+    #
+    # Guarding this also fixes the crash that killed Sense G outright: with zero
+    # surviving rows, `kd$method <- m` assigns a length-1 value into a 0-row data
+    # frame and R throws "replacement has 1 row, data has 0", taking the whole
+    # script (and both remaining strata) down with it.
+    if (!nrow(wk)) {
+      message(sprintf(
+        "  no rows survive the headroom gate%s - kappa undefined here, skipping",
+        if (identical(st$annotation_type, "none") ||
+            grepl("_none$", st$key)) " (expected: no annotations, so no headroom)"
+        else " (the ceiling has collapsed - see the exclusions table)"))
+    } else for (m in intersect(FOCUS, names(wk))) {
       k <- (wk[[m]] - wk[[BASELINE]]) / wk$headroom
       kd <- wk[, c(".cell", "job_dir", "S", "phi", "region_size", "pc", "enrich",
                    "model", "annotation_type"), drop = FALSE]
