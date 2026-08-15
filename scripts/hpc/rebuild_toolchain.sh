@@ -35,11 +35,11 @@ module load "$PYTHON_MODULE" 2>/dev/null || echo "  (module load skipped - using
 
 # --- 1. the virtualenv ------------------------------------------------------
 if [[ ! -f "$DEST/fmpy-venv/pyvenv.cfg" ]]; then
-  echo "[1/5] creating fmpy-venv"
+  echo "[1/6] creating fmpy-venv"
   rm -rf "$DEST/fmpy-venv"
   python3 -m venv "$DEST/fmpy-venv"
 else
-  echo "[1/5] fmpy-venv already present, reusing"
+  echo "[1/6] fmpy-venv already present, reusing"
 fi
 # shellcheck disable=SC1091
 source "$DEST/fmpy-venv/bin/activate"
@@ -55,7 +55,7 @@ python -m pip install numpy scipy pandas torch absl-py
 # --- 2. the runner the methods are handed as `python` -----------------------
 # run_benchmark_job.R passes TOOLS_ROOT/py-venv-runner.sh as the `python`
 # argument to every Python-backed method, so it must behave like an interpreter.
-echo "[2/5] writing py-venv-runner.sh"
+echo "[2/6] writing py-venv-runner.sh"
 cat > "$DEST/py-venv-runner.sh" <<RUNNER
 #!/bin/bash
 # Behaves like a python interpreter, but inside the benchmark's venv.
@@ -65,8 +65,30 @@ exec python "\$@"
 RUNNER
 chmod +x "$DEST/py-venv-runner.sh"
 
-# --- 3. Python-source tools -------------------------------------------------
-echo "[3/5] cloning Python tools"
+# --- 3. repoint ~/tools NOW -------------------------------------------------
+# Deliberately BEFORE the tool builds. The venv is the part that must be right,
+# and it is complete by here (steps 1-2 run under set -e). Doing the symlink
+# last meant a single failing binary build aborted the script and left ~/tools
+# still pointing at the purging ephemeral copy - which is exactly what happened
+# on the first run. Individual tools can be retried; the redirect should not be
+# hostage to them.
+echo "[3/6] repointing ~/tools -> $DEST"
+if [[ -L "$HOME/tools" ]]; then
+  echo "  existing symlink -> $(readlink -f "$HOME/tools") (replacing)"
+  rm -f "$HOME/tools"
+elif [[ -e "$HOME/tools" ]]; then
+  echo "  ~/tools is a real directory; moving aside to ~/tools.pre-rebuild"
+  mv "$HOME/tools" "$HOME/tools.pre-rebuild"
+fi
+ln -s "$DEST" "$HOME/tools"
+
+# From here on a failure is reported, not fatal: a missing binary costs one
+# method, whereas aborting costs the redirect and every method after it.
+set +e
+FAILED_TOOLS=""
+
+# --- 4. Python-source tools -------------------------------------------------
+echo "[4/6] cloning Python tools"
 [[ -d "$DEST/SparsePro/.git" ]]        || { rm -rf "$DEST/SparsePro";        git clone --depth 1 https://github.com/zhwm/SparsePro "$DEST/SparsePro"; }
 [[ -d "$DEST/fine-mapping-inf/.git" ]] || { rm -rf "$DEST/fine-mapping-inf"; git clone --depth 1 https://github.com/FinucaneLab/fine-mapping-inf "$DEST/fine-mapping-inf"; }
 [[ -d "$DEST/Funmap/.git" ]]           || { rm -rf "$DEST/Funmap";           git clone --depth 1 https://github.com/LeeHITsz/Funmap.git "$DEST/Funmap"; }
@@ -75,32 +97,47 @@ for r in SparsePro/requirements.txt fine-mapping-inf/requirements.txt Funmap/req
 done
 [[ -d "$DEST/Funmap" ]] && python -m pip install "$DEST/Funmap" || true
 
-# --- 4. compiled binaries ---------------------------------------------------
-echo "[4/5] fetching binaries"
+# --- 5. FINEMAP -------------------------------------------------------------
+echo "[5/6] fetching FINEMAP 1.4.2"
 if [[ ! -x "$DEST/finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64" ]]; then
-  curl -fsSL -O http://www.christianbenner.com/finemap_v1.4.2_x86_64.tgz
-  tar -xzf finemap_v1.4.2_x86_64.tgz && rm -f finemap_v1.4.2_x86_64.tgz
-  chmod +x "$DEST/finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64" || true
+  ( cd "$DEST" \
+    && curl -fSL -o finemap.tgz http://www.christianbenner.com/finemap_v1.4.2_x86_64.tgz \
+    && tar -xzf finemap.tgz && rm -f finemap.tgz )
+  chmod +x "$DEST/finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64" 2>/dev/null
 fi
-if [[ ! -x "$DEST/PAINTOR_V3.0/PAINTOR" ]]; then
-  [[ -d "$DEST/PAINTOR_V3.0/.git" ]] || git clone --depth 1 https://github.com/gkichaev/PAINTOR_V3.0 "$DEST/PAINTOR_V3.0"
-  ( cd "$DEST/PAINTOR_V3.0" && bash install.sh )
-fi
+[[ -x "$DEST/finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64" ]] \
+  && echo "  finemap ok" || FAILED_TOOLS="$FAILED_TOOLS finemap"
 
-# --- 5. repoint ~/tools -----------------------------------------------------
-# Deliberately a symlink, not a move: every script resolves ~/tools, so this is
-# the single switch that redirects all of them at once.
-echo "[5/5] repointing ~/tools -> $DEST"
-if [[ -L "$HOME/tools" ]]; then
-  OLD="$(readlink -f "$HOME/tools")"
-  echo "  existing symlink -> $OLD (replacing)"
-  rm -f "$HOME/tools"
-elif [[ -e "$HOME/tools" ]]; then
-  echo "  ~/tools is a real directory; moving aside to ~/tools.pre-rebuild"
-  mv "$HOME/tools" "$HOME/tools.pre-rebuild"
+# --- 6. PAINTOR -------------------------------------------------------------
+# PAINTOR ships a PRE-GENERATED nlopt config.status carrying the author's own
+# macOS prefix (/Users/glebkichaev/Dropbox/PAINTOR_3.0), and its configure
+# scripts arrive without the executable bit. When ./configure cannot run,
+# autotools silently falls back to that stale config.status, nlopt installs its
+# headers to a path that does not exist, and the PAINTOR compile then dies on
+#   fatal error: nlopt.hpp: No such file or directory
+# So: make configure executable and delete the stale cache first, forcing a real
+# reconfigure against this machine.
+echo "[6/6] building PAINTOR"
+if [[ ! -x "$DEST/PAINTOR_V3.0/PAINTOR" ]]; then
+  [[ -d "$DEST/PAINTOR_V3.0/.git" ]] \
+    || git clone --depth 1 https://github.com/gkichaev/PAINTOR_V3.0 "$DEST/PAINTOR_V3.0"
+  (
+    cd "$DEST/PAINTOR_V3.0" || exit 1
+    find . -name 'configure' -exec chmod +x {} + 2>/dev/null
+    chmod +x install.sh 2>/dev/null
+    rm -f nlopt-*/config.status nlopt-*/config.cache 2>/dev/null
+    bash install.sh
+  )
 fi
-ln -s "$DEST" "$HOME/tools"
+[[ -x "$DEST/PAINTOR_V3.0/PAINTOR" ]] \
+  && echo "  PAINTOR ok" || FAILED_TOOLS="$FAILED_TOOLS PAINTOR"
 
 echo
-echo "Done. Verify before submitting anything:"
+echo "~/tools -> $(readlink -f "$HOME/tools")"
+if [[ -n "$FAILED_TOOLS" ]]; then
+  echo "WARNING: these did not build:$FAILED_TOOLS"
+  echo "         Everything else is in place. Fix or install them by hand, then re-check."
+fi
+echo
+echo "Verify before submitting anything:"
 echo "  bash scripts/hpc/check_toolchain.sh"
