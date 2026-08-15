@@ -134,6 +134,57 @@ false alarm on every run.
 **For the paper:** funmap's row on the no-annotation stratum is *empty*, not *poor*. A
 reader must not infer a performance claim from an absence.
 
+### A method that produces nothing *without saying so*
+
+**`finemap_inf` returns an all-NA posterior at phi = 0.6 while reporting no error.**
+Found after the fitting array completed: all 11,250 `results.rds` were present, but only
+10,861 `evaluation.rds`. All 389 missing evaluations carried one identical message —
+`'vec' must be sorted non-decreasingly and not contain NAs`, from `findInterval()`.
+
+Decoding the scenario indices (`expand.grid(S, phi, iter)`, S fastest) put every failure
+on phi level 5, the level added this iteration. The mechanism, confirmed by direct
+inspection of `results.rds`:
+
+| arm | S=1, phi=0.6 | S=10, phi=0.6 | `err_fits` |
+|---|---|---|---|
+| sparse | 100% NA | works | **0 — silent** |
+| sparse_inf | works | 100% NA | **10 — declared** |
+
+`finemap_inf` breaks at phi = 0.6 in *both* models, at opposite ends of S, and the two
+failures report themselves differently. `evaluate_methods()` skips fits carrying an
+`error` but has no defence against a fit that silently returns all-NA, so **the 389
+evaluation failures are exactly the silent ones**. In the sparse arm that is S ∈ {1,2,3,5}
+across all 10 iterations plus S=10 in 3 of them — 43 per row × 9 rows ≈ 387, plus
+sparse_inf stragglers. The declared failures crashed nothing and were never a problem.
+
+Two consequences.
+
+**No compute was lost.** `results.rds` holds the raw PIPs and is written *before*
+evaluation, which runs inside a `tryCatch`. The Iteration 004 analysis re-derives every
+metric from `results.rds` + `sim.rds` and never reads `evaluation.rds`, so the 389 gaps
+cost nothing.
+
+**The collect had the same latent fault.** Its guard was `all(is.na(pip))`, which returns
+`FALSE` for a *partially* non-finite vector. Verified against the real functions:
+`.compute_ap_exact()` returns NA via a length-recycled comparison with only a warning, and
+`.rank_set_metrics()` throws. These NAs turned out to be whole-vector, so the old code
+would have survived this dataset — but the guard is now `!all(is.finite(pip))`, catching
+`Inf` from `exp()` overflow and the `NaN` from `Inf/sum(Inf)`, with a `tryCatch` so one
+pathological fit cannot kill a 250-scenario task.
+
+Such a fit is **marked failed, not imputed**. Its total mass and the ranking of the
+affected variants are undefined, so no metric derived from it is trustworthy; imputing the
+non-finite entries to 0 would invent posterior mass and would flatter precisely the method
+that overflowed. A new `bad_pip` column, scoped to fits that did *not* report an error,
+makes the loss countable per method × phi and keeps a silent failure distinguishable from
+an honest one like funmap's.
+
+**For the paper:** this is a robustness result about `finemap_inf`, not a reason to drop
+phi = 0.6 — the level is valid for the other 17 methods. But `finemap_inf`'s variance
+decomposition must not simply skip the level where it collapses: dropping phi = 0.6 from
+its own phi main effect removes the level it fails hardest on and makes it look *more*
+phi-robust than it is. Report the failure rate as a result alongside the metric.
+
 ---
 
 ## 4. Functional BEATRICE hyperparameters
