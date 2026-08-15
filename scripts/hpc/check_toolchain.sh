@@ -75,9 +75,37 @@ echo
 echo "Python imports (via the runner the methods are actually given)"
 RUNNER="$TOOLS_ROOT/py-venv-runner.sh"
 if [[ -x "$RUNNER" ]]; then
+  # Show the REAL error. The first version of this check sent stderr to
+  # /dev/null, so a failing import printed a bare [MISS] and cost a whole
+  # round trip to work out that the interpreter could not even start. The
+  # last two lines of the traceback name the cause; print them.
   for m in numpy scipy.special pandas torch absl.flags; do
-    if "$RUNNER" -c "import $m" 2>/dev/null; then okay "import $m"; else bad "import $m"; fi
+    err="$("$RUNNER" -c "import $m" 2>&1)"; rc=$?
+    if (( rc == 0 )); then
+      okay "import $m"
+    else
+      bad "import $m"
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && printf "             %s\n" "$line"
+      done < <(printf '%s\n' "$err" | tail -2)
+    fi
   done
+  # ASSERT the interpreter is the venv's, do not merely report it. Imports
+  # succeeding proves nothing on its own: if the venv's interpreter is broken,
+  # a bare `python` resolves to whatever else is on PATH, and should that
+  # interpreter happen to carry numpy/scipy/torch the whole check passes while
+  # every method silently runs against an environment nobody configured. This
+  # assertion is the difference between a preflight and a placebo.
+  echo
+  got_prefix="$("$RUNNER" -c 'import sys; print(sys.prefix)' 2>&1 | tail -1)"
+  want_prefix="$TOOLS_ROOT/fmpy-venv"
+  printf "  %-10s %s\n" "[info]" "prefix: $got_prefix"
+  if [[ "$got_prefix" == "$want_prefix" ]]; then
+    okay "interpreter is the benchmark venv"
+  else
+    bad "WRONG INTERPRETER - expected $want_prefix"
+    say "" "the runner fell through to another python; the venv is broken"
+  fi
 else
   bad "py-venv-runner.sh not executable - cannot test imports"
 fi
