@@ -121,6 +121,8 @@ message("  scenarios on disk: ", length(scen_dirs))
 rows <- vector("list", length(scen_dirs) * 200L)
 k <- 0L
 n_skipped <- 0L
+n_badpip  <- 0L   # fits carrying non-finite PIPs (see the guard below)
+n_errored <- 0L   # fits whose metric computation threw despite the guard
 
 for (sd in scen_dirs) {
   # THE SCENARIO INDEX COMES FROM THE DIRECTORY NAME, NOT FROM THE FIT.
@@ -155,6 +157,16 @@ for (sd in scen_dirs) {
       if (is.null(tr)) next
 
       n_var <- length(fit$pip)
+      # is.finite() rather than is.na(): exp() overflow yields Inf, and Inf/sum
+      # yields NaN, so both must be caught. A zero-length PIP vector is equally
+      # unusable and is folded into the same flag.
+      # Scoped to fits that did NOT report an error, so bad_pip means exactly
+      # "the method claimed success and returned non-finite output" - the
+      # alarming case. A fit that already declared failure is accounted for by
+      # `failed`; letting it also set bad_pip would bury the overflow signal
+      # under structural absences like funmap on the unannotated arm.
+      bad_pip <- !failed && (n_var == 0L || !all(is.finite(fit$pip)))
+      if (bad_pip) n_badpip <- n_badpip + 1L
       rsz <- if (!is.null(p_nominal) && length(p_nominal) >= fit$region_id)
                as.integer(p_nominal[fit$region_id]) else n_var
 
@@ -168,18 +180,40 @@ for (sd in scen_dirs) {
         region_idx  = region_idx_of(fit$region_id),
         region_size = rsz,
         method      = m,
-        failed      = failed
+        failed      = failed,
+        bad_pip     = bad_pip
       )
 
       # A failed fit contributes an all-NA metric row, NOT a dropped row. Its
       # absence must stay visible downstream - funmap on the `none` arm is
       # structural, not missing at random, and an NA-dropping aggregation would
       # quietly change the method set per cell.
-      met <- if (failed || all(is.na(fit$pip))) {
+      #
+      # NON-FINITE PIPs COUNT AS FAILURE (Iteration 004). The phi=0.6 arm added
+      # this iteration produced fits carrying NaN/Inf PIPs - numerical overflow
+      # at high heritability - which is what killed evaluate_methods() on 389
+      # scenarios with "'vec' must be sorted non-decreasingly and not contain
+      # NAs". The PARTIALLY non-finite vector is the dangerous case: the old
+      # all(is.na()) test returns FALSE for it, .compute_ap_exact then returns
+      # NA via a length-recycled comparison (with only a warning), and
+      # .rank_set_metrics throws outright.
+      #
+      # Such a posterior has undefined total mass and an undefined ranking for
+      # the affected variants, so NO metric derived from it is trustworthy: the
+      # fit is marked failed, not repaired. Imputing the non-finite entries to 0
+      # would invent posterior mass and would flatter precisely the method that
+      # overflowed. bad_pip is carried as its own column so this loss is
+      # countable per method x phi rather than being conflated with `failed`.
+      met <- if (failed || bad_pip) {
         proto <- fit_row(rep(0, max(n_var, 1L)), integer(0), max(n_var, 1L))
         lapply(proto, function(z) NA_real_)
       } else {
-        fit_row(fit$pip, tr$causal_indices, n_var)
+        # Belt and braces: one pathological fit must not kill a 250-scenario task.
+        tryCatch(fit_row(fit$pip, tr$causal_indices, n_var), error = function(e) {
+          n_errored <<- n_errored + 1L
+          proto <- fit_row(rep(0, max(n_var, 1L)), integer(0), max(n_var, 1L))
+          lapply(proto, function(z) NA_real_)
+        })
       }
 
       k <- k + 1L
@@ -199,3 +233,18 @@ out_file <- file.path(out_dir, sprintf("L1_%s.rds", label))
 saveRDS(L1, out_file)
 message(sprintf("  wrote %s  (%d fit rows, %d scenarios skipped)",
                 basename(out_file), nrow(L1), n_skipped))
+# Surfaced per row so a systematic overflow shows up in the Stage A logs rather
+# than only as thinned cells much later in the decomposition.
+if (n_badpip > 0L || n_errored > 0L) {
+  message(sprintf("  NON-FINITE PIPs: %d fits marked failed; %d metric errors caught",
+                  n_badpip, n_errored))
+  bp <- L1[L1$bad_pip, , drop = FALSE]
+  if (nrow(bp)) {
+    tb <- table(bp$method, bp$phi)
+    message("  bad_pip fits by method x phi:")
+    for (i in seq_len(nrow(tb))) {
+      message(sprintf("    %-22s %s", rownames(tb)[i],
+                      paste(sprintf("phi=%s:%d", colnames(tb), tb[i, ]), collapse = "  ")))
+    }
+  }
+}
