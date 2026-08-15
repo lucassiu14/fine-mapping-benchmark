@@ -145,6 +145,29 @@ module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}
 source ${PY_VENV_ACTIVATE}
+# PREFLIGHT: sourcing activate proves the venv PATH exists, NOT that its packages
+# import. Iteration 004 lost the entire sparse_inf arm to this gap - activation
+# succeeded, then every Python-backed method (beatrice, functional_beatrice,
+# fb_pooled, fb_xregion, sparsepro, finemap_inf, funmap) died on ImportError
+# inside its subprocess. The R wrapper caught each one and recorded a failed fit,
+# so the job ran for hours writing 40-50% NA instead of stopping, and the damage
+# was only visible after the analysis. Fail the task at second zero instead.
+python - <<'PYCHECK'
+import importlib, sys
+missing = []
+for mod in ("numpy", "scipy.special", "torch", "absl.flags", "pandas"):
+    try:
+        importlib.import_module(mod)
+    except Exception as e:
+        missing.append("%s: %s" % (mod, e))
+if missing:
+    sys.stderr.write("PREFLIGHT FAILED - the Python environment is broken:\n")
+    for m in missing:
+        sys.stderr.write("  " + m + "\n")
+    sys.stderr.write("venv: " + sys.prefix + "\n")
+    sys.exit(1)
+sys.stderr.write("preflight ok - venv %s\n" % sys.prefix)
+PYCHECK
 echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} of ${ARRAY_RANGE} starting at \$(date)"
 echo "[node:\$(hostname)] FMB_OUTPUT_ROOT=\${FMB_OUTPUT_ROOT}"
 ${RSCRIPT} scripts/hpc/run_benchmark_job.R "\${PBS_ARRAY_INDEX}"
