@@ -82,10 +82,23 @@ for root in roots:
 
 third_party = sorted(found - set(sys.stdlib_module_names) - local)
 
-missing = []
+# ACTUALLY IMPORT each module. find_spec() only proves the module can be
+# LOCATED, not that it loads: a package whose compiled extension is broken
+# passes find_spec and then dies at runtime. Caught live - the bgzip wheel
+# imports fine by spec but raises
+#   ImportError: symbol not found in flat namespace '___kmpc_dispatch_deinit'
+# because its C extension wants an OpenMP runtime that is not present. That is
+# the same shape as every other failure in this iteration: present, locatable,
+# and useless. Importing is the only test that distinguishes them.
+missing, broken = [], []
 for m in third_party:
     if importlib.util.find_spec(m) is None:
         missing.append(m)
+        continue
+    try:
+        importlib.import_module(m)
+    except Exception as e:                      # noqa: BLE001 - report anything
+        broken.append((m, f"{type(e).__name__}: {e}"))
 
 print(f"third-party imports discovered: {len(third_party)}")
 print("  " + " ".join(third_party))
@@ -94,5 +107,12 @@ if missing:
     for m in missing:
         print(f"  {m:<20} pip install {PIP_NAME.get(m, m)}")
     print("\npip install " + " ".join(PIP_NAME.get(m, m) for m in missing))
+if broken:
+    print(f"\nINSTALLED BUT FAILS TO IMPORT ({len(broken)}):")
+    for m, err in broken:
+        print(f"  {m:<20} {err[:150]}")
+    print("\nThese will NOT be fixed by pip install - the package is present.")
+    print("A missing system library (OpenMP, BLAS, zlib) is the usual cause.")
+if missing or broken:
     sys.exit(1)
 print("\nall discovered imports resolve")
