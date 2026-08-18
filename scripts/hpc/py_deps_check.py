@@ -31,6 +31,10 @@ PIP_NAME = {
     "absl": "absl-py", "sklearn": "scikit-learn", "cv2": "opencv-python",
     "PIL": "pillow", "yaml": "pyyaml", "skimage": "scikit-image",
     "Bio": "biopython", "dateutil": "python-dateutil",
+    # pkg_resources ships inside setuptools; `pip install pkg_resources` fails.
+    # fine-mapping-inf calls pkg_resources.require("finemapinf"), which also
+    # means its sub-packages must be pip-INSTALLED, not merely cloned.
+    "pkg_resources": "setuptools",
 }
 
 roots = [pathlib.Path(a) for a in sys.argv[1:]]
@@ -41,6 +45,25 @@ if not roots:
 
 found, local = set(), set()
 for root in roots:
+    # Compiled extensions and C/C++ sources declare modules that are BUILT from
+    # this tree, never installed from PyPI. fine-mapping-inf's _c_funcs is one:
+    # setup.py declares Extension('_c_funcs', ...) over py_extension.cpp, so it
+    # exists only after `pip install ./finemapinf`. Without this the scan
+    # reports "pip install _c_funcs", which can never succeed, and the toolchain
+    # check fails forever on a package that is not missing at all.
+    for ext in ("*.so", "*.pyd", "*.pyx", "*.cpp", "*.c"):
+        for q in root.rglob(ext):
+            local.add(q.stem.split(".")[0])
+    for q in root.rglob("setup.py"):
+        try:
+            for line in q.read_text(errors="ignore").splitlines():
+                if "Extension(" in line:
+                    seg = line.split("Extension(", 1)[1]
+                    name = seg.strip().strip("'\"").split("'")[0].split('"')[0]
+                    if name:
+                        local.add(name.strip("'\" ").split(",")[0])
+        except OSError:
+            pass
     for p in root.rglob("*.py"):
         local.add(p.stem)
         local.add(p.parent.name)

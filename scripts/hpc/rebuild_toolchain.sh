@@ -45,7 +45,13 @@ else
 fi
 # shellcheck disable=SC1091
 source "$DEST/fmpy-venv/bin/activate"
-python -m pip install --upgrade pip setuptools wheel
+# setuptools PINNED BELOW 81. Versions 81+ REMOVED pkg_resources, and
+# fine-mapping-inf does `import pkg_resources` plus
+# pkg_resources.require("finemapinf") for its version string. An unpinned
+# --upgrade pulls 84.x, pkg_resources vanishes, and finemap_inf dies with
+# ModuleNotFoundError - verified locally: 84.0.0 fails, 80.10.2 works.
+python -m pip install --upgrade pip wheel
+python -m pip install --upgrade "setuptools<81"
 
 # absl-py is pinned because BEATRICE imports `from absl import app` and calls
 # absl.flags.FLAGS; the failures in Iteration 004 were
@@ -119,6 +125,24 @@ for r in SparsePro/requirements.txt fine-mapping-inf/requirements.txt Funmap/req
   [[ -f "$DEST/$r" ]] && python -m pip install -r "$DEST/$r" || true
 done
 [[ -d "$DEST/Funmap" ]] && python -m pip install "$DEST/Funmap" || true
+
+# fine-mapping-inf must be BUILT, not merely cloned. Its finemapinf sub-package
+# declares Extension('_c_funcs', ...) over py_extension.cpp, so `import
+# _c_funcs` only resolves after a real compile, and pkg_resources.require()
+# needs both sub-packages present as installed distributions. Cloning alone -
+# which is all this script used to do - leaves finemap_inf broken in a way no
+# amount of pip-installing third-party names can fix.
+#
+# --no-build-isolation because setup.py imports numpy AT BUILD TIME; with
+# isolation pip builds in a clean env without it and fails on
+# "ModuleNotFoundError: No module named 'numpy'". Verified locally both ways.
+for sub in finemapinf susieinf; do
+  if [[ -f "$DEST/fine-mapping-inf/$sub/setup.py" ]]; then
+    echo "  building $sub (C extension)"
+    python -m pip install --no-build-isolation "$DEST/fine-mapping-inf/$sub" \
+      || FAILED_TOOLS="$FAILED_TOOLS $sub"
+  fi
+done
 
 # --- 4b. install what the tools ACTUALLY import ------------------------------
 # The hand-written list above (numpy/scipy/pandas/torch/absl-py) is necessary
