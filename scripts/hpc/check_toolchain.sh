@@ -75,21 +75,30 @@ echo
 echo "Python imports (via the runner the methods are actually given)"
 RUNNER="$TOOLS_ROOT/py-venv-runner.sh"
 if [[ -x "$RUNNER" ]]; then
-  # Show the REAL error. The first version of this check sent stderr to
-  # /dev/null, so a failing import printed a bare [MISS] and cost a whole
-  # round trip to work out that the interpreter could not even start. The
-  # last two lines of the traceback name the cause; print them.
-  for m in numpy scipy.special pandas torch absl.flags; do
-    err="$("$RUNNER" -c "import $m" 2>&1)"; rc=$?
-    if (( rc == 0 )); then
-      okay "import $m"
+  # DERIVE the required imports from the tools' own source rather than listing
+  # them here. A hand-written list is how the second array was lost: it read
+  # numpy/scipy/pandas/torch/absl-py, every one of which imported fine, while
+  # BEATRICE also needs imageio, seaborn and tqdm and FINEMAP-inf needs bgzip.
+  # The check passed, the array ran, and all 2,520 fits died on
+  # ModuleNotFoundError. The source is on disk; there is no reason to guess.
+  DEPS="$TOOLS_ROOT/py_deps_check.py"
+  [[ -f "$DEPS" ]] || DEPS="$PROJECT_ROOT/scripts/hpc/py_deps_check.py"
+  if [[ -f "$DEPS" ]]; then
+    dep_out="$("$RUNNER" "$DEPS" \
+        "$PROJECT_ROOT/BEATRICE_annot_sparse" \
+        "$TOOLS_ROOT/SparsePro" "$TOOLS_ROOT/fine-mapping-inf" \
+        "$TOOLS_ROOT/Funmap" 2>&1)"; dep_rc=$?
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && printf "             %s\n" "$line"
+    done < <(printf '%s\n' "$dep_out")
+    if (( dep_rc == 0 )); then
+      okay "every import the tool sources actually use resolves"
     else
-      bad "import $m"
-      while IFS= read -r line; do
-        [[ -n "$line" ]] && printf "             %s\n" "$line"
-      done < <(printf '%s\n' "$err" | tail -2)
+      bad "missing packages - see the pip line above"
     fi
-  done
+  else
+    bad "py_deps_check.py not found - cannot verify the real dependency set"
+  fi
   # ASSERT the interpreter is the venv's, do not merely report it. Imports
   # succeeding proves nothing on its own: if the venv's interpreter is broken,
   # a bare `python` resolves to whatever else is on PATH, and should that

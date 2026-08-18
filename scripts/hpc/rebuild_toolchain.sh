@@ -27,7 +27,9 @@ case "$DEST" in
     exit 1 ;;
 esac
 
+PROJECT_ROOT_GUESS="${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
 echo "Rebuilding toolchain into $DEST"
+echo "  (BEATRICE source expected under $PROJECT_ROOT_GUESS)"
 mkdir -p "$DEST"
 cd "$DEST"
 
@@ -117,6 +119,36 @@ for r in SparsePro/requirements.txt fine-mapping-inf/requirements.txt Funmap/req
   [[ -f "$DEST/$r" ]] && python -m pip install -r "$DEST/$r" || true
 done
 [[ -d "$DEST/Funmap" ]] && python -m pip install "$DEST/Funmap" || true
+
+# --- 4b. install what the tools ACTUALLY import ------------------------------
+# The hand-written list above (numpy/scipy/pandas/torch/absl-py) is necessary
+# but was NOT sufficient, and assuming it was cost a whole 1,800-task array:
+# BEATRICE also imports imageio, seaborn and tqdm, FINEMAP-inf imports bgzip,
+# and every fit died on ModuleNotFoundError after the toolchain check had
+# happily passed. requirements.txt files do not cover it either - several of
+# these tools ship none, or ship one that omits their own imports.
+#
+# So: walk the sources with ast, subtract the standard library, and install
+# whatever is left over. Derived from the code, not from memory.
+echo "  resolving imports from the tool sources"
+DEPS_SCRIPT="$(dirname "$0")/py_deps_check.py"
+if [[ -f "$DEPS_SCRIPT" ]]; then
+  cp "$DEPS_SCRIPT" "$DEST/py_deps_check.py"
+  SCAN=("$PROJECT_ROOT_GUESS/BEATRICE_annot_sparse" "$DEST/SparsePro" \
+        "$DEST/fine-mapping-inf" "$DEST/Funmap")
+  for _try in 1 2; do
+    PIPLINE="$(python "$DEST/py_deps_check.py" "${SCAN[@]}" 2>/dev/null \
+               | awk '/^pip install /{sub(/^pip install /,""); print; exit}')"
+    [[ -z "$PIPLINE" ]] && break
+    echo "  missing, installing: $PIPLINE"
+    # shellcheck disable=SC2086
+    python -m pip install $PIPLINE || true
+  done
+  python "$DEST/py_deps_check.py" "${SCAN[@]}" || \
+    FAILED_TOOLS="$FAILED_TOOLS python-deps"
+else
+  echo "  WARNING: py_deps_check.py not found next to this script"
+fi
 
 # --- 5. FINEMAP -------------------------------------------------------------
 echo "[5/6] fetching FINEMAP 1.4.2"
