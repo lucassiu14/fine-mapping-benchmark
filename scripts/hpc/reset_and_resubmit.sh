@@ -34,6 +34,17 @@ LAST_ROW="${LAST_ROW:-45}"
 CHUNK="${CHUNK:-5}"
 SCEN_PER_ROW="${SCEN_PER_ROW:-250}"
 
+# module load R, because this script CALLS submit_benchmark_pbs.sh, which runs
+# Rscript to regenerate params_grid.csv. Compute nodes do not have Rscript on
+# PATH by default, so without this the deletion succeeds and the submission dies
+# with "Rscript: command not found" - leaving the checkpoints gone and no array
+# queued. verify_and_analyse.sh already did this; this script did not.
+module load "${R_MODULE:-R/4.5.2-gfbf-2025b}" 2>/dev/null || \
+  echo "WARNING: could not module load R; submission will fail if Rscript is absent"
+command -v Rscript >/dev/null 2>&1 \
+  && echo "Rscript: $(command -v Rscript)" \
+  || echo "WARNING: Rscript STILL not on PATH after module load"
+
 # Task range derived, never hardcoded. run_benchmark_job.R maps
 #   row = ((task-1) / TASKS_PER_ROW) + 1
 # so getting this wrong silently refits the WRONG rows - including the clean
