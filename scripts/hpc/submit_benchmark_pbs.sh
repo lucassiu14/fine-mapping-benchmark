@@ -152,22 +152,23 @@ source ${PY_VENV_ACTIVATE}
 # inside its subprocess. The R wrapper caught each one and recorded a failed fit,
 # so the job ran for hours writing 40-50% NA instead of stopping, and the damage
 # was only visible after the analysis. Fail the task at second zero instead.
-python - <<'PYCHECK'
-import importlib, sys
-missing = []
-for mod in ("numpy", "scipy.special", "torch", "absl.flags", "pandas"):
-    try:
-        importlib.import_module(mod)
-    except Exception as e:
-        missing.append("%s: %s" % (mod, e))
-if missing:
-    sys.stderr.write("PREFLIGHT FAILED - the Python environment is broken:\n")
-    for m in missing:
-        sys.stderr.write("  " + m + "\n")
-    sys.stderr.write("venv: " + sys.prefix + "\n")
-    sys.exit(1)
-sys.stderr.write("preflight ok - venv %s\n" % sys.prefix)
-PYCHECK
+# Preflight via the SAME derived scan check_toolchain.sh uses. An earlier
+# version listed five modules by hand - numpy/scipy/torch/absl/pandas - all of
+# which imported fine while BEATRICE's imageio, seaborn and tqdm and
+# FINEMAP-inf's bgzip were absent. The preflight passed and every fit in the
+# array died on ModuleNotFoundError. Derive the list from the tool sources so
+# the check cannot drift from what the methods actually import.
+_TOOLS="\$(readlink -f "\$HOME/tools" 2>/dev/null || echo "\$HOME/tools")"
+if [[ -f "${PROJECT_ROOT}/scripts/hpc/py_deps_check.py" ]]; then
+  python "${PROJECT_ROOT}/scripts/hpc/py_deps_check.py" \\
+      "${PROJECT_ROOT}/BEATRICE_annot_sparse" \\
+      "\$_TOOLS/SparsePro" "\$_TOOLS/fine-mapping-inf" "\$_TOOLS/Funmap" \\
+    || { echo "PREFLIGHT FAILED - see the missing/broken packages above" >&2; exit 1; }
+  echo "preflight ok - dependency scan clean" >&2
+else
+  echo "PREFLIGHT FAILED - py_deps_check.py missing at ${PROJECT_ROOT}/scripts/hpc/" >&2
+  exit 1
+fi
 echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} of ${ARRAY_RANGE} starting at \$(date)"
 echo "[node:\$(hostname)] FMB_OUTPUT_ROOT=\${FMB_OUTPUT_ROOT}"
 ${RSCRIPT} scripts/hpc/run_benchmark_job.R "\${PBS_ARRAY_INDEX}"
