@@ -1,0 +1,86 @@
+\begin{table}[htbp]\centering\small
+\caption{\textbf{No annotations} --- all methods, sparse arm. Ranked by mean AP. \emph{cells} is the number of non-missing cells out of 1{,}125; anything below that is a genuine absence, explained in \S\ref{sec:completeness}.}
+\label{tab:main-none}
+\begin{tabular}{lrrrrrrrr r}\toprule
+method & AP & FDR@.9 & mass & ECE$_{hi}$ & $|CS_{95}|$ & cov$_{95}$ & RES & BSS & cells\\\midrule
+susie\_inf & 0.7095 & 0.0062 & 1.14 & 0.0288 & 4.2 & 19.864 & 0.0023 & 0.575 & 125\\
+polyfun\_est & 0.6819 & 0.0061 & 1.73 & 0.0225 & 1.7 & 19.800 & 0.0024 & 0.579 & 125\\
+polyfun\_ldsc & 0.6819 & 0.0061 & 1.73 & 0.0225 & 1.7 & 19.800 & 0.0024 & 0.579 & 125\\
+polyfun\_oracle & 0.6819 & 0.0061 & 1.73 & 0.0225 & 1.7 & 19.800 & 0.0024 & 0.579 & 125\\
+susie & 0.6819 & 0.0061 & 1.73 & 0.0225 & 1.7 & 19.800 & 0.0024 & 0.579 & 125\\
+finemap & 0.6767 & 0.0442 & 1.16 & 0.0683 & 1.5 & 19.168 & 0.0021 & 0.490 & 125\\
+finemap\_inf & 0.6711 & 0.1815 & 1.82 & 0.1619 & 1.7 & 16.864 & 0.0021 & 0.056 & 120\\
+\textbf{beatrice} & 0.6659 & 0.0237 & 1.84 & 0.1434 & 1.9 & 18.888 & 0.0018 & 0.321 & 125\\
+\textbf{fb\_pooled} & 0.6659 & 0.0237 & 1.84 & 0.1434 & 1.9 & 18.888 & 0.0018 & 0.321 & 125\\
+\textbf{fb\_xregion} & 0.6659 & 0.0237 & 1.84 & 0.1434 & 1.9 & 18.888 & 0.0018 & 0.321 & 125\\
+\textbf{functional\_beatrice} & 0.6659 & 0.0237 & 1.84 & 0.1434 & 1.9 & 18.888 & 0.0018 & 0.321 & 125\\
+sparsepro & 0.5737 & 0.1556 & 1.45 & 0.1232 & 1.5 & 17.336 & 0.0019 & 0.249 & 125\\
+finimom & 0.5735 & 0.1213 & 1.12 & 0.0890 & 1.7 & 18.056 & 0.0019 & 0.322 & 125\\
+paintor & 0.5247 & 0.0570 & 0.74 & 0.0615 & 1.8 & 19.008 & 0.0013 & 0.372 & 125\\
+sbayesrc & 0.4841 & 0.3705 & 10.02 & 0.2207 & 1.0 & 13.064 & 0.0015 & -0.552 & 125\\
+marginal\_z & 0.4086 & 0.0000 & 0.43 & NaN & 735.6 & 20.000 & 0.0000 & -0.003 & 125\\
+abf & 0.4005 & 0.0054 & 0.43 & 0.0237 & 3.3 & 19.920 & 0.0008 & 0.314 & 125\\
+funmap & NaN & 0.0000 & NaN & NaN & NaN & 0.000 & NaN & NaN & 0\\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[htbp]\centering\small
+\caption{\textbf{Binary annotations} --- all methods, sparse arm. Ranked by mean AP. \emph{cells} is the number of non-missing cells out of 1{,}125; anything below that is a genuine absence, explained in \S\ref{sec:completeness}.}
+\label{tab:main-binary}
+\begin{tabular}{lrrrrrrrr r}\toprule
+method & AP & FDR@.9 & mass & ECE$_{hi}$ & $|CS_{95}|$ & cov$_{95}$ & RES & BSS & cells\\\midrule
+polyfun\_oracle & 0.8432 & 0.0110 & 1.63 & 0.0715 & 1.2 & 19.866 & 0.0032 & 0.694 & 500\\
+polyfun\_est & 0.7914 & 0.0046 & 1.81 & 0.0376 & 1.4 & 19.914 & 0.0028 & 0.644 & 500\\
+polyfun\_ldsc & 0.7732 & 0.0209 & 1.81 & 0.0440 & 1.3 & 19.668 & 0.0027 & 0.635 & 500\\
+\textbf{fb\_xregion} & 0.7484 & 0.0569 & 2.08 & 0.1454 & 1.3 & 19.306 & 0.0023 & 0.301 & 500\\
+susie\_inf & 0.7470 & 0.0043 & 1.16 & 0.0283 & 2.1 & 19.870 & 0.0026 & 0.620 & 500\\
+funmap & 0.7462 & 0.0866 & 1.81 & 0.0746 & 1.3 & 18.616 & 0.0026 & 0.614 & 500\\
+\textbf{functional\_beatrice} & 0.7280 & 0.0783 & 2.10 & 0.1547 & 1.3 & 19.034 & 0.0022 & 0.245 & 500\\
+susie & 0.7232 & 0.0050 & 1.80 & 0.0218 & 1.4 & 19.856 & 0.0026 & 0.624 & 500\\
+finemap & 0.7147 & 0.0447 & 1.14 & 0.0648 & 1.3 & 19.346 & 0.0023 & 0.535 & 500\\
+finemap\_inf & 0.7096 & 0.1717 & 1.76 & 0.1585 & 1.5 & 16.894 & 0.0024 & 0.141 & 480\\
+\textbf{beatrice} & 0.7026 & 0.0235 & 1.79 & 0.1592 & 1.9 & 19.050 & 0.0021 & 0.369 & 500\\
+\textbf{fb\_pooled} & 0.6661 & 0.0745 & 2.09 & 0.1547 & 1.5 & 18.312 & 0.0019 & 0.187 & 500\\
+paintor & 0.6458 & 0.0668 & 0.74 & 0.0919 & 1.1 & 19.064 & 0.0016 & 0.452 & 500\\
+finimom & 0.6182 & 0.1156 & 1.09 & 0.0876 & 1.4 & 18.264 & 0.0022 & 0.378 & 500\\
+sparsepro & 0.6107 & 0.1509 & 1.45 & 0.1232 & 1.3 & 17.504 & 0.0021 & 0.286 & 500\\
+sbayesrc & 0.5086 & 0.3592 & 4.74 & 0.2470 & 1.0 & 13.186 & 0.0018 & -0.313 & 500\\
+marginal\_z & 0.4467 & 0.0000 & 0.43 & NaN & 765.5 & 20.000 & 0.0000 & -0.003 & 500\\
+abf & 0.4357 & 0.0047 & 0.43 & 0.0255 & 2.7 & 19.914 & 0.0009 & 0.334 & 500\\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[htbp]\centering\small
+\caption{\textbf{Continuous annotations} --- all methods, sparse arm. Ranked by mean AP. \emph{cells} is the number of non-missing cells out of 1{,}125; anything below that is a genuine absence, explained in \S\ref{sec:completeness}.}
+\label{tab:main-continuous}
+\begin{tabular}{lrrrrrrrr r}\toprule
+method & AP & FDR@.9 & mass & ECE$_{hi}$ & $|CS_{95}|$ & cov$_{95}$ & RES & BSS & cells\\\midrule
+polyfun\_oracle & 0.9114 & 0.0119 & 1.21 & 0.0791 & 1.0 & 19.952 & 0.0037 & 0.774 & 500\\
+polyfun\_est & 0.8061 & 0.0051 & 1.77 & 0.0414 & 1.6 & 19.928 & 0.0028 & 0.641 & 500\\
+\textbf{fb\_xregion} & 0.7933 & 0.0491 & 2.14 & 0.1529 & 1.3 & 19.462 & 0.0027 & 0.327 & 500\\
+polyfun\_ldsc & 0.7914 & 0.0047 & 1.77 & 0.0360 & 1.6 & 19.906 & 0.0028 & 0.638 & 500\\
+\textbf{fb\_pooled} & 0.7681 & 0.0422 & 2.15 & 0.1504 & 1.6 & 19.424 & 0.0023 & 0.278 & 500\\
+funmap & 0.7617 & 0.0227 & 1.77 & 0.0367 & 1.6 & 19.610 & 0.0027 & 0.628 & 500\\
+susie\_inf & 0.7398 & 0.0053 & 1.13 & 0.0284 & 3.0 & 19.886 & 0.0026 & 0.618 & 500\\
+\textbf{functional\_beatrice} & 0.7204 & 0.1002 & 2.27 & 0.1728 & 1.2 & 18.680 & 0.0022 & 0.117 & 500\\
+susie & 0.7175 & 0.0059 & 1.77 & 0.0236 & 1.6 & 19.852 & 0.0027 & 0.621 & 500\\
+finemap & 0.7071 & 0.0492 & 1.16 & 0.0682 & 1.4 & 19.250 & 0.0023 & 0.529 & 500\\
+finemap\_inf & 0.7053 & 0.1708 & 1.77 & 0.1555 & 1.6 & 16.870 & 0.0024 & 0.143 & 480\\
+paintor & 0.7001 & 0.0520 & 0.74 & 0.0790 & 1.0 & 19.420 & 0.0019 & 0.520 & 500\\
+\textbf{beatrice} & 0.6981 & 0.0198 & 1.82 & 0.1531 & 1.9 & 18.846 & 0.0021 & 0.362 & 500\\
+sbayesrc & 0.6192 & 0.3000 & 5.75 & 0.1993 & 1.0 & 14.482 & 0.0024 & -0.254 & 500\\
+finimom & 0.6177 & 0.1152 & 1.09 & 0.0910 & 1.6 & 18.308 & 0.0022 & 0.378 & 500\\
+sparsepro & 0.6093 & 0.1502 & 1.45 & 0.1236 & 1.4 & 17.636 & 0.0021 & 0.294 & 500\\
+marginal\_z & 0.4371 & 0.0000 & 0.43 & NaN & 738.4 & 20.000 & 0.0000 & -0.003 & 500\\
+abf & 0.4271 & 0.0024 & 0.43 & 0.0237 & 3.0 & 19.910 & 0.0009 & 0.333 & 500\\
+\bottomrule\end{tabular}\end{table}
+\begin{table}[htbp]\centering\small
+\caption{Paired ablation on AP. Each row compares two methods on the \emph{same} simulated replicate; $n$ is the number of paired replicates. $t=\bar d/\mathrm{SE}(\bar d)$.}\label{tab:ablation}
+\begin{tabular}{llrrrrr}\toprule
+stratum & contrast & $\bar d$ & sd & $n$ & SE & $t$\\\midrule
+No annotations & annotations & 0.0000 & 0.0000 & 1250 & 0.00000 & ---\\
+No annotations & region sharing & 0.0000 & 0.0000 & 1250 & 0.00000 & ---\\
+No annotations & combined & 0.0000 & 0.0000 & 1250 & 0.00000 & ---\\
+Binary annotations & annotations & 0.0254 & 0.0975 & 4981 & 0.00138 & 18.4\\
+Binary annotations & region sharing & 0.0205 & 0.0859 & 4980 & 0.00122 & 16.8\\
+Binary annotations & combined & 0.0458 & 0.1026 & 4980 & 0.00145 & 31.5\\
+Continuous annotations & annotations & 0.0224 & 0.0962 & 4965 & 0.00136 & 16.4\\
+Continuous annotations & region sharing & 0.0730 & 0.1183 & 4960 & 0.00168 & 43.5\\
+Continuous annotations & combined & 0.0954 & 0.1352 & 4960 & 0.00192 & 49.7\\
+\bottomrule\end{tabular}\end{table}
