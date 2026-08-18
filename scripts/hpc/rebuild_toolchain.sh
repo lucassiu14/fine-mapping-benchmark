@@ -27,7 +27,15 @@ case "$DEST" in
     exit 1 ;;
 esac
 
-PROJECT_ROOT_GUESS="${PROJECT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+# BOTH resolved to ABSOLUTE paths here, BEFORE the `cd "$DEST"` below. Invoked
+# as `bash scripts/hpc/rebuild_toolchain.sh`, $0 is relative, so any later use
+# of dirname "$0" resolves against $DEST instead of the repo - which is exactly
+# how the dependency scan silently skipped itself with
+#   WARNING: py_deps_check.py not found next to this script
+# and let a rebuild finish "successfully" while bgzip, imageio, seaborn and
+# tqdm were all still missing.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT_GUESS="${PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 echo "Rebuilding toolchain into $DEST"
 echo "  (BEATRICE source expected under $PROJECT_ROOT_GUESS)"
 mkdir -p "$DEST"
@@ -155,7 +163,7 @@ done
 # So: walk the sources with ast, subtract the standard library, and install
 # whatever is left over. Derived from the code, not from memory.
 echo "  resolving imports from the tool sources"
-DEPS_SCRIPT="$(dirname "$0")/py_deps_check.py"
+DEPS_SCRIPT="$SCRIPT_DIR/py_deps_check.py"
 if [[ -f "$DEPS_SCRIPT" ]]; then
   cp "$DEPS_SCRIPT" "$DEST/py_deps_check.py"
   SCAN=("$PROJECT_ROOT_GUESS/BEATRICE_annot_sparse" "$DEST/SparsePro" \
@@ -171,7 +179,11 @@ if [[ -f "$DEPS_SCRIPT" ]]; then
   python "$DEST/py_deps_check.py" "${SCAN[@]}" || \
     FAILED_TOOLS="$FAILED_TOOLS python-deps"
 else
-  echo "  WARNING: py_deps_check.py not found next to this script"
+  # NOT a warning. Skipping the scan is precisely how a rebuild reported success
+  # while bgzip, imageio, seaborn and tqdm were all still absent; surface it in
+  # the summary so the run is not mistaken for a clean one.
+  echo "  ERROR: py_deps_check.py not found at $DEPS_SCRIPT - dependency scan SKIPPED"
+  FAILED_TOOLS="$FAILED_TOOLS python-deps-scan"
 fi
 
 # --- 5. FINEMAP -------------------------------------------------------------
