@@ -50,7 +50,8 @@ picks <- unlist(lapply(jobs, function(j) {
 
 tot <- new.env(parent = emptyenv())
 add <- function(key, field, v) {
-  cur <- if (exists(key, tot)) get(key, tot) else c(fits = 0, failed = 0, nafits = 0)
+  cur <- if (exists(key, tot)) get(key, tot) else
+           c(fits = 0, failed = 0, nafits = 0, secs = 0, nscen = 0)
   cur[[field]] <- cur[[field]] + v
   assign(key, cur, tot)
 }
@@ -77,6 +78,17 @@ for (sd in picks) {
       isTRUE(!is.null(x$pip) && is.null(x$error) && all(!is.finite(x$pip))),
       logical(1)))
     add(key, "fits", nt); add(key, "failed", nf); add(key, "nafits", na)
+    # Runtime is recorded per (method, scenario) by run_methods() as
+    # total_runtime_seconds, covering all regions of that scenario. It exists
+    # ONLY inside results.rds - no aggregate table carries it - which is why
+    # the CARMA cost that justified dropping it survives merely as a code
+    # comment. Accumulate it here so the number is recoverable from a normal QC
+    # pass instead of requiring a bespoke dig through the raw output.
+    rt <- if (is.null(v$total_runtime_seconds)) NA_real_ else
+            suppressWarnings(as.numeric(v$total_runtime_seconds))
+    if (length(rt) == 1L && is.finite(rt)) {
+      add(key, "secs", rt); add(key, "nscen", 1)
+    }
   }
 }
 
@@ -115,6 +127,27 @@ for (k in keys) {
   if (p[1] %in% exempt) next
   pct <- if (v[["fits"]] > 0) 100 * v[["nafits"]] / v[["fits"]] else 0
   if (pct > ws$pct) ws <- list(m = p[1], arm = p[2], pct = pct)
+}
+
+# ---- runtime -------------------------------------------------------------
+rt <- do.call(rbind, lapply(keys, function(k) {
+  v <- get(k, tot); p <- strsplit(k, " ")[[1]]
+  if (v[["nscen"]] == 0) return(NULL)
+  data.frame(method = p[1], arm = p[2], secs = v[["secs"]],
+             nscen = v[["nscen"]], stringsAsFactors = FALSE)
+}))
+if (!is.null(rt) && nrow(rt)) {
+  agg <- tapply(rt$secs, rt$method, sum)
+  nsc <- tapply(rt$nscen, rt$method, sum)
+  per <- agg / pmax(nsc, 1)
+  o <- order(-per)
+  cat("\nRUNTIME per method (seconds per scenario = all regions of one scenario)\n\n")
+  cat(sprintf("  %-22s %12s %10s %9s\n", "method", "s/scenario", "share", "scenarios"))
+  tot_per <- sum(per)
+  for (i in o)
+    cat(sprintf("  %-22s %12.1f %9.1f%% %9d\n", names(per)[i], per[i],
+                100 * per[i] / max(tot_per, 1e-9), nsc[i]))
+  cat(sprintf("\n  %-22s %12.1f\n", "ALL METHODS", tot_per))
 }
 
 cat("\n")
