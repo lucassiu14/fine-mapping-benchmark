@@ -412,96 +412,314 @@ which is why Figure~\ref{fig:cs} plots them jointly and on a log size axis.
 
 \section{Sense V: what moves the metric}\label{sec:sensev}
 
+\subsection{How the decomposition is computed}
+
+For a fixed (stratum, method, response) the input is the vector of \emph{cell
+means} --- one number per $(\text{row},S,\phi,\text{region size})$, each already
+an average of 20 fits. The procedure is:
+
+\begin{enumerate}
+\item Fit a full factorial ANOVA on the cell means, with the free factors of
+that stratum ($S$, $\phi$, region size, and enrichment where it applies),
+including all interactions. This yields a sum of squares $\mathrm{SS}_T$ and
+degrees of freedom $\mathrm{df}_T$ for every term.
+\item Estimate the two variance components. $\sigma^2_\varepsilon$ comes from
+the within-cell spread across the 10 iterations; $\sigma^2_u$ from the spread
+between the \emph{two region draws} of the same size class, debiased by
+$c=K(J-1)/(JK-1)$ as described in \S\ref{sec:noise}.
+\item Classify each term as whole-plot or not. A term is whole-plot iff it
+contains region size, because only then do its levels necessarily involve
+different region draws.
+\item Compute the per-df noise expectation
+$\lambda_T=\sigma^2_\varepsilon/20+\mathbf{1}\{\text{whole-plot}\}\,m\sigma^2_u/2$
+and subtract $\mathrm{df}_T\lambda_T$ from $\mathrm{SS}_T$ before dividing by
+$\mathrm{SS}_{\text{tot}}$, giving $\omega^2_T$ of equation~\eqref{eq:omega}.
+\item Aggregate: the \emph{noise floor} is $\sum_T \mathrm{df}_T\lambda_T /
+\mathrm{SS}_{\text{tot}}$, and the remaining structure is grouped by
+interaction order.
+\end{enumerate}
+
+Shares plus the noise floor sum to one by construction, which is what makes the
+budget in Figure~\ref{fig:budget} a closed accounting rather than a set of
+loosely related percentages.
+
+\subsection{The variance budget}
+
 \begin{figure}[htbp]\centering
-\includegraphics[width=\linewidth]{figs/fig11_sense_v.pdf}
-\caption{Noise-corrected $\omega^2$ for each main effect, per method. $S$
-dominates; enrichment fold is negligible.}\label{fig:sensev}\end{figure}
+\includegraphics[width=\linewidth]{figs/fig14_variance_budget.pdf}
+\caption{The closed variance budget for AP. Everything below the noise floor is
+irreducible at this replication level.}\label{fig:budget}\end{figure}
 
-Averaged over methods within stratum, the main-effect shares of AP are: $S$
-between $38.5\%$ and $46.6\%$; $\phi$ between $19.0\%$ and $21.4\%$; region size
-$4.1$--$4.5\%$; enrichment fold $1.2$--$6.1\%$. The largest interaction is
-$S{:}\phi$, worth roughly $12$--$14\%$, which is interpretable: heritability per
-causal variant, $\phi/S$, is closer to the quantity that actually governs
-difficulty than either factor alone.
+Averaged over methods:
 
-Because main effects carry the majority of the explained variance, \textbf{the
-marginal plots in \S\ref{sec:conditional} are honest summaries} --- claims do not
-have to be stated conditionally. Had two-way terms dominated, they would.
+\begin{center}\small
+\begin{tabular}{lrrrr}\toprule
+stratum & noise floor & main effects & 2-way & 3-way+\\\midrule
+binary annotations     & 17.0\% & 67.6\% & 14.7\% & 0.8\%\\
+continuous annotations & 18.8\% & 59.6\% & 16.5\% & 5.1\%\\
+\bottomrule\end{tabular}\end{center}
 
-\paragraph{A caveat that must travel with these numbers.} $\omega^2$ is defined
-relative to the input distribution, here uniform over the levels swept. Widening
-a factor's range mechanically inflates its importance. $S$ spans a tenfold range
-($1$--$10$) while enrichment spans fourfold ($2.7$--$10.8$), so part of $S$'s
-dominance is range. The correct phrasing is always ``$S$ explains $43\%$ of the
-variance \emph{over the range swept}'', never ``$S$ is the most important
-factor''.
+Two consequences. First, roughly \textbf{a sixth of the cell-to-cell variation
+is irreducible noise} --- no factor decomposition can account for more than
+about $82\%$, and any method whose ``explained'' shares approach $100\%$ is
+overfitting the noise. Second, \textbf{main effects carry the clear majority}
+($60$--$68\%$) against $15$--$17\%$ for all two-way terms and under $5\%$ for
+everything higher. That is the licence for reading the marginal plots of
+\S\ref{sec:conditional} at face value: the conditional structure exists but is
+roughly a quarter the size of the marginal structure.
+
+\subsection{Different metrics have different drivers}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/fig15_sense_v_responses.pdf}
+\caption{Noise-corrected $\omega^2$ for three responses. The factor ordering
+changes with the response, so ``what matters'' is metric-dependent.}\label{fig:vresp}\end{figure}
+
+This is the result that a single-metric analysis would have missed. Pooling the
+two annotated strata, the mean $\omega^2$ (\%) is:
+
+\begin{center}\small
+\begin{tabular}{lrrr}\toprule
+factor & AP (ranking) & FDR at $0.9$ & total mass ratio\\\midrule
+$S$          & \textbf{41.1} & 10.1 & \textbf{71.8}\\
+$\phi$       & 18.0 & \textbf{21.3} & 8.4\\
+region size  & 4.0  & $-10.1$ & $-1.7$\\
+enrichment   & 0.4  & $-8.0$  & $-1.1$\\
+\bottomrule\end{tabular}\end{center}
+
+\textbf{Ranking accuracy and mass calibration are both governed by $S$}
+($41\%$ and $72\%$), which is intuitive: how much total probability a method
+should emit is essentially a statement about how many causals there are.
+\textbf{False discovery is governed instead by $\phi$} ($21\%$, with $S$ at
+only $10\%$). Signal strength, not signal count, is what determines whether a
+method's confident calls are right. A benchmark reporting AP alone would
+conclude that $\phi$ is a second-order factor; for the metric a practitioner
+actually acts on --- the error rate among high-PIP calls --- it is the leading
+one.
+
+\paragraph{The negative shares are a diagnostic, and are reported unclamped.}
+Region size and enrichment take clearly negative $\omega^2$ for FDR
+($-10.1$ and $-8.0$). By construction that means $\mathrm{df}_T\lambda_T$
+exceeded $\mathrm{SS}_T$, i.e.\ the estimated noise for those terms is larger
+than the variation observed. FDR at a fixed threshold is a ratio of small
+counts and is far noisier per cell than AP, so $\hat\sigma^2_\varepsilon$ is
+large relative to the between-cell structure. The honest reading is that
+\textbf{the FDR decomposition is not reliable at this replication level}, and
+we report the negative numbers rather than clamping them precisely so that this
+is visible.
+
+\subsection{How conditional is each effect?}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/fig16_interaction_involvement.pdf}
+\caption{$S_{Ti}-S_i$ per factor and method: the share of variance a factor is
+involved in through interactions, over and above its own main
+effect.}\label{fig:interact}\end{figure}
+
+$S_i$ is the factor's own main-effect share; $S_{Ti}$ is its total share
+including every interaction it appears in. The difference is how much of the
+factor's influence is conditional on the others. Values near zero mean the
+marginal plot is the whole story; large values mean a claim about that factor
+must be stated conditionally. The dominant interaction throughout is
+$S{:}\phi$, consistent with per-causal heritability $\phi/S$ being closer to
+the quantity that actually governs difficulty than either factor separately.
+
+\subsection{Caveats specific to this section}
+
+\begin{itemize}
+\item \textbf{The unannotated stratum has no noise floor.} It contains a single
+design row, so there is only one group from which to estimate $\sigma^2_u$ and
+the between-region-draw component is unidentifiable. Every budget and corrected
+share in this section is therefore computed on the binary and continuous strata
+only. Uncorrected shares for the \texttt{none} arm would be inflated,
+particularly for whole-plot terms, and are not reported.
+\item \textbf{Range dependence.} $\omega^2$ is relative to the input
+distribution, uniform over the levels swept. $S$ spans tenfold, enrichment
+fourfold, so part of $S$'s dominance is range. Always ``over the range swept''.
+\item \textbf{Metric scale.} $\omega^2$ is not invariant to monotone transforms,
+and bounded metrics saturate. A factor operating where AP is already near its
+ceiling looks unimportant because there is no room left to move.
+\end{itemize}
 
 \section{Sense D: what changes the decision}\label{sec:sensed}
 
+\subsection{How the flip rate and the gate are computed}
+
+For a given factor, take every pair of adjacent levels holding all other
+factors fixed --- one such comparison per setting of the remaining factors.
+Within each cell, rank methods by mean AP and record the winner. Then:
+
+\begin{enumerate}
+\item \textbf{Raw flip}: the fraction of adjacent pairs where the winner
+changes. This counts \emph{any} change, including one driven entirely by noise.
+\item \textbf{Gated flip}: the same, but a cell contributes only if its winner
+beats its runner-up by a margin that survives a cross-fitted paired test at
+$z=2$. Cross-fitting means the margin is estimated on held-out replicates
+rather than on the same data that selected the winner, which would otherwise
+guarantee a positive margin by construction.
+\item \textbf{Decidability}: separately, the fraction of \emph{cells} in which
+any winner at all clears that test.
+\end{enumerate}
+
+The gap between raw and gated is the quantity of interest. A large raw rate
+with a near-zero gated rate means the apparent regime structure is noise.
+
+\subsection{Who actually wins}
+
 \begin{figure}[htbp]\centering
-\includegraphics[width=\linewidth]{figs/fig12_sense_d.pdf}
-\caption{Apparent versus statistically supported changes of winner. The gap is
-the noise.}\label{fig:sensed}\end{figure}
+\includegraphics[width=\linewidth]{figs/fig17_sense_d_winners.pdf}
+\caption{Cells won by each method, split by whether the win survives the paired
+test.}\label{fig:winners}\end{figure}
 
-This is the most cautionary result in the report. Raw flip rates are enormous
---- $64\%$ to $100\%$ of adjacent level-pairs show a change in which method
-scores best --- while the gated rates collapse to near zero, and only $1.6\%$ to
-$7.8\%$ of cells have any statistically decidable winner at all.
+\textbf{14 of the 18 methods win at least one cell}, and only
+\textbf{53 of 1{,}125 cells ($4.7\%$) have a statistically decided winner}.
 
-\textbf{At 20 fits per cell, the benchmark cannot resolve which of 18 methods is
-best within a single cell.} Regime maps built from modal winners are therefore
-mostly empty, and the ones that are populated should not be read as
-recommendations.
+By nominal win count the leaders are \texttt{polyfun\_est} (340 cells),
+\texttt{paintor} (203) and \texttt{fb\_xregion} (137). Among the 53 decided
+cells the ordering is different --- \texttt{paintor} (20), \texttt{sbayesrc}
+(13), \texttt{polyfun\_est} (10), \texttt{fb\_xregion} (4).
 
-This does \emph{not} contradict \S\ref{sec:senseg}. Those are different
-questions with very different power: ``which of 18 methods wins this one cell''
-uses 20 fits, whereas ``does method A beat method B on average'' pools thousands
-of paired replicates. The benchmark answers the second question decisively and
-the first one barely at all --- and reporting both is the honest position.
+That \texttt{sbayesrc} wins 13 decided cells despite ranking near the bottom on
+mean AP is worth stating plainly: a method can be poor on average and still be
+decisively best in a particular corner of the design. It is also a warning
+against reading the nominal win counts as a ranking --- most of those 340
+\texttt{polyfun\_est} cells are ties dressed up as wins.
+
+\subsection{Why so little is decidable}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/fig18_sense_d_margin.pdf}
+\caption{Distribution of the AP margin between the best and second-best method
+in each cell.}\label{fig:margin}\end{figure}
+
+The mechanism is visible in the margins. The \textbf{median margin in undecided
+cells is $0.0128$; in decided cells it is $0.1254$} --- a factor of ten. The
+mass of the distribution sits near zero, so the paired test is not being
+unreasonably strict; the methods genuinely are close together in most of the
+design.
+
+\paragraph{What follows.} At 20 fits per cell this benchmark \textbf{cannot
+resolve which of 18 methods is best within a single cell}, and regime maps
+built from modal winners must not be read as recommendations. This is a
+statement about power, not about the methods being equivalent: the paired
+two-method contrasts of \S\ref{sec:senseg} pool thousands of replicates and are
+decisive. Reporting only one of the two would misrepresent what the benchmark
+establishes.
 
 \section{Sense G: headroom and the Functional BEATRICE ablation}\label{sec:senseg}
 
+\subsection{How $\kappa$ and the controlled pairs are computed}
+
+Both quantities are formed \emph{within a replicate}, meaning all methods being
+compared saw the identical simulated data --- same causal variants, same
+genotypes, same annotations. This removes the between-scenario variance that
+dominates the marginal comparisons and is the reason this section has power
+where \S\ref{sec:sensed} does not.
+
+\textbf{$\kappa$, headroom captured.} For each replicate,
+\[
+\kappa=\frac{\mathrm{AP}_{\text{method}}-\mathrm{AP}_{\text{baseline}}}
+{\mathrm{AP}_{\text{ceiling}}-\mathrm{AP}_{\text{baseline}}},
+\]
+with SuSiE as the annotation-blind baseline and PolyFun-oracle as the ceiling.
+$\kappa=1$ means the method captured all the headroom the annotations made
+available; $\kappa=0$ means it did no better than ignoring them.
+
+\textbf{The headroom gate.} $\kappa$ is unstable when the denominator is near
+zero, so replicates with headroom $\le 0.02$ are excluded and the excluded
+fraction is reported rather than silently dropped:
+
+\begin{center}\small
+\begin{tabular}{lrrr}\toprule
+stratum & replicate rows & excluded & median headroom\\\midrule
+no annotations     & 1{,}250 & \textbf{100.0\%} & 0.000\\
+binary             & 5{,}000 & 29.4\% & 0.084\\
+continuous         & 5{,}000 & 21.8\% & 0.166\\
+\bottomrule\end{tabular}\end{center}
+
+The unannotated arm excludes everything, and correctly so: with no annotations
+the ceiling and the baseline are the same method, headroom is identically zero,
+and $\kappa$ is undefined by construction rather than by failure.
+
+\textbf{Controlled pairs.} Two contrasts isolate the two mechanisms:
+$\text{annot}=\mathrm{AP}(\text{FB})-\mathrm{AP}(\text{BEATRICE})$ isolates
+using annotations at all, and
+$\text{joint}=\mathrm{AP}(\text{FB-xregion})-\mathrm{AP}(\text{FB})$ isolates
+sharing the prior across regions. Each is a paired difference on identical
+data, so the only thing varying is the mechanism named.
+
+\subsection{The ablation}
+
 \begin{figure}[htbp]\centering
 \includegraphics[width=\linewidth]{figs/fig13_ablation.pdf}
-\caption{The ablation, paired within replicate. Each contrast compares two
-methods on identical simulated data. The ``No annotations'' panel is the
+\caption{Paired contrasts with 95\% intervals. The unannotated panel is the
 negative control.}\label{fig:ablation}\end{figure}
 
-Because all methods run on the same simulated data, differences can be taken
-\emph{within} a replicate, which removes the between-scenario variance that
-dominates the marginal comparisons and is what gives this analysis its power.
+Both stages contribute and the negative control is exact (Table~\ref{tab:ablation}):
+annotations add $+0.025$ AP under binary ($t=18.4$) and $+0.022$ under
+continuous ($t=16.4$); region sharing adds a further $+0.021$ ($t=16.8$) and
+$+0.073$ ($t=43.5$); combined, $+0.046$ and $+0.095$. On the unannotated arm all
+three contrasts are exactly $0.0000\pm0.0000$ over 1{,}250 paired replicates ---
+the three variants are bit-identical there, so the measured gains cannot be an
+artefact of the extra machinery, of additional parameters, or of run-to-run
+variation.
 
-Table~\ref{tab:ablation} reports the paired contrasts. Both stages of the
-ablation are significant, and the negative control is exact:
+\subsection{Where the gains come from}
 
-\begin{itemize}
-\item \textbf{Annotations} (Functional BEATRICE $-$ BEATRICE) add
-$+0.025$ AP under binary annotations ($t=18.4$) and $+0.022$ under continuous
-($t=16.4$).
-\item \textbf{Region sharing} (FB-xregion $-$ Functional BEATRICE) adds a
-further $+0.021$ ($t=16.8$) and $+0.073$ ($t=43.5$) respectively.
-\item \textbf{Combined}, $+0.046$ and $+0.095$ AP.
-\item On the unannotated arm all three contrasts are \textbf{exactly
-$0.0000\pm0.0000$} over $1{,}250$ paired replicates.
-\end{itemize}
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/fig19_ablation_by_S.pdf}
+\caption{The two contrasts against the number of causal variants.}\label{fig:abl-s}\end{figure}
 
-That last point deserves emphasis. With no annotations to exploit, the three
-variants are bit-identical, so the measured gains cannot be an artefact of the
-extra machinery, of additional parameters, or of run-to-run variation. It is as
-clean a negative control as the design admits.
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/fig20_ablation_by_phi.pdf}
+\caption{The two contrasts against region heritability.}\label{fig:abl-phi}\end{figure}
 
-Notably, \textbf{region sharing contributes more than annotations alone under
-continuous annotations} --- $0.073$ against $0.022$ --- so the extension is not
-riding on the base method.
+Pooling the annotated strata, the conditional structure of the two mechanisms
+is different, and the difference is interpretable:
 
-\paragraph{$\kappa$ is reported but should not be over-read.} The headroom
-denominator $(\text{ceiling}-\text{baseline})$ is small in many cells, and after
-gating out cells with headroom $\le0.02$ the residual $\kappa$ estimates carry
-standard deviations of $1.17$--$1.29$ against means between $-0.11$ and $0.31$.
-On the unannotated arm the gate removes everything, correctly: with no
-annotations the ceiling and the baseline are the same method and $\kappa$ is
-undefined by construction. We report $\kappa$ for completeness and rest no
-conclusion on it.
+\begin{center}\small
+\begin{tabular}{lrrrrr}\toprule
+& $S=1$ & $S=2$ & $S=3$ & $S=5$ & $S=10$\\\midrule
+annotations    & $+0.0131$ & $+0.0243$ & $\mathbf{+0.0288}$ & $+0.0272$ & $+0.0262$\\
+region sharing & $\mathbf{+0.0523}$ & $+0.0511$ & $+0.0487$ & $+0.0441$ & $+0.0370$\\
+\bottomrule\end{tabular}\end{center}
+
+\textbf{Region sharing is worth most when regions contain fewest causals}, and
+decays monotonically as $S$ grows ($+0.052 \to +0.037$). That is the behaviour
+the mechanism predicts: a region with a single causal variant carries almost no
+internal information about which annotations matter, so borrowing the
+enrichment estimate from nine other regions is worth a great deal; a region with
+ten causals can estimate it locally and has less to gain.
+
+\textbf{Annotations alone behave oppositely at the sparse end}, rising from
+$+0.013$ at $S=1$ to a plateau around $+0.027$ for $S\ge3$. With one causal
+variant there is little for a per-region prior network to learn from.
+
+Against heritability both contrasts are flat across $\phi\in[0.05,0.4]$ and dip
+at $\phi=0.6$ (annotations $+0.0118$, sharing $+0.0386$) --- at very high signal
+the likelihood dominates and the prior matters less, which is the expected
+Bayesian behaviour.
+
+Against region size, sharing strengthens from $+0.025$ at $p=500$ to $+0.064$ at
+$p=1000$ and stays high, consistent with larger regions offering more variants
+over which a shared annotation signal can accumulate.
+
+\subsection{$\kappa$ is reported but no conclusion rests on it}
+
+After gating, the residual $\kappa$ estimates carry standard deviations of
+$1.17$--$1.29$ against means between $-0.11$ and $0.31$; \texttt{fb\_pooled}
+reaches $-0.689$ on the binary arm. The denominator is small in many surviving
+cells and the ratio is correspondingly unstable. We report $\kappa$ for
+completeness and rest every conclusion in this section on the controlled pairs,
+which are differences rather than ratios and are consequently well behaved.
+
+\paragraph{The $\kappa$ variance decomposition is unavailable.} The
+replicate-level table does not carry the region index, so $\sigma^2_u$ cannot be
+estimated for the derived $\kappa$ and $\Delta$ responses and the \S\ref{sec:noise}
+correction cannot be applied. The code refuses to report an uncorrected
+decomposition, which would inflate whole-plot terms by $m\sigma^2_u/2$ per
+degree of freedom. Recovering it requires changing the pairing unit from
+scenario to region.
 
 \section{Validity checks}\label{sec:validity}
 
