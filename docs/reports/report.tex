@@ -412,36 +412,117 @@ which is why Figure~\ref{fig:cs} plots them jointly and on a log size axis.
 
 \section{Sense V: what moves the metric}\label{sec:sensev}
 
-\subsection{How the decomposition is computed}
+\subsection{How the decomposition is computed, in full}\label{sec:vhow}
 
-For a fixed (stratum, method, response) the input is the vector of \emph{cell
-means} --- one number per $(\text{row},S,\phi,\text{region size})$, each already
-an average of 20 fits. The procedure is:
+Every number in this section descends from the per-fit AP values of
+\S\ref{sec:ap} by the following chain. Constants are named as they appear in the
+code: \texttt{N\_ITER}$=10$, \texttt{N\_REGIONS}$=2$ (regions per size class),
+\texttt{N\_FITS}$=20$, \texttt{M\_SHARED}$=25$, \texttt{SUBPLOT\_FACTORS}$=\{S,\phi\}$.
+
+\paragraph{Step 1 --- form cell means.}
+A cell is the tuple $(\text{job\_dir},S,\phi,\text{region size})$. Its value is
+the mean of the $\texttt{N\_FITS}=20$ fits it contains: 10 iterations $\times$ 2
+regions of that size class. This table (L3) is the only input to the ANOVA;
+individual fits are used solely to estimate the two variance components below.
+
+\paragraph{Step 2 --- estimate $\sigma^2_\varepsilon$, the iteration variance.}
+Group the fit table by
+\[
+\mathrm{KEY}=(\text{job\_dir},\,\text{region size},\,\text{region\_idx},\,S,\,\phi),
+\]
+which pins down \emph{one physical region at one design point}, leaving only the
+iteration index free. Within each group take the sample variance across its 10
+iterations; $\hat\sigma^2_\varepsilon$ is the mean of those variances. Note what
+is held fixed: the region, its LD, its variants and its annotations are
+literally identical across those 10 values, so this is pure replicate error from
+the phenotype draw.
+
+\paragraph{Step 3 --- estimate $\sigma^2_u$, the between-region-draw variance.}
+This cannot be read off directly, because a region draw is never replicated
+within a size class --- there are exactly two, and they differ. It is recovered
+from their contrast:
 
 \begin{enumerate}
-\item Fit a full factorial ANOVA on the cell means, with the free factors of
-that stratum ($S$, $\phi$, region size, and enrichment where it applies),
-including all interactions. This yields a sum of squares $\mathrm{SS}_T$ and
-degrees of freedom $\mathrm{df}_T$ for every term.
-\item Estimate the two variance components. $\sigma^2_\varepsilon$ comes from
-the within-cell spread across the 10 iterations; $\sigma^2_u$ from the spread
-between the \emph{two region draws} of the same size class, debiased by
-$c=K(J-1)/(JK-1)$ as described in \S\ref{sec:noise}.
-\item Classify each term as whole-plot or not. A term is whole-plot iff it
-contains region size, because only then do its levels necessarily involve
-different region draws.
-\item Compute the per-df noise expectation
-$\lambda_T=\sigma^2_\varepsilon/20+\mathbf{1}\{\text{whole-plot}\}\,m\sigma^2_u/2$
-and subtract $\mathrm{df}_T\lambda_T$ from $\mathrm{SS}_T$ before dividing by
-$\mathrm{SS}_{\text{tot}}$, giving $\omega^2_T$ of equation~\eqref{eq:omega}.
-\item Aggregate: the \emph{noise floor} is $\sum_T \mathrm{df}_T\lambda_T /
-\mathrm{SS}_{\text{tot}}$, and the remaining structure is grouped by
-interaction order.
+\item Average over iterations within each KEY group, giving a region mean
+$\bar y(\text{job},\text{size},\text{idx},S,\phi)$.
+\item Reshape wide on \texttt{region\_idx} and difference the pair:
+$d = \bar y_1 - \bar y_2$ for each $(\text{job},\text{size},S,\phi)$.
+\item In expectation
+$\operatorname{Var}(d) = 2\sigma^2_u + 2\sigma^2_\varepsilon/\texttt{N\_ITER}$,
+so subtracting the second term and halving would give $\sigma^2_u$ --- except
+for the bias in Step 4.
+\item Do this separately for each region size, then average the five estimates
+into $\bar\sigma^2_u$.
 \end{enumerate}
 
-Shares plus the noise floor sum to one by construction, which is what makes the
-budget in Figure~\ref{fig:budget} a closed accounting rather than a set of
-loosely related percentages.
+\paragraph{Step 4 --- debias the pair variance.}
+The two region draws of a size class are \emph{reused} across all
+$K$ combinations of $(S,\phi)$ within a job, so those $K$ differences share a
+common draw-level offset $D_j$ and are not independent. With $J$ job rows and
+$K$ cells per job the naive $\operatorname{Var}(d)$ is biased low by
+\[
+c=\frac{K(J-1)}{JK-1},
+\qquad
+\hat\sigma^2_D=\max\!\Bigl(0,\ \frac{\operatorname{Var}(d)-2\sigma^2_\varepsilon/\texttt{N\_ITER}}{c}\Bigr),
+\qquad
+\hat\sigma^2_u=\hat\sigma^2_D/2 .
+\]
+At $J=4$ this is $c=0.758$, i.e.\ the naive estimator recovers only about
+three-quarters of the true component. Verified over 120 simulated replicates:
+corrected $0.0438$ against a true $0.0400$, where the naive estimator gave
+$0.0332$.
+
+\paragraph{Step 5 --- fit the saturated ANOVA on cell means.}
+\texttt{aov(response \textasciitilde{} f1 * f2 * \ldots)} over the stratum's free
+factors, all interactions included. The design is complete and balanced, so the
+model is saturated: \textbf{there is deliberately no residual line}, every degree
+of freedom belongs to a named term, and the orthogonal sums of squares partition
+$\mathrm{SS}_{\text{tot}}$ exactly. If a \texttt{Residuals} row does appear the
+code warns and drops it, because its presence means the stratum is not balanced
+and the closed forms below no longer hold.
+
+\paragraph{Step 6 --- classify each term.}
+\[
+T \text{ is \emph{whole-plot}} \iff T \text{ contains \textbf{no} factor from } \{S,\phi\}.
+\]
+The logic runs through what a contrast differences away. $S$ and $\phi$ are
+re-simulated per scenario \emph{on the same region draw}, so any contrast
+involving them cancels the draw exactly and sees only iteration noise. A term
+built solely from region size and enrichment compares values computed on
+\emph{different} region draws and therefore carries $\sigma^2_u$ as well. Note
+the consequence: \texttt{enrich} alone and
+\texttt{enrich:region\_size} are whole-plot, whereas \texttt{S:region\_size} is
+not, despite containing region size.
+
+\paragraph{Step 7 --- the noise expectation and the corrected share.}
+\[
+\lambda_T=\frac{\sigma^2_\varepsilon}{\texttt{N\_FITS}}
++\mathbf{1}\{T\text{ whole-plot}\}\cdot\frac{\texttt{M\_SHARED}\cdot\bar\sigma^2_u}{2},
+\qquad
+\omega^2_T=\frac{\mathrm{SS}_T-\mathrm{df}_T\lambda_T}{\mathrm{SS}_{\text{tot}}} .
+\]
+\texttt{N\_FITS}$=20$ is the number of fits behind each cell mean;
+\texttt{M\_SHARED}$=25=5\times5$ is the number of $(S,\phi)$ cells sharing one
+region draw, and the $/2$ is the two regions per size class. The noise floor is
+$\sum_T \mathrm{df}_T\lambda_T/\mathrm{SS}_{\text{tot}}$, and it is reported
+split into its iteration and region parts.
+
+\paragraph{Why cell means rather than one replicate-level ANOVA.}
+Both are defensible in principle; only one is safe here. At replicate level each
+noise source enters a mean square multiplied by the number of rows sharing that
+draw --- hundreds of them --- so subtracting a cell-mean-scale $\sigma^2_u/2$
+under-corrects by orders of magnitude \emph{while still looking like a
+correction has been applied}. Working on cell means keeps every quantity on one
+scale, which is why the closed form above is exact rather than approximate.
+
+\paragraph{Sobol indices.}
+$V_T=\max(\omega^2_T,0)$ --- this is the \emph{only} place a clamp is applied,
+and it is applied because the indices are ratios that would otherwise be
+uninterpretable. Then
+$S_i = V_i/\sum_T V_T$ and $S_{Ti}=\sum_{T\ni i}V_T/\sum_T V_T$, so
+$S_{Ti}-S_i$ is the share of variance factor $i$ participates in only through
+interactions. Everywhere else in this report negative $\omega^2$ is reported as
+computed.
 
 \subsection{The variance budget}
 
@@ -543,26 +624,63 @@ ceiling looks unimportant because there is no room left to move.
 
 \section{Sense D: what changes the decision}\label{sec:sensed}
 
-\subsection{How the flip rate and the gate are computed}
+\subsection{How a cell's winner is decided, in full}\label{sec:dhow}
 
-For a given factor, take every pair of adjacent levels holding all other
-factors fixed --- one such comparison per setting of the remaining factors.
-Within each cell, rank methods by mean AP and record the winner. Then:
+The unit is again the cell $(\text{job\_dir},S,\phi,\text{region size})$, but
+here it is \emph{not} collapsed to a mean. The procedure per cell is:
 
+\paragraph{Step 1 --- build the replicate matrix.}
+Reshape to a matrix $Y$ with one row per iteration ($R=10$) and one column per
+method, entry $Y_{im}=\mathrm{AP}$ of method $m$ on iteration $i$. Because all
+methods ran on the same simulated data, row $i$ is a genuine paired
+observation across methods. Columns that are entirely non-finite are dropped;
+fewer than two surviving columns means the cell is skipped.
+
+\paragraph{Step 2 --- the nominal winner.}
+$\text{winner}=\arg\max_m \overline{Y}_{\cdot m}$, the column mean over all 10
+iterations. This is the quantity the regime maps display, and on its own it is
+\textbf{not} evidence of anything --- the maximum of $M$ noisy means is upward
+biased by construction.
+
+\paragraph{Step 3 --- cross-fitted testing.}
+If $R<4$ the cell is marked undecided immediately. Otherwise the 10 iterations
+are randomly permuted (once, under \texttt{set.seed(20260806)}, so the result is
+reproducible) and split into halves $A$ and $B$. Then, in each direction:
 \begin{enumerate}
-\item \textbf{Raw flip}: the fraction of adjacent pairs where the winner
-changes. This counts \emph{any} change, including one driven entirely by noise.
-\item \textbf{Gated flip}: the same, but a cell contributes only if its winner
-beats its runner-up by a margin that survives a cross-fitted paired test at
-$z=2$. Cross-fitting means the margin is estimated on held-out replicates
-rather than on the same data that selected the winner, which would otherwise
-guarantee a positive margin by construction.
-\item \textbf{Decidability}: separately, the fraction of \emph{cells} in which
-any winner at all clears that test.
+\item Compute column means on the \emph{selection} half.
+\item Take the top two methods \emph{by that half only}.
+\item On the \emph{other} half form the paired differences
+$d_i = Y_{i,\text{top1}} - Y_{i,\text{top2}}$.
+\item Declare decided iff $|\bar d| > z\cdot\mathrm{SE}(\bar d)$ with $z=2$ and
+$\mathrm{SE}=\mathrm{sd}(d)/\sqrt{n}$.
 \end{enumerate}
 
-The gap between raw and gated is the quantity of interest. A large raw rate
-with a near-zero gated rate means the apparent regime structure is noise.
+\paragraph{Step 4 --- require agreement.}
+The cell counts as decided only if \textbf{both} directions ($A$ selects and $B$
+tests, then $B$ selects and $A$ tests) declare decided \emph{and} both name the
+same winner. Any disagreement means the apparent winner depended on which half
+happened to be used for selection.
+
+\paragraph{Why cross-fitting is necessary.}
+Selecting the top two and testing them on the same data guarantees a positive
+margin: the selection has already sorted the noise. Splitting selection from
+testing removes that bias, and requiring both directions to agree removes the
+residual luck of a single split. This is why the gated rates are so much lower
+than the raw ones --- the raw rate is measuring exactly the bias this procedure
+is designed to eliminate.
+
+\paragraph{Step 5 --- the reported margin.}
+$\bar d$ (\texttt{dbar}) is computed on \emph{all} 10 rows as
+$\overline{Y_{\cdot\text{winner}} - Y_{\cdot\text{runner-up}}}$, using the
+cross-fitted runner-up. It is a descriptive effect size, not the test statistic.
+
+\paragraph{Step 6 --- flip rates.}
+For a factor $f$: hold every other free factor fixed, walk adjacent levels of
+$f$, and record whether the winner changes. \texttt{flip\_raw} is the fraction
+of such adjacent pairs whose nominal winner differs; \texttt{flip\_gated} is the
+same fraction counting only pairs in which the relevant cells were decided.
+\texttt{pct\_cells\_decided} is reported separately as the unconditional
+decidability of the stratum.
 
 \subsection{Who actually wins}
 
@@ -608,45 +726,84 @@ establishes.
 
 \section{Sense G: headroom and the Functional BEATRICE ablation}\label{sec:senseg}
 
-\subsection{How $\kappa$ and the controlled pairs are computed}
+\subsection{How $\kappa$ and the controlled pairs are computed, in full}\label{sec:ghow}
 
-Both quantities are formed \emph{within a replicate}, meaning all methods being
-compared saw the identical simulated data --- same causal variants, same
-genotypes, same annotations. This removes the between-scenario variance that
-dominates the marginal comparisons and is the reason this section has power
-where \S\ref{sec:sensed} does not.
+The input here is the \emph{replicate-level} table (L2): one row per
+$(\text{cell},\text{iteration},\text{method})$, reshaped so that each
+$(\text{cell},\text{iteration})$ carries one column per method. Because every
+method ran on the same simulated data, a row is a set of paired observations ---
+same causal variants, same genotypes, same annotations, same phenotype draw.
 
-\textbf{$\kappa$, headroom captured.} For each replicate,
+\paragraph{Step 1 --- headroom.}
+Per row,
 \[
-\kappa=\frac{\mathrm{AP}_{\text{method}}-\mathrm{AP}_{\text{baseline}}}
-{\mathrm{AP}_{\text{ceiling}}-\mathrm{AP}_{\text{baseline}}},
+h=\mathrm{AP}_{\texttt{polyfun\_oracle}}-\mathrm{AP}_{\texttt{susie}} .
 \]
-with SuSiE as the annotation-blind baseline and PolyFun-oracle as the ceiling.
-$\kappa=1$ means the method captured all the headroom the annotations made
-available; $\kappa=0$ means it did no better than ignoring them.
+\texttt{susie} is the annotation-blind backbone --- what a method achieves
+\emph{without} using annotations at all --- and \texttt{polyfun\_oracle} receives
+the simulator's true prior weights, so it is what is achievable \emph{with
+perfect} annotation information. Their difference is the room annotations
+create on that particular replicate.
 
-\textbf{The headroom gate.} $\kappa$ is unstable when the denominator is near
-zero, so replicates with headroom $\le 0.02$ are excluded and the excluded
-fraction is reported rather than silently dropped:
+\paragraph{Step 2 --- the gate.}
+Rows with $h\le\texttt{HEADROOM\_EPS}=0.02$ (or non-finite $h$) are excluded,
+because $\kappa$ divides by $h$ and is unstable as $h\to0$. The excluded
+fraction and the median headroom are reported rather than dropped silently
+(below); on the unannotated arm the gate removes \emph{everything}, which is
+correct: the ceiling and the baseline are the same method there, so $h\equiv0$
+and $\kappa$ is undefined by construction.
 
 \begin{center}\small
 \begin{tabular}{lrrr}\toprule
-stratum & replicate rows & excluded & median headroom\\\midrule
+stratum & replicate rows & excluded by the gate & median headroom\\\midrule
 no annotations     & 1{,}250 & \textbf{100.0\%} & 0.000\\
 binary             & 5{,}000 & 29.4\% & 0.084\\
 continuous         & 5{,}000 & 21.8\% & 0.166\\
 \bottomrule\end{tabular}\end{center}
 
-The unannotated arm excludes everything, and correctly so: with no annotations
-the ceiling and the baseline are the same method, headroom is identically zero,
-and $\kappa$ is undefined by construction rather than by failure.
+The median headroom is itself a result: continuous annotations create twice the
+exploitable room that binary ones do ($0.166$ against $0.084$), which is the
+backdrop against which the ablation gains in \S\ref{sec:where} should be read.
 
-\textbf{Controlled pairs.} Two contrasts isolate the two mechanisms:
-$\text{annot}=\mathrm{AP}(\text{FB})-\mathrm{AP}(\text{BEATRICE})$ isolates
-using annotations at all, and
-$\text{joint}=\mathrm{AP}(\text{FB-xregion})-\mathrm{AP}(\text{FB})$ isolates
-sharing the prior across regions. Each is a paired difference on identical
-data, so the only thing varying is the mechanism named.
+\paragraph{Step 3 --- $\kappa$.}
+On surviving rows, for each focus method $m\in\{$\texttt{functional\_beatrice},
+\texttt{fb\_xregion}, \texttt{fb\_pooled}$\}$,
+\[
+\kappa_m=\frac{\mathrm{AP}_m-\mathrm{AP}_{\texttt{susie}}}{h} .
+\]
+$\kappa=1$ means $m$ captured all the available headroom; $\kappa=0$ means it
+did no better than ignoring the annotations; $\kappa<0$ means it did worse than
+the annotation-blind baseline on that replicate.
+
+\paragraph{Step 4 --- the controlled pairs, which are NOT gated.}
+Two contrasts are formed on \emph{all} rows, with no headroom gate, because they
+are differences rather than ratios and have no denominator to destabilise:
+\[
+\Delta_{\text{annot}}=\mathrm{AP}_{\texttt{functional\_beatrice}}-\mathrm{AP}_{\texttt{beatrice}},
+\qquad
+\Delta_{\text{joint}}=\mathrm{AP}_{\texttt{fb\_xregion}}-\mathrm{AP}_{\texttt{functional\_beatrice}} .
+\]
+Each isolates exactly one mechanism, because the two methods being differenced
+are identical in every other respect: same inference network, same
+hyperparameters, same data, same seed. $\Delta_{\text{annot}}$ turns the
+annotation prior on; $\Delta_{\text{joint}}$ changes that prior from per-region
+to shared-across-regions.
+
+\paragraph{Step 5 --- inference on the pairs.}
+For a group of $n$ paired rows, $\bar\Delta$, $\mathrm{sd}(\Delta)$,
+$\mathrm{SE}=\mathrm{sd}/\sqrt n$ and $t=\bar\Delta/\mathrm{SE}$. The pairing is
+what supplies the power: the between-scenario variance that dominates marginal
+comparisons cancels exactly, leaving only the within-replicate difference. This
+is why $\S\ref{sec:senseg}$ resolves effects of $0.02$ AP decisively while
+\S\ref{sec:sensed} cannot resolve a $0.13$ gap between two \emph{different}
+methods in a single cell --- $n$ differs by three orders of magnitude and the
+nuisance variance has been removed.
+
+\paragraph{Step 6 --- conditional breakdowns.}
+The tables in \S\ref{sec:where} are $\bar\Delta$ recomputed within levels of one
+design factor at a time, pooling the two annotated strata. $114$ of the $22{,}500$
+$\Delta$ values are missing ($0.5\%$), all at $S\in\{5,10\}$, corresponding to
+the BEATRICE family's small fit-failure rate; those rows are dropped pairwise.
 
 \subsection{The ablation}
 
@@ -664,7 +821,7 @@ the three variants are bit-identical there, so the measured gains cannot be an
 artefact of the extra machinery, of additional parameters, or of run-to-run
 variation.
 
-\subsection{Where the gains come from}
+\subsection{Where the gains come from}\label{sec:where}
 
 \begin{figure}[htbp]\centering
 \includegraphics[width=\linewidth]{figs/fig19_ablation_by_S.pdf}
