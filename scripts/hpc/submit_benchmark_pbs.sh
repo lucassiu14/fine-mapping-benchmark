@@ -134,6 +134,26 @@ if (( N_JOBS > MAX_ARRAY )); then
 fi
 if [[ -z "$ARRAY_RANGE" ]]; then ARRAY_RANGE="1-${N_JOBS}"; fi
 
+# PBS Pro rejects a SINGLE-ELEMENT array range: -J X-Y requires Y > X, so
+# ARRAY_RANGE="2093-2093" dies with "qsub: illegal -J value" only AFTER the
+# whole banner has printed. Re-running one task is a natural operation (a
+# subjob system-held for repeated launch failures, say), so widen by one
+# neighbour instead of failing. The extra task is free: resume skips scenarios
+# that already have an evaluation.rds and exits immediately.
+if [[ "$ARRAY_RANGE" =~ ^([0-9]+)-([0-9]+)$ && "${BASH_REMATCH[1]}" == "${BASH_REMATCH[2]}" ]]; then
+  _one="${BASH_REMATCH[1]}"
+  if (( _one < N_JOBS )); then
+    ARRAY_RANGE="${_one}-$(( _one + 1 ))"
+  elif (( _one > 1 )); then
+    ARRAY_RANGE="$(( _one - 1 ))-${_one}"
+  else
+    echo "ERROR: cannot widen a single-task range; the grid has only one task." >&2
+    exit 1
+  fi
+  echo "NOTE: PBS forbids a single-element -J range; widened to ${ARRAY_RANGE}."
+  echo "      The neighbour re-runs nothing - resume skips completed scenarios."
+fi
+
 mkdir -p "$LOG_DIR" "$OUTPUT_ROOT"
 echo "Output root: $OUTPUT_ROOT"
 echo "Log dir:     $LOG_DIR"
