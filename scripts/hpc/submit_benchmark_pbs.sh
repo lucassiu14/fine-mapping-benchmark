@@ -47,6 +47,28 @@ PY_VENV_ACTIVATE="${PY_VENV_ACTIVATE:-$HOME/tools/fmpy-venv/bin/activate}"
 # the stale Iteration 003 file (135 rows, n=1000, regions 100-1000, three LD
 # levels) was silently reused and a whole array was submitted against the wrong
 # simulation design. The generator is deterministic and takes under a second.
+# Rscript must be on PATH for the grid regeneration below. A login shell does
+# not have the R module loaded by default, so a fresh terminal fails with
+#   scripts/hpc/submit_benchmark_pbs.sh: line 51: Rscript: command not found
+# AFTER the script has already printed its banner, which reads like a real
+# failure rather than a missing module. Load it here if it is absent; if the
+# module system is unavailable, say so plainly instead of dying mid-run.
+if ! command -v "$RSCRIPT" >/dev/null 2>&1; then
+  if ! command -v module >/dev/null 2>&1; then
+    for _mi in /etc/profile.d/modules.sh /usr/share/Modules/init/bash \
+               /etc/profile.d/lmod.sh /usr/share/lmod/lmod/init/bash; do
+      [ -r "$_mi" ] && . "$_mi" && break
+    done
+  fi
+  command -v module >/dev/null 2>&1 && module load "${R_MODULE:-R/4.5.2-gfbf-2025b}" 2>/dev/null
+  if ! command -v "$RSCRIPT" >/dev/null 2>&1; then
+    echo "ERROR: $RSCRIPT not on PATH and could not be module-loaded." >&2
+    echo "       Run: module load ${R_MODULE:-R/4.5.2-gfbf-2025b}" >&2
+    exit 1
+  fi
+  echo "Loaded ${R_MODULE:-R/4.5.2-gfbf-2025b} ($(command -v "$RSCRIPT"))"
+fi
+
 echo "Regenerating params_grid.csv from generate_params_grid.R ..."
 "$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV" >/dev/null
 # The array is subdivided by scenario, with all regions kept together in each
