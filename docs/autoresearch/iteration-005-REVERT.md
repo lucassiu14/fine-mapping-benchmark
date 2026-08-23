@@ -34,7 +34,7 @@ grep -rn "ITER-005\|ITERATION 005" R/ scripts/ docs/
 | 7 | `scripts/hpc/run_benchmark_job.R` | the ITER-005 method-set and relationship blocks | |
 | 8 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER005_METHODS` block inside the PBS heredoc | leave the `FMB_GRID_GENERATOR` override in place — see below |
 | 9 | `scripts/analysis/iter005_*.R` | delete all eight files | `iter005_lib.R`, `iter005_report.R`, `iter005_sense_{v,d,g}.R`, `iter005_collect.R`, `test_iter005.R`, `make_test_fixture_iter005.R` |
-| 10 | `scripts/analysis/iter004_lib.R` | the generalised `variance_components()` — **KEEP THIS ONE** | see below |
+| 10 | `scripts/analysis/iter004_lib.R` | nothing — already reverted to its 2026-08-13 state | the generalisation now lives only in `iter005_lib.R` |
 
 ## The analysis is a FORK, not a modification
 
@@ -72,11 +72,15 @@ unconditionally, which is the safety that stops a stale grid being silently
 reused; the override lets an alternative *generator* be swapped in without
 weakening that. Only the `FMB_ITER005_METHODS` export (row 8) is temporary.
 
-**The generalised `variance_components()` is an improvement, not a hack.** The
-original estimator required exactly two regions per size class and recovered
-σ²_u by differencing them with a bias correction. The generalisation handles any
-number of regions per class and reduces to the original when there are two. It
-is strictly more general and better conditioned; keep it.
+**`iter004_lib.R` is byte-identical to what produced the standing results.**
+It was generalised earlier on 2026-08-23 so `variance_components()` could handle
+Iteration 005's ten same-size region draws and 25 iterations, then reverted once
+Iteration 005 got its own library: Iteration 004 has two draws per size class and
+ten iterations, never reaches the new branch, and the two versions were verified
+bit-identical on Iteration 004-shaped data before the revert. The generalisation
+survives in `iter005_lib.R`, where it is actually needed - the original returns
+NULL on a single size class, and a hardcoded `N_ITER = 10` biases sigma^2_u low
+by ~23% at 25 iterations.
 
 ## Why the calibration exists (do not silently drop it if the arms are reused)
 
