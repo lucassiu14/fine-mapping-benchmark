@@ -144,6 +144,8 @@ run_simulation <- function(n_regions = 3,
                            model = "sparse",
                            p_causal = c(0.1, 0.2, 0.4),
                            inf_model = "beatrice",
+                           relationship = "additive",   # ITER-005 (temporary)
+                           n_informative = NULL,        # ITER-005 (temporary)
                            effect_distribution = "normal",
                            effect_variance = 0.36,
                            annotations = "none",
@@ -414,6 +416,8 @@ run_simulation <- function(n_regions = 3,
       annotation_proportions = annotation_proportions,
       enrichment = enrichment,
       annotation_correlation = annotation_correlation,
+      relationship = relationship,      # ITER-005 (temporary)
+      n_informative = n_informative,    # ITER-005 (temporary)
       seed = NULL,  # let the RNG continue sequentially
       verbose = FALSE
     )

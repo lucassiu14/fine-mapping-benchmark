@@ -65,6 +65,20 @@ GENETIC_MAP_DIR <- "data/genetic_maps"
 # joint-prior models - the project's headline contribution - and had to be
 # requested through FMB_METHODS to run at all, which is exactly the kind of
 # default that silently drops the thing being tested.
+# >>> ITERATION 005 ONLY - TEMPORARY (see iteration-005-REVERT.md) <<<
+# Iteration 005 fits a reduced set: the annotation-aware methods whose priors
+# are linear or log-linear in the annotations, the BEATRICE family whose
+# LassoNet is not, and the two annotation-blind controls. Set
+# FMB_ITER005_METHODS=1 to select it; unset, the full Iteration 004 set below
+# is used unchanged.
+ITER005_METHODS <- c(
+  "susie", "beatrice",                                    # annotation-blind controls
+  "polyfun_oracle", "polyfun_est", "polyfun_ldsc",        # per-SNP prior, linear
+  "paintor", "sbayesrc", "funmap",                        # other annotation-aware
+  "functional_beatrice", "fb_pooled", "fb_xregion"        # the focus
+)
+# >>> END ITERATION 005 TEMPORARY BLOCK <<<
+
 METHODS <- c(
   # summary-statistic baselines
   "susie", "susie_inf", "finemap", "finemap_inf", "abf", "marginal_z",
@@ -111,6 +125,12 @@ PY_VENV    <- file.path(TOOLS_ROOT, "py-venv-runner.sh")
 # sayangsep/Beatrice-Finemapping repo has a late-training crash under
 # numpy>=2 and is intentionally not used.
 FB_DIR <- normalizePath("BEATRICE_annot_sparse", mustWork = FALSE)
+
+# ITERATION 005 (TEMPORARY): swap in the reduced set when asked.
+if (nzchar(Sys.getenv("FMB_ITER005_METHODS", ""))) {
+  METHODS <- ITER005_METHODS
+  cat(sprintf("[iter005] reduced method set: %d methods\n", length(METHODS)))
+}
 
 METHOD_ARGS <- list(
   susie               = list(L = 10, coverage = 0.95),
@@ -392,6 +412,27 @@ if (file.exists(sim_file)) {
   )
   if (!is.null(p_causal_arg)) sim_args$p_causal <- p_causal_arg
   if (!is.null(n_ref_arg))    sim_args$n_ref    <- n_ref_arg
+
+  # >>> ITERATION 005 ONLY - TEMPORARY (see iteration-005-REVERT.md) <<<
+  # Grids that carry a `relationship` column route causal selection through the
+  # alternative annotation->causality forms. Iteration 004's grid has no such
+  # column, so this block is inert there and that iteration is unaffected.
+  if (!is.null(job$relationship) && !is.na(job$relationship) &&
+      nzchar(as.character(job$relationship))) {
+    sim_args$relationship <- as.character(job$relationship)
+    if (!is.null(job$n_informative) && !is.na(job$n_informative))
+      sim_args$n_informative <- as.integer(job$n_informative)
+    # The null arm still simulates annotations and hands them to every method;
+    # they simply never enter selection. Pass a neutral enrichment vector rather
+    # than NA so nothing downstream has to special-case a missing value.
+    if (identical(sim_args$relationship, "null"))
+      sim_args$enrichment <- rep(1, max(1L, as.integer(job$n_annotations)))
+    cat(sprintf("[iter005] relationship=%s  informative=%s\n",
+                sim_args$relationship,
+                sim_args$n_informative %||% "default"))
+  }
+  # >>> END ITERATION 005 TEMPORARY BLOCK <<<
+
   sim <- do.call(run_simulation, sim_args)
 
   tmp <- paste0(sim_file, ".tmp.", Sys.getpid())

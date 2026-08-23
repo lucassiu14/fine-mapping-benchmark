@@ -131,6 +131,8 @@ simulate_phenotypes <- function(genotypes,
                                 model = "sparse",
                                 p_causal = 0.5,
                                 inf_model = "beatrice",
+                                relationship = "additive",   # ITER-005 (temporary)
+                                n_informative = NULL,        # ITER-005 (temporary)
                                 effect_distribution = "normal",
                                 effect_variance = 0.36,
                                 annotations = "none",
@@ -295,7 +297,9 @@ simulate_phenotypes <- function(genotypes,
       annotation_matrix = A_i,
       enrichment = enrichment,
       n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
-      annotation_type = annotation_type
+      annotation_type = annotation_type,
+      relationship = relationship,      # ITER-005 (temporary)
+      n_informative = n_informative     # ITER-005 (temporary)
     )
 
     causal_indices <- causal_result$causal_indices

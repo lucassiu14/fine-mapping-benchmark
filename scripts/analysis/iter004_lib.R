@@ -313,6 +313,47 @@ variance_components <- function(fits, response) {
   if (!all(c("ybar.1", "ybar.2") %in% names(w))) return(NULL)
   w$dif <- w$ybar.1 - w$ybar.2
 
+  # GENERALISED FOR ANY NUMBER OF REGIONS PER SIZE CLASS.
+  #
+  # The pair-difference route below assumes exactly two draws per class and
+  # recovers sigma^2_u from their contrast with the c = K(J-1)/(JK-1) debias.
+  # Iteration 005 uses ten regions of ONE size, where that reshape produces no
+  # ybar.2 column and the function would return NULL, silently costing the noise
+  # correction. With three or more draws per class the between-draw variance is
+  # directly estimable and better conditioned, so use that instead. With exactly
+  # two draws this branch is skipped and the original estimator runs unchanged,
+  # so Iteration 004's numbers are bit-identical.
+  # ITERATIONS PER CELL, DERIVED - NOT the hardcoded N_ITER.
+  # N_ITER is a constant set for Iteration 004 (10). Iteration 005 runs 25, and
+  # subtracting sigma^2_eps/10 instead of sigma^2_eps/25 over-subtracts, biasing
+  # sigma^2_u low by ~23% (measured). Deriving it returns exactly 10 on
+  # Iteration 004 data, so that iteration is unaffected.
+  n_it <- stats::median(as.numeric(table(do.call(paste, c(f[KEY], sep = "\r")))))
+  if (!is.finite(n_it) || n_it < 1) n_it <- N_ITER
+
+  n_draws <- length(unique(rm$region_idx))
+  if (n_draws >= 3L) {
+    sizes <- sort(unique(rm$region_size))
+    s2u   <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
+    npair <- setNames(rep(0L, length(sizes)), as.character(sizes))
+    for (g in sizes) {
+      sub <- rm[rm$region_size == g, , drop = FALSE]
+      # Within each (job, S, phi) the region draws are exchangeable replicates.
+      # Var(region mean) = sigma^2_u + sigma^2_eps / N_ITER, so subtract the
+      # sampling term to isolate the between-draw component.
+      k <- paste(sub$job_dir, sub$S, sub$phi, sep = "\r")
+      v <- tapply(sub$ybar, k, function(z) if (length(z) > 1L) var(z) else NA_real_)
+      cnt <- tapply(sub$ybar, k, length)
+      s2u[as.character(g)]   <- max(0, mean(v, na.rm = TRUE) - sigma2_eps / n_it)
+      npair[as.character(g)] <- sum(cnt[!is.na(v)], na.rm = TRUE)
+    }
+    return(list(sigma2_eps = sigma2_eps, sigma2_u = s2u,
+                sigma2_u_bar = mean(s2u, na.rm = TRUE),
+                sigma2_job   = mean(s2u, na.rm = TRUE) / 2,
+                n_pairs      = npair,
+                estimator    = sprintf("direct (%d draws per class)", n_draws)))
+  }
+
   sizes <- sort(unique(w$region_size))
   s2u   <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
   npair <- setNames(rep(0L, length(sizes)), as.character(sizes))
@@ -325,7 +366,7 @@ variance_components <- function(fits, response) {
       # D_j across the K (S,phi) cells of each job before halving.
       J <- length(unique(sub$job_dir))
       K <- max(1L, round(nrow(sub) / max(J, 1L)))
-      sigD2 <- .debias_pair_var(var(d), 2 * sigma2_eps / N_ITER, J, K)
+      sigD2 <- .debias_pair_var(var(d), 2 * sigma2_eps / n_it, J, K)
       s2u[as.character(g)] <- if (is.na(sigD2)) NA_real_ else sigD2 / 2
     }
   }
