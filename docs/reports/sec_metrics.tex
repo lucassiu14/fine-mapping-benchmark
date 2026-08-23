@@ -1,0 +1,197 @@
+\section{From posterior inclusion probabilities to numbers}\label{sec:methods}
+
+Every method returns, for each region, a vector
+$\pip_1,\dots,\pip_p\in[0,1]$ --- one posterior inclusion probability per
+variant --- together with the truth $y_j\in\{0,1\}$ known from the simulation.
+All metrics below are functions of that pair. This section defines each one and
+justifies the estimator, because several of the obvious implementations are
+wrong in ways that silently change conclusions.
+
+\subsection{Average precision (the ranking metric)}\label{sec:ap}
+
+Average precision summarises the whole precision--recall curve without
+committing to a threshold, which matters here because methods' PIP scales
+differ by orders of magnitude: any fixed-threshold comparison partly measures
+calibration rather than ranking.
+
+Sort the variants by $\pip$ descending. Let $k$ index the distinct PIP values
+(so that all variants sharing a value form one block), $\mathrm{tp}_k$ the
+cumulative number of causals at the end of block $k$, $n_k$ the cumulative
+number of variants, $\mathrm{prec}_k=\mathrm{tp}_k/n_k$ and
+$\mathrm{rec}_k=\mathrm{tp}_k/S$. Then
+\begin{equation}
+\mathrm{AP}=\sum_k\bigl(\mathrm{rec}_k-\mathrm{rec}_{k-1}\bigr)\,\mathrm{prec}_k ,
+\qquad \mathrm{rec}_0=0 .
+\label{eq:ap}
+\end{equation}
+
+Three implementation points are load-bearing.
+
+\textbf{It is a step integral, not a trapezoid.} Equation~\eqref{eq:ap}
+evaluates precision at the operating point reached, matching
+\texttt{sklearn.metrics.average\_precision\_score}. A trapezoidal rule
+interpolates between operating points that the classifier never actually
+occupies and is optimistically biased.
+
+\textbf{Ties are resolved by block, not by index.} Several methods emit many
+exactly-tied PIPs. Implementing AP as ``sort, then read off precision at the
+causal's index'' lets the sort's tie-break --- here genomic position --- decide
+the score. Because causal variants are drawn uniformly at random this would not
+introduce a constant bias but would inject pure noise into precisely the
+comparisons the analysis exists to make. Collapsing tied variants into one
+block gives every member the same operating point, which is the only
+tie-handling that is invariant to input order.
+
+\textbf{AP is computed per fit and then averaged, never on a merged ranking.}
+Pooling all variants from all regions into one ranking and computing a single
+AP is a different and incorrect quantity: it rewards a method for getting the
+\emph{relative calibration across regions} right, which is not what
+region-level fine-mapping is asked to do. The two disagree materially. For two
+fits with $\mathrm{AP}=1$ and $\mathrm{AP}=1/3$, the correct answer is the mean
+$2/3\approx0.667$, whereas the merged ranking of the same data gives $0.700$.
+Both values are checked against hand computation in the test suite.
+
+A fit with no causal variants returns \texttt{NA} rather than $0$, and NAs are
+excluded from means with the count reported alongside, so a method is never
+credited or penalised for a fit that posed no question.
+
+\subsection{Thresholded discovery: FDR and its honest companion}\label{sec:fdr}
+
+For a threshold $t$ let $\mathcal{S}_t=\{j:\pip_j\ge t\}$, $n_t=|\mathcal{S}_t|$
+and $\mathrm{tp}_t=\sum_{j\in\mathcal{S}_t}y_j$. Then
+\begin{equation}
+\mathrm{FDR}_t=\frac{n_t-\mathrm{tp}_t}{n_t},\qquad
+\text{reported jointly with } n_t .
+\end{equation}
+Reporting FDR alone is not meaningful: a method that never crosses $t$ has
+$\mathrm{FDR}_t=0$ by convention and $n_t=0$, and would otherwise win the
+comparison by abstaining. The pair $(\mathrm{FDR}_t,n_t)$ is therefore always
+presented together, and $n_t$ appears in the credible-set analysis
+(\S\ref{sec:cs}) as the follow-up burden.
+
+We also compute the \textbf{honesty ratio}. A Bayesian method that emits $\pip$
+values is making a falsifiable claim about its own error rate: the expected
+number of false positives among $\mathcal{S}_t$ is
+$\widehat{\mathrm{FP}}_t=\sum_{j\in\mathcal{S}_t}(1-\pip_j)$. Comparing that to
+the realised count gives
+\begin{equation}
+\rho_t=\frac{\mathrm{FP}_t}{\widehat{\mathrm{FP}}_t},
+\end{equation}
+so $\rho_t=1$ means the method's own uncertainty statement was accurate,
+$\rho_t>1$ means it was overconfident by that factor. This is stricter than
+FDR: it holds the method to \emph{its own} claim rather than to an external
+threshold.
+
+\subsection{Calibration}\label{sec:calibmethod}
+
+Two complementary summaries are used, because each is separately gameable.
+
+\textbf{Total mass ratio.} $\sum_j \pip_j / S$. A coherent posterior over which
+variants are causal should place total mass equal to the expected number of
+causals. A ratio of $2$ means the method claims twice as many causal variants
+as exist.
+
+\textbf{Banded reliability.} Variants are binned by PIP into
+$[0,0.1)$, $[0.1,0.5)$, $[0.5,0.9)$, $[0.9,1]$. Within a bin we accumulate the
+count $n_b$, the number truly causal $c_b$, and $\sum\pip$. Calibration
+compares the realised rate $c_b/n_b$ to the claimed mean $\sum\pip/n_b$; this is
+the reliability diagram in Figure~\ref{fig:rel}. We report
+$\mathrm{ECE}_{hi}$, the expected calibration error restricted to bins with
+$\pip\ge0.1$, because the $[0,0.1)$ bin contains the overwhelming majority of
+variants and an unrestricted ECE is dominated by the trivially-correct
+statement that almost nothing is causal.
+
+\textbf{Why both, and why RES.} Consider a predictor emitting $\pip_j=S/p$ for
+every variant. Its mass ratio is exactly $1$ and its calibration error is
+exactly $0$ --- it is perfectly calibrated and completely useless. The Murphy
+decomposition of the Brier score separates this out:
+\begin{equation}
+\mathrm{BS}=\underbrace{\mathrm{REL}}_{\text{miscalibration}}-\underbrace{\mathrm{RES}}_{\text{resolution}}+\underbrace{\mathrm{UNC}}_{\text{base rate}},
+\end{equation}
+where RES measures how far the method's conditional rates depart from the base
+rate. The uniform predictor has $\mathrm{REL}=0$ \emph{and} $\mathrm{RES}=0$.
+Resolution is therefore the component that detects calibration achieved by
+saying nothing, and it is reported in Table~\ref{tab:main-sparse-continuous} and
+Figure~\ref{fig:murphy} alongside REL.
+
+\subsection{Credible sets}\label{sec:cs}
+
+For a target mass $\alpha$, variants are added in decreasing PIP order until the
+cumulative mass first reaches $\alpha$; the resulting set size is
+$|CS_\alpha|$ and coverage is the indicator that the set contains a causal
+variant, averaged over fits. When a posterior's \emph{total} mass never reaches
+$\alpha$ the set is the whole region and a flag \texttt{set\_reached} records
+it --- this is a result, not a missing value, and suppressing it would let a
+maximally diffuse posterior masquerade as a confident small set. Size and
+coverage are always read together (Figure~\ref{fig:cs}): a set can be made to
+cover by being large, and small by abandoning coverage.
+
+\subsection{The replication structure and the noise floor}\label{sec:noise}
+
+The design is a split plot. Two variance components matter:
+$\sigma^2_\varepsilon$, the between-iteration variance at fixed region, and
+$\sigma^2_u$, the between-region-draw variance. A factor whose levels are
+compared \emph{within} the same region draws (namely $S$ and $\phi$, which are
+re-simulated per scenario) sees only $\sigma^2_\varepsilon$. A factor whose
+levels necessarily use \emph{different} region draws --- region size, and any
+term containing it --- additionally carries $\sigma^2_u$. Those are
+``whole-plot'' terms.
+
+For a term $T$ with $\mathrm{df}_T$ degrees of freedom, the expected sum of
+squares under the null is $\mathrm{df}_T\lambda_T$ with
+\begin{equation}
+\lambda_T=\frac{\sigma^2_\varepsilon}{20}
++\mathbf{1}\{T\ \text{whole-plot}\}\cdot\frac{m\,\sigma^2_u}{2},
+\qquad m=25 ,
+\end{equation}
+the $20$ being the fits per cell and the $2$ the regions per size class. The
+noise-corrected share is
+\begin{equation}
+\omega^2_T=\frac{\mathrm{SS}_T-\mathrm{df}_T\lambda_T}{\mathrm{SS}_{\text{tot}}} .
+\label{eq:omega}
+\end{equation}
+
+\textbf{Why the correction is necessary.} Without it, a factor that explains
+nothing still receives a share proportional to its degrees of freedom, and
+whole-plot terms receive a large one. In simulation, an uncorrected null factor
+recorded a $14.6\%$ share where the truth was zero; corrected, it averaged
+$-0.6\%$ over replicates. Negative values are reported as computed and never
+clamped: a systematically negative share is a diagnostic that
+$\hat\lambda$ is too large, and hiding it would hide the diagnostic.
+
+\textbf{Estimating $\sigma^2_u$ requires a bias correction.} The naive pooled
+estimator over $J$ region draws in $K$ groups is biased low by the factor
+$c=K(J-1)/(JK-1)$ --- $0.758$ at $J=4$ --- because the pooled mean absorbs part
+of the between-draw signal. Dividing by $c$ restores unbiasedness; verified over
+120 replicates, recovering $0.0438$ against a true $0.0400$ where the naive
+estimator gave $0.0332$.
+
+\subsection{What each ``sense'' asks}\label{sec:senses}
+
+Three different questions are routinely conflated under ``which variables
+matter''. They are kept separate throughout.
+
+\begin{description}
+\item[Sense V --- variance-explaining.] Of the variation in a metric across
+cells, how much does each design factor account for, after the noise
+correction of \eqref{eq:omega}? This bounds every claim below it: a noise floor
+of $50\%$ means no decomposition can explain more than half.
+\item[Sense D --- decision-relevant.] Does changing a factor change
+\emph{which method you would choose}? Measured as the rate at which the
+best-performing method flips between adjacent factor levels, split into a raw
+rate and a gated rate that counts only flips whose margin survives a
+cross-fitted paired test at $z=2$. The gap between them is the quantity of
+interest: it is how much of the apparent structure is noise.
+\item[Sense G --- diagnostic.] For a specific method, which factors hurt
+\emph{it} relative to what was achievable? Measured by
+$\kappa=(\text{method}-\text{baseline})/(\text{ceiling}-\text{baseline})$, the
+fraction of available headroom captured, with SuSiE as baseline and
+PolyFun-oracle as ceiling.
+\end{description}
+
+Sense V and Sense D can disagree entirely, and in this dataset they do. A factor
+can move a metric a great deal while never changing the winner (every method
+degrades together), and a factor with a small main effect can flip the winner
+if it acts differently on different methods. Reporting only one of them
+overstates what is known.
+

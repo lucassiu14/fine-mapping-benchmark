@@ -1,0 +1,462 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,longtable,xcolor,fancyvrb}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,urlcolor=blue!45!black]{hyperref}
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+\setlength{\parskip}{0.35em}
+\newcommand{\file}[1]{\texttt{\small #1}}
+\title{\bf Iteration 004: complete process record\\[3pt]
+\large From simulated genotypes to the final analysis --- every step, in order}
+\author{fmbenchmark}\date{\today}
+\begin{document}\maketitle
+
+\begin{abstract}\noindent
+This document records exactly how the Iteration 004 fine-mapping benchmark
+results were produced. It is written to be followed by someone who has not seen
+the project before: every stage names the file that implements it, the
+parameters it was run with, what it consumed and what it produced. Where a step
+went wrong during execution and had to be redone, that is recorded too, in
+\S\ref{sec:incidents} --- a process record that omits its failures cannot be
+audited. The companion document \file{iter004\_full\_analysis.pdf} presents the
+results; this one explains how they came to exist.
+\end{abstract}
+
+\tableofcontents\bigskip
+
+\section{Overview}
+
+The pipeline has nine stages. Each is a separate script; each writes its output
+to disk before the next begins, so any stage can be re-run without repeating the
+ones before it.
+
+\begin{center}\small
+\begin{tabular}{rlll}\toprule
+& stage & implemented in & produces\\\midrule
+1 & design grid & \file{generate\_params\_grid.R} & \file{params\_grid.csv}\\
+2 & genotypes & \file{simulate\_genotypes.R} & region panel (in \file{sim.rds})\\
+3 & annotations & \file{simulate\_phenotypes.R} & annotation matrices\\
+4 & causal selection & \file{simulate\_phenotypes.R} & \file{truth\$causal\_indices}\\
+5 & phenotypes & \file{simulate\_phenotypes.R} & $y$, $\beta$, realised PVE\\
+6 & summary stats + LD & \file{simulate\_phenotypes.R} & $z$, LD matrix\\
+7 & method fitting & \file{run\_methods.R} + 18 wrappers & \file{results.rds}\\
+8 & collection & \file{iter004\_collect.R} & L1 fit table\\
+9 & analysis & \file{iter004\_report.R} + 3 sense scripts & L2, L3, sense outputs\\
+\bottomrule\end{tabular}\end{center}
+
+\paragraph{Determinism.} Stages 2--6 run under \texttt{seed = 1000 + row\_index},
+set once per design row. Given the same grid and the same VCF inputs, the
+simulated data are reproducible exactly. Stage 9's cross-fitted test uses
+\texttt{set.seed(20260806)}. Stage 7 is not seeded centrally: each method
+controls its own randomness, and the BEATRICE family's Python trainer sets
+\texttt{torch.manual\_seed(1)} internally.
+
+\section{Software environment}
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+R & 4.5.2 (\texttt{R/4.5.2-gfbf-2025b})\\
+Python & 3.12.3 (\texttt{Python/3.12.3-GCCcore-13.3.0})\\
+GSL & 2.8 (\texttt{GSL/2.8-GCC-14.3.0})\\
+scheduler & PBS Pro, queue \texttt{v1\_small72a}, 72\,h walltime\\
+toolchain root & \file{/rds/general/project/neurogenomics-lab/live/tools}\\
+\bottomrule\end{tabular}\end{center}
+
+The toolchain root holds a Python virtualenv (\file{fmpy-venv}), a wrapper
+(\file{py-venv-runner.sh}) that every Python-backed method is handed in place of
+a bare interpreter, the compiled binaries \file{finemap\_v1.4.2} and
+\file{PAINTOR}, and the source checkouts \file{SparsePro}, \file{fine-mapping-inf}
+and \file{Funmap}. The last of these must be \emph{built}, not merely cloned: its
+\file{finemapinf} sub-package declares a C extension.
+
+\paragraph{This location matters.} It must be on permanent storage. An earlier
+execution placed it behind a symlink onto a filesystem subject to a rolling
+30-day purge; see \S\ref{sec:incidents}.
+
+Rebuild it with:
+\begin{Verbatim}[fontsize=\small,frame=single]
+DEST=/rds/general/project/neurogenomics-lab/live/tools \
+  bash scripts/hpc/rebuild_toolchain.sh
+bash scripts/hpc/check_toolchain.sh      # must print RESULT: PASS
+\end{Verbatim}
+
+\file{check\_toolchain.sh} derives the required Python imports by walking the
+tool sources with \texttt{ast}, subtracting the standard library, and importing
+what remains. It does not use a hand-written package list, because a
+hand-written list is what caused the failure in \S\ref{sec:incidents}.
+
+\section{Stage 1 --- the design grid}
+
+\file{scripts/hpc/generate\_params\_grid.R} writes 45 rows to
+\file{params\_grid.csv}. Each row is one combination of architecture,
+annotation type, enrichment fold and (for the infinitesimal arm)
+$p_{\text{causal}}$. The within-row sweep is fixed:
+
+\begin{center}\small
+\begin{tabular}{ll}\toprule
+$S$ & $1,2,3,5,10$\\
+$\phi$ & $0.05, 0.1, 0.2, 0.4, 0.6$\\
+iterations & 10\\
+regions & 10, nominal sizes $\{500,500,750,750,1000,1000,1500,1500,2000,2000\}$\\
+$n$ & 5000\\
+LD & in-sample only (\texttt{n\_ref = NA})\\
+annotations & 10 per region\\
+\bottomrule\end{tabular}\end{center}
+
+$45\times5\times5\times10 = 11{,}250$ scenarios; $\times10$ regions
+$=112{,}500$ fits per method.
+
+\paragraph{The grid is regenerated at every submission, never reused from disk.}
+It is untracked and persists between iterations, and an earlier run silently
+reused a stale 135-row grid from Iteration 003. The submitter now regenerates it
+unconditionally and echoes the resulting design before calling \texttt{qsub}, so
+a mismatch is caught in seconds rather than after 72 hours.
+
+\section{Stage 2 --- genotypes}
+
+\file{R/simulate\_genotypes.R} draws each region from real 1000 Genomes loci
+under \file{data/vcf}, filtered to $\mathrm{MAF}\ge0.01$, then standardises
+columns.
+
+\paragraph{Regions can be smaller than requested.} If a locus does not contain
+enough variants passing the filter, the region is whatever is available. Measured
+over the 709 distinct regions actually used:
+
+\begin{center}\small
+\begin{tabular}{lrrr}\toprule
+nominal & median actual & ratio & within 5\%\\\midrule
+500 & 499 & 1.00 & 100\%\\
+750 & 749 & 1.00 & 96\%\\
+1000 & 999 & 1.00 & 97\%\\
+1500 & 1483 & 0.99 & 62\%\\
+2000 & 1590 & 0.80 & 26\%\\
+\bottomrule\end{tabular}\end{center}
+
+The analysis uses the \emph{nominal} size as its design factor. Variation in
+actual size within a nominal class is absorbed into the between-region variance
+component $\sigma^2_u$ and correctly subtracted by the noise correction, so the
+design remains valid; only the label is approximate.
+
+\paragraph{Regions are shared across the whole row.} All 250 scenarios of a
+design row use the same ten regions, simulated once and cached in \file{sim.rds}.
+This is what creates the split-plot structure the analysis corrects for, and it
+is why two regions exist per size class --- without a replicate draw, $\sigma^2_u$
+would not be identifiable.
+
+\section{Stage 3 --- annotations}
+
+Ten annotations per region. Binary annotations are Bernoulli indicators;
+continuous ones are drawn from a shared-factor model so that annotations within
+an enrichment group are correlated. The same matrix is passed to every
+annotation-aware method, so no method sees information another does not.
+
+\section{Stage 4 --- causal variant selection}
+
+\file{select\_causal\_variants()} in \file{R/simulate\_phenotypes.R}.
+
+\begin{itemize}
+\item \textbf{No annotations}: $S$ indices drawn uniformly without replacement.
+\item \textbf{With annotations}: weights
+$w_j=\exp\!\big(A_j^\top\log\gamma\big)$, normalised to probabilities, then $S$
+drawn without replacement.
+\end{itemize}
+
+$\gamma$ is the enrichment vector for that row. \file{polyfun\_oracle}
+reconstructs $\pi_j\propto\exp(A_j^\top\log\gamma)$ from the stored truth,
+using the identical formula --- which is what makes it a true ceiling rather
+than a strong competitor.
+
+\section{Stage 5 --- phenotypes}
+
+\subsection{Sparse}
+Effects $\beta\sim N(0,\sigma^2_\beta)$ on the $S$ causal variants; the residual
+variance is then chosen to hit the target heritability exactly:
+\[
+\sigma^2_\varepsilon=\operatorname{Var}(X\beta)\frac{1-\phi}{\phi}
+\quad\Longrightarrow\quad \mathrm{PVE}=\phi\ \text{exactly}.
+\]
+
+\subsection{Sparse plus infinitesimal}
+A second component is drawn on the \textbf{non-causal variants only},
+$\alpha_{nc}\sim N(0,1/m_{nc})$ (the BEATRICE formulation;
+\texttt{inf\_model = "beatrice"}, the default, is what was used). The components
+are then rescaled so that
+\[
+\operatorname{Var}(g_{\text{sparse}})=p_{\text{causal}}\phi,\quad
+\operatorname{Var}(g_{\text{inf}})=(1-p_{\text{causal}})\phi,\quad
+\sigma^2_\varepsilon=1-\phi,
+\]
+and $\beta$ is rescaled by the same factor so the recorded truth stays
+consistent with the realised phenotype.
+
+\paragraph{Consequence for interpretation.} Every non-causal variant then has a
+genuine non-zero effect, while the ground truth used for scoring is the $S$
+sparse causals only. A method that detects infinitesimal signal is counted as
+making a false discovery. Absolute FDR is therefore not comparable between the
+two arms; \emph{degradation} between arms is the meaningful quantity.
+
+\section{Stage 6 --- summary statistics and LD}
+
+\file{compute\_summary\_statistics()}: marginal OLS per variant on the centred
+phenotype,
+\[
+\hat\beta_j=\frac{x_j^\top y_c}{x_j^\top x_j},\quad
+\mathrm{RSS}_j=\|y_c\|^2-\hat\beta_j x_j^\top y_c,\quad
+\mathrm{se}_j=\sqrt{\frac{\mathrm{RSS}_j}{(n-2)\,x_j^\top x_j}},\quad
+z_j=\hat\beta_j/\mathrm{se}_j .
+\]
+
+LD is \texttt{cor(X)} on the \emph{same} genotype matrix that generated the
+phenotype --- in-sample throughout, with no reference panel anywhere in this
+iteration. Iteration 003 established that in-sample and reference-panel LD can
+invert method rankings, so no conclusion here transfers to the panel setting.
+\section{Stage 7 --- fitting the methods}
+
+\file{scripts/hpc/run\_benchmark\_job.R} is the array worker. Task $t$ maps to
+\[
+\text{row}=\Big\lfloor\frac{t-1}{\text{tasks per row}}\Big\rfloor+1,
+\qquad \text{tasks per row}=\Big\lceil\frac{250}{\text{chunk}}\Big\rceil ,
+\]
+with chunk $=5$, so 50 tasks per row and 2{,}250 tasks for the full grid. Each
+task loads its row's cached \file{sim.rds}, then fits all methods to each of its
+five scenarios in turn, writing \file{results.rds} per scenario before moving on.
+
+\paragraph{Eighteen methods were fitted.}
+\texttt{susie}, \texttt{susie\_inf}, \texttt{finemap}, \texttt{finemap\_inf},
+\texttt{abf}, \texttt{marginal\_z}, \texttt{finimom}, \texttt{sparsepro},
+\texttt{funmap}, \texttt{paintor}, \texttt{polyfun\_oracle},
+\texttt{polyfun\_est}, \texttt{polyfun\_ldsc}, \texttt{sbayesrc},
+\texttt{beatrice}, \texttt{functional\_beatrice}, \texttt{fb\_pooled},
+\texttt{fb\_xregion}.
+
+CARMA was dropped part-way through on measured cost: $19{,}000$\,s per scenario
+against $9{,}765$\,s for the other eighteen combined, i.e.\ $66\%$ of total
+runtime, for a differentiator (LD-discrepancy outlier detection) that an
+all-in-sample design cannot exercise. Scenarios fitted before that change do
+contain CARMA results; they are retained on disk but excluded from every
+analysis, because partial coverage of a balanced design unbalances every
+stratum it touches.
+
+\paragraph{The four BEATRICE variants.} All share one Binary Concrete
+(Gumbel-Softmax) variational posterior over causal configurations and differ
+only in where the prior comes from:
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+method & prior & fitted\\\midrule
+\texttt{beatrice} & uniform & ---\\
+\texttt{functional\_beatrice} & LassoNet on annotations & per region\\
+\texttt{fb\_pooled} & shared logistic head & jointly, all regions\\
+\texttt{fb\_xregion} & shared LassoNet head & jointly, all regions\\
+\bottomrule\end{tabular}\end{center}
+
+The two joint variants optimise
+$L(\phi,\{\psi_r\})=\sum_r\mathrm{ELBO}_r(\psi_r;p_{0,r}=f_\phi(v_r))$ with a
+\emph{single} optimiser over the shared head and all region posteriors: one
+backward pass per step on $\tfrac1R\sum_r\mathrm{loss}_r$, so every parameter
+moves simultaneously. It is not alternating optimisation. The equal weighting of
+regions follows from the $1/R$ rather than being imposed separately.
+
+With no annotations all four reduce to the same code path, which is why they are
+bit-identical on both unannotated arms --- a mechanical negative control, not a
+coincidence.
+
+\paragraph{Hyperparameters} for the BEATRICE family come from Optuna trial
+\#401: \texttt{sigma\_sq}~$=0.0899$, \texttt{sparse\_concrete}~$=51$,
+\texttt{max\_iter}~$=2000$, \texttt{n\_caus}~$=10$, and for the functional
+variants \texttt{prior\_regularisation}~$=0.1255$,
+\texttt{lambda\_l1}~$=0.1223$, \texttt{hierarchy\_M}~$=10.15$. All competitors
+run at their documented defaults. A separate analysis found the family's
+sensitivity to these values to be small ($\pm0.004$ AP across a deliberately
+wide hand-tuned sweep) relative to the architectural contrasts.
+
+\paragraph{Per-task preflight.} Before any fitting, each task imports every
+module the tool sources actually require --- the list derived by \texttt{ast}
+walk, not written by hand --- and aborts if any fails. All 1{,}800 tasks of the
+final run reported \texttt{preflight ok}.
+
+\section{Stage 8 --- collection}
+
+\file{scripts/analysis/iter004\_collect.R}, one array task per design row,
+re-derives every metric from the raw PIPs in \file{results.rds} and the truth in
+\file{sim.rds}. It does not read the \file{evaluation.rds} written during
+fitting.
+
+Two details matter for correctness:
+
+\begin{itemize}
+\item \textbf{The scenario index comes from the directory name}, not from
+\texttt{fit\$scenario\_id}. The worker subsets \file{sim} to one scenario and
+resets that field to 1, because \texttt{evaluate\_methods()} uses it as a list
+index; the true index survives only in the \file{scenario\_<n>} path. Indexing
+by the stored field would silently attach every fit to scenario 1.
+\item \textbf{A fit with any non-finite PIP is marked failed, not repaired.} Its
+total mass and the ranking of the affected variants are undefined, so no metric
+derived from it is trustworthy. Imputing to zero would invent posterior mass and
+flatter precisely the method that failed. A separate \texttt{bad\_pip} column,
+scoped to fits that did \emph{not} declare an error, makes silent failure
+countable and distinguishable from an honest one.
+\end{itemize}
+
+Output: the L1 table, one row per (scenario, region, method), $2{,}031{,}230$
+rows, carrying $\sim45$ metric columns.
+
+\section{Stage 9 --- aggregation and analysis}
+
+\file{scripts/analysis/iter004\_report.R} binds the L1 partials, then:
+
+\begin{enumerate}
+\item Joins the grid, and \textbf{recodes \texttt{NA}-as-level before any
+grouping}. \texttt{p\_causal} is \texttt{NA} on every sparse row and
+\texttt{enrichment\_fold} is \texttt{NA} on every unannotated row;
+\texttt{aggregate()}, \texttt{split()} and \texttt{table()} all drop \texttt{NA}
+groups silently, which would delete those arms entirely.
+\item Builds L2 (replicate level: cell $\times$ iteration $\times$ method) and
+L3 (cell means), using a hand-rolled grouped reduction. \texttt{aggregate()} did
+not complete in 120\,s at this scale; the replacement runs in 2.7\,s and was
+verified to give identical results.
+\item Runs the validity checks of \S\ref{sec:checks}.
+\item Drives the three sense scripts.
+\end{enumerate}
+
+The three senses are defined and derived in full in the companion analysis
+document; in outline, Sense V is a noise-corrected variance decomposition on
+cell means, Sense D a cross-fitted test of whether a cell's winner is real, and
+Sense G a set of paired within-replicate contrasts.
+
+\section{Validity checks performed}\label{sec:checks}
+
+\subsection{Automatic, on every run}
+\begin{enumerate}
+\item In-sample LD only --- zero rows with a reference-panel size.
+\item 45 design rows present, matching the grid.
+\item Balanced cells per analysed method --- $5{,}625$ for all 18.
+\item Exclusions (CARMA) reported explicitly rather than silently applied.
+\item No method entirely absent outside the unannotated arms.
+\item \texttt{polyfun\_est} $=$ \texttt{susie} on the unannotated arms.
+\item \texttt{polyfun\_ldsc} $=$ \texttt{susie} on the unannotated arms.
+\end{enumerate}
+
+Checks 6 and 7 are the strongest structural tests available: both methods reduce
+to SuSiE analytically without annotations, so a discrepancy would indicate a
+fault in the annotation plumbing rather than in a method.
+
+\subsection{Additional checks performed for this report}
+\begin{enumerate}\setcounter{enumi}{7}
+\item Truth consistency: $\texttt{n\_causal}=S$ for all $2{,}031{,}230$ fit
+rows. Zero mismatches.
+\item Grid completeness: exactly $11{,}250$ distinct
+$(\text{row},S,\phi,\text{iter})$ tuples; \texttt{region\_idx} $\in\{1,2\}$ only.
+\item Metric internal consistency, per fit: $\mathrm{tp}_t\le n_t$ and
+$\mathrm{tp}_t\le S$ at $t\in\{0.5,0.9,0.99\}$; $n_t$ monotone decreasing in
+$t$; $\mathrm{AP}\in[0,1]$; $|CS_{95}|\le p$; PIP-band counts summing to $p$;
+causal band counts summing to $S$. Zero violations of any.
+\item Negative controls, exactly: all four BEATRICE variants identical to
+machine precision on both unannotated arms; \texttt{polyfun\_\{est,ldsc,oracle\}}
+identical to \texttt{susie} there.
+\item Directional sanity: AP strictly decreasing in $S$; strictly increasing in
+$p_{\text{causal}}$; sparse arm easier than sparse+infinitesimal. AP is
+\emph{not} monotone in $\phi$ --- investigated and found to be a genuine
+method-specific effect, not a fault.
+\item Simulation code review: PVE calibration exact by construction in both
+architectures; oracle prior uses the identical formula to causal selection.
+\item Headroom validity: the oracle's ranking advantage over the baseline is
+intact in all four annotated strata, so $\kappa$ is defined there.
+\end{enumerate}
+
+\section{Incidents during execution}\label{sec:incidents}
+
+Recorded because a process record that omits its failures cannot be audited, and
+because each fix is now a guard that a future run inherits.
+
+\paragraph{1. Stale grid silently reused.} \file{params\_grid.csv} is untracked
+and persists between iterations; a submission reused Iteration 003's 135-row
+grid. \emph{Fix:} the submitter regenerates it unconditionally and prints the
+design before submitting.
+
+\paragraph{2. CARMA dominating runtime.} $66\%$ of total compute for an
+untestable capability. \emph{Fix:} removed from the method set; prior partial
+results retained but excluded from analysis.
+
+\paragraph{3. Toolchain on a purging filesystem.} \file{\textasciitilde/tools}
+was a symlink onto ephemeral storage subject to a rolling 30-day purge. It
+decayed \emph{during} a run: activating the virtualenv kept succeeding while
+imports inside it stopped resolving, so seven Python-backed methods recorded
+$38$--$50\%$ failed fits for hours without the job stopping. \emph{Fix:}
+toolchain moved to permanent project storage; a per-task preflight now aborts
+immediately if any required import fails. Affected results were discarded and
+the arm refitted.
+
+\paragraph{4. Dependency list written from memory.} The rebuilt environment
+installed five packages; BEATRICE also requires \texttt{imageio},
+\texttt{seaborn} and \texttt{tqdm}, and FINEMAP-inf requires \texttt{bgzip}. All
+fits died on \texttt{ModuleNotFoundError} after a check that had passed.
+\emph{Fix:} the required imports are now derived from the tool sources by
+\texttt{ast} walk and each is actually imported, not merely located --- an
+installed-but-broken package passes \texttt{find\_spec} and fails at runtime.
+
+\paragraph{5. \texttt{setuptools} 81 removed \texttt{pkg\_resources}.} An
+unpinned upgrade broke FINEMAP-inf, which imports it. \emph{Fix:} pinned
+\texttt{setuptools<81}. Separately, \file{fine-mapping-inf} must be built rather
+than cloned (it declares a C extension) and its build needs
+\texttt{--no-build-isolation} because \file{setup.py} imports numpy at build
+time.
+
+\paragraph{6. Silent all-NA output.} \texttt{finemap\_inf} returns an all-NA
+posterior without raising an error at $\phi=0.6$, $S=1$ in the sparse arm. The
+old evaluator crashed on it; the collect stage treated it as a successful fit.
+\emph{Fix:} non-finite PIPs mark the fit failed and set a \texttt{bad\_pip} flag,
+scoped to fits that declared no error, so silent failure is countable.
+
+\paragraph{7. Scheduler instability.} The final tail of the array was
+system-held twice for repeated launch failures, during a period when the site
+had disabled \texttt{qstat} for slowness. \emph{Fix (operational):} the held
+subjobs were deleted and resubmitted as fresh jobs; all completed. No data was
+affected --- completed scenarios were already on disk.
+
+\section{Reproducing the run}
+
+From the project root on the cluster:
+
+\begin{Verbatim}[fontsize=\small,frame=single]
+# 0. toolchain (once)
+DEST=/rds/general/project/neurogenomics-lab/live/tools \
+  bash scripts/hpc/rebuild_toolchain.sh
+bash scripts/hpc/check_toolchain.sh          # must print RESULT: PASS
+
+# 1-7. simulate and fit  (2250 tasks, ~72h with wide concurrency)
+module load R/4.5.2-gfbf-2025b
+FMB_SCENARIOS_PER_TASK=5 PBS_QUEUE=v1_small72a PBS_WALLTIME=72:00:00 \
+  FMB_SCRATCH=$EPHEMERAL/fmbench_iter004 \
+  bash scripts/hpc/submit_benchmark_pbs.sh
+
+# 8-9. verify, then collect and analyse  (submits itself only if the run is sound)
+qsub -v PROJECT=$HOME/fine-mapping-benchmark \
+  scripts/analysis/verify_and_analyse.sh
+\end{Verbatim}
+
+The verify step checks \file{results.rds} completeness against 11{,}250, scans
+every task log for preflight failures, and gates on per-method declared-failure
+and silent-NA rates before submitting the analysis. It refuses to proceed on a
+short or damaged grid.
+
+\section{Output manifest}
+
+\begin{center}\small
+\begin{tabular}{lll}\toprule
+file & level & contents\\\midrule
+\file{combined\_fit\_metrics.rds} & L1 & one row per (scenario, region, method)\\
+\file{combined\_replicate\_metrics.rds} & L2 & one row per (cell, iteration, method)\\
+\file{combined\_scenario\_metrics.rds} & L3 & cell means; the ANOVA input\\
+\file{validity\_checks.txt} & --- & the checks of \S\ref{sec:checks}\\
+\file{iter004\_sense\_v/} & --- & variance decomposition\\
+\file{iter004\_sense\_d/} & --- & decision analysis, per-cell winners\\
+\file{iter004\_sense\_g/} & --- & headroom, $\kappa$, paired contrasts\\
+\bottomrule\end{tabular}\end{center}
+
+L1 is the pivot: every statistic in the analysis document is re-derivable from
+it without refitting. The raw PIPs it was built from live under
+\file{fmbench\_iter004/results/benchmark} and should be archived off ephemeral
+storage if any metric not already in L1 might be wanted later.
+
+\end{document}

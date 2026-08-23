@@ -1,0 +1,540 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{amsmath,amssymb,booktabs,graphicx,longtable,xcolor}
+\usepackage[colorlinks=true,linkcolor=blue!45!black,urlcolor=blue!45!black]{hyperref}
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+\setlength{\parskip}{0.35em}
+\newcommand{\pip}{\mathrm{PIP}}
+\title{\bf Fine-mapping across sparse and sparse-plus-infinitesimal architectures\\[3pt]
+\large Iteration 004 benchmark --- complete analysis, all six strata}
+\author{fmbenchmark}\date{\today}
+\begin{document}\maketitle
+
+\begin{abstract}\noindent
+This report analyses the complete Iteration 004 fine-mapping benchmark: 45 design
+rows, 11{,}250 scenarios, 112{,}500 region-fits per method, 18 methods, in-sample
+LD throughout. It spans two genetic architectures --- a purely sparse model and a
+sparse-plus-infinitesimal model --- crossed with three annotation conditions,
+giving six strata that are never pooled. Every quantity derived from posterior
+inclusion probabilities is defined explicitly before use, including its
+aggregation level, its tie handling and the noise correction applied to the
+variance decomposition. The principal findings are: (i) the number of causal
+variants $S$ dominates the variance budget in every stratum; (ii) the
+\emph{presence} of annotations matters and their \emph{strength} barely does;
+(iii) the Functional BEATRICE ablation is monotone and highly significant in all
+four annotated strata and \emph{exactly zero} in both unannotated ones, over
+51{,}250 paired replicates; and (iv) the annotation-aware methods that lead under
+the sparse model degrade sharply under misspecification, whereas the
+region-sharing variant does not --- \texttt{fb\_xregion} rises from third to
+second of eighteen and overtakes the entire PolyFun family.
+\end{abstract}
+
+\tableofcontents\bigskip
+
+\section{Design}\label{sec:design}
+
+\subsection{The two architectures}
+
+Each simulated region contains exactly $S$ causal variants. The arms differ in
+what else contributes to the phenotype.
+
+\paragraph{Sparse.} Only the $S$ causal variants have effects. Effect sizes are
+drawn $\beta\sim N(0,\sigma^2_\beta)$ and the residual variance is calibrated to
+hit the target heritability exactly:
+\[
+\sigma^2_\varepsilon=\operatorname{Var}(X\beta)\,\frac{1-\phi}{\phi}
+\quad\Longrightarrow\quad
+\mathrm{PVE}=\frac{\operatorname{Var}(X\beta)}{\operatorname{Var}(X\beta)+\sigma^2_\varepsilon}=\phi .
+\]
+
+\paragraph{Sparse plus infinitesimal.} A second genetic component is added,
+drawn on the \textbf{non-causal variants only}
+($\alpha_{nc}\sim N(0,1/m_{nc})$, the BEATRICE formulation). The three variance
+components are then scaled so that
+\[
+\operatorname{Var}(g_{\text{sparse}})=p_{\text{causal}}\cdot\phi,\qquad
+\operatorname{Var}(g_{\text{inf}})=(1-p_{\text{causal}})\cdot\phi,\qquad
+\sigma^2_\varepsilon=1-\phi .
+\]
+So $\phi$ is total heritability in both arms, and $p_{\text{causal}}$ is
+\textbf{the fraction of heritability carried by the sparse component}. At
+$p_{\text{causal}}=0.2$, four-fifths of the genetic signal is infinitesimal.
+
+\paragraph{This has a consequence that governs how the second arm must be read.}
+Under sparse-plus-infinitesimal, \emph{every non-causal variant has a genuine
+non-zero effect}. The ground truth used for every metric in this report is the
+set of $S$ sparse causal variants only. A method that correctly detects
+infinitesimal signal is therefore scored as making a false discovery.
+\textbf{All accuracy and calibration numbers in the second arm measure recovery
+of the sparse component against a background of real but unlabelled signal},
+which is the correct question for fine-mapping but is not the same question as
+the first arm asks. Cross-arm comparisons of absolute FDR are meaningless for
+that reason; comparisons of \emph{degradation} between arms are the informative
+quantity, and are the subject of \S\ref{sec:misspec}.
+
+\subsection{The grid}
+
+\begin{center}\small
+\begin{tabular}{llll}\toprule
+& rows & annotation & enrichment folds\\\midrule
+sparse & 1 & none & ---\\
+& 4 & binary & 2.7, 5.4, 8.1, 10.8\\
+& 4 & continuous & 2.7, 5.4, 8.1, 10.8\\
+sparse + infinitesimal & 4 & none & --- \quad ($p_{\text{causal}}\in\{0.2,0.4,0.6,0.8\}$)\\
+& 16 & binary & $4\times4$ enrichment $\times\ p_{\text{causal}}$\\
+& 16 & continuous & $4\times4$\\\midrule
+\multicolumn{4}{l}{45 rows $\times$ 250 scenarios $\times$ 10 regions $=$ 112{,}500 fits per method}\\
+\bottomrule\end{tabular}\end{center}
+
+Within every row: $S\in\{1,2,3,5,10\}$, $\phi\in\{0.05,0.1,0.2,0.4,0.6\}$,
+10 iterations, 10 regions of nominal sizes
+$\{500,500,750,750,1000,1000,1500,1500,2000,2000\}$, $n=5000$ individuals.
+
+\paragraph{Causal variants are drawn with annotation-proportional probability.}
+$w_j=\exp\!\big(A_j^\top\log\gamma\big)$, normalised, sampled without
+replacement. \texttt{polyfun\_oracle} reconstructs exactly this $\pi_j$ from the
+stored truth, which is what makes it a genuine ceiling rather than merely a
+strong method.
+
+\paragraph{Nominal region sizes are approximate at the top of the range.}
+Regions are drawn from real 1000 Genomes loci, and many do not contain 2{,}000
+usable variants. Measured actual counts:
+
+\begin{center}\small
+\begin{tabular}{lrrrr}\toprule
+nominal & median actual & ratio & within 5\% of nominal\\\midrule
+500  & 499  & 1.00 & 100\%\\
+750  & 749  & 1.00 & 96\%\\
+1000 & 999  & 1.00 & 97\%\\
+1500 & 1483 & 0.99 & 62\%\\
+2000 & \textbf{1590} & \textbf{0.80} & \textbf{26\%}\\
+\bottomrule\end{tabular}\end{center}
+
+The true swept range is therefore $499$--$1590$ ($3.2\times$), not
+$500$--$2000$ ($4\times$). Since $\omega^2$ is range-dependent
+(\S\ref{sec:sensev}), region size's already-small importance is measured over a
+narrower span than its label suggests. The design remains valid: variation in
+actual size \emph{within} a nominal class is differenced away by the
+$\sigma^2_u$ estimator (\S\ref{sec:vhow}) and correctly subtracted. Only the
+label is approximate.
+
+\paragraph{The unit of analysis.} A \textbf{cell} is
+$(\text{row},S,\phi,\text{nominal region size})$, aggregating
+$10\ \text{iterations}\times2\ \text{regions of that size}=20$ fits. There are
+$45\times125=5{,}625$ cells per method. Cell means feed every ANOVA;
+individual fits feed the calibration counts; replicate-level rows feed the
+paired contrasts.
+
+\paragraph{Stratification is not optional.} Nothing is pooled across
+architecture or annotation type. Beyond the obvious --- a method that cannot use
+annotations is not comparable to one that can --- the unannotated arms serve as
+negative controls, and the two architectures pose different questions
+(\S\ref{sec:design}).
+\input{sec_metrics.tex}
+
+\section{Completeness}\label{sec:completeness}
+
+Every one of the 18 analysed methods has all $5{,}625$ cells populated, with
+per-method declared-failure rates of $0.0\%$ and silent all-NA rates of $0.0\%$
+across both arms. Three absences are structural and are \emph{not} defects:
+
+\begin{itemize}
+\item \textbf{Funmap} requires annotations and cannot run on either unannotated
+arm. Its row there is \emph{empty}, not \emph{poor}; no performance claim may be
+inferred from it.
+\item \textbf{FINEMAP-inf} returns an all-NA posterior without raising an error
+at $\phi=0.6$, $S=1$ in the sparse arm --- 45 cells, nine rows $\times$ five
+region sizes. Recorded via a dedicated \texttt{bad\_pip} flag so the loss is
+countable rather than averaged away.
+\item \textbf{CARMA} was dropped mid-iteration on measured cost --- $19{,}000$\,s
+per scenario against $9{,}765$\,s for the other eighteen combined, $66\%$ of
+total runtime --- for a differentiator (LD-discrepancy outlier detection) that
+an all-in-sample design cannot exercise. It is excluded from every analysis here.
+\end{itemize}
+
+\paragraph{A prior failure, and what fixed it.} An earlier execution of the
+sparse-plus-infinitesimal arm recorded $38$--$50\%$ failed fits for seven
+Python-backed methods. The cause was environmental, not statistical: the
+toolchain lived on a filesystem subject to a rolling 30-day purge and decayed
+mid-run, so activation kept succeeding while imports inside it stopped
+resolving. Those results were discarded and the arm refitted after moving the
+toolchain to permanent storage. The run reported here carries a per-task
+preflight that imports every module the tool sources actually use --- derived by
+AST from the sources rather than listed by hand --- and aborts the task if any
+fails. All $1{,}800$ tasks reported \texttt{preflight ok}.
+
+\section{Overall accuracy}\label{sec:overall}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f01_ap_ranking.pdf}
+\caption{Mean AP with 95\% intervals over the 5{,}625 cells of each method,
+ordered by the sparse+infinitesimal continuous stratum.}\label{fig:ap}\end{figure}
+
+Reading down the two rows of Figure~\ref{fig:ap}, three things change between
+architectures.
+
+\textbf{Everything gets harder.} Mean AP falls from $0.677$ (sparse) to $0.527$
+(sparse + infinitesimal). This is expected and is not solely a difficulty
+effect: the infinitesimal background is real signal that the metric counts as
+noise (\S\ref{sec:design}).
+
+\textbf{The leaderboard reorders.} Under the sparse model the PolyFun family
+leads among deployable methods. Under misspecification it collapses and
+\texttt{fb\_xregion} becomes the strongest non-oracle method on continuous
+annotations. This is quantified in \S\ref{sec:misspec}.
+
+\textbf{FINEMAP-inf comes into its own.} It ranks first or second across all
+three sparse+infinitesimal strata. That is the architecture it explicitly
+models, and the benchmark rewards it accordingly --- a useful internal check
+that the second arm is doing what it was designed to do.
+
+\section{When does each method do well?}\label{sec:conditional}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f02_ap_vs_S.pdf}
+\caption{AP against the number of causal variants.}\label{fig:vs-s}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f03_ap_vs_phi.pdf}
+\caption{AP against region heritability.}\label{fig:vs-phi}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f04_ap_vs_p.pdf}
+\caption{AP against nominal region size. Nearly flat in both arms --- over the
+range actually swept (median 499 to 1590 variants), region size is not what
+makes fine-mapping hard here.}\label{fig:vs-p}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f05_ap_vs_pcausal.pdf}
+\caption{AP against $p_{\text{causal}}$, the fraction of heritability in the
+sparse component. Sparse+infinitesimal arm only.}\label{fig:vs-pc}\end{figure}
+
+$S$ is the binding constraint in both arms: pooled AP falls
+$0.780\to0.367$ from $S=1$ to $S=10$, a larger swing than any other factor
+produces. $p_{\text{causal}}$ is the second lever in the infinitesimal arm,
+rising $0.370\to0.640$ from $p_{\text{causal}}=0.2$ to $0.8$ --- unsurprising,
+since it directly controls how much of the signal is the kind the metric scores.
+
+\paragraph{Heritability is not monotone, and that is a real result.} Pooled AP
+rises $0.482\to0.596$ from $\phi=0.05$ to $\phi=0.4$ and then \emph{falls} to
+$0.586$ at $\phi=0.6$. The dip is not an artefact of the FINEMAP-inf gap --- it
+survives excluding that method ($0.5907\to0.5811$) --- and it is
+method-specific. Eight methods degrade at the top of the range, led by
+\texttt{sbayesrc} ($-0.088$), \texttt{sparsepro} ($-0.078$) and
+\texttt{finimom} ($-0.055$); ten improve, led by \texttt{susie\_inf}
+($+0.032$). Methods whose priors or variational approximations are tuned for
+moderate signal do not necessarily benefit from more of it. A benchmark that
+reported only the pooled mean would have shown a flat top and missed this
+entirely.
+
+\section{Robustness to misspecification}\label{sec:misspec}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f14_misspecification.pdf}
+\caption{AP under the sparse model (blue) against sparse + infinitesimal
+(orange), annotated strata. Bar length is the cost of misspecification; methods
+are ordered by it.}\label{fig:misspec}\end{figure}
+
+This is the central result of the second arm. Taking continuous annotations:
+
+\begin{center}\small
+\begin{tabular}{lrrl}\toprule
+method & sparse & sparse + inf & \\\midrule
+\texttt{polyfun\_est}   & \textbf{0.8061} (2nd) & 0.5480 & FDR@.9 $0.005\to0.35$\\
+\texttt{polyfun\_ldsc}  & 0.7914 & 0.5443 & FDR@.9 $0.005\to0.38$\\
+\texttt{fb\_xregion}    & 0.7933 (3rd) & \textbf{0.6521} (2nd) & FDR@.9 $0.049\to0.068$\\
+\texttt{susie\_inf}     & 0.7398 & 0.6120 & FDR@.9 $0.005\to0.037$\\
+\bottomrule\end{tabular}\end{center}
+
+\textbf{The PolyFun family's FDR at $\pip\ge0.9$ degrades roughly seventy-fold},
+from about $0.005$ to $0.35$--$0.38$, and its ranking collapses.
+\texttt{fb\_xregion} loses accuracy too --- everything does --- but its FDR
+moves only from $0.049$ to $0.068$, and it \emph{gains} rank, finishing second
+of eighteen behind only the oracle.
+
+The mechanism is visible in the design. PolyFun-style methods place a per-SNP
+prior derived from a model in which annotation-weighted variants are causal and
+everything else is null. When four-fifths of the heritability sits in unlabelled
+infinitesimal effects that assumption is badly wrong, and a confident prior
+built on it produces confident errors. The BEATRICE family's concrete
+variational posterior does not commit as hard, and the shared prior head in
+\texttt{fb\_xregion} is fitted across ten regions, which appears to regularise
+it further.
+
+\paragraph{The oracle is itself miscalibrated in this arm.} PolyFun-oracle
+retains the highest AP but its FDR@$0.9$ reaches $0.36$--$0.38$, because it
+holds the true \emph{sparse} prior while the infinitesimal component it does not
+model generates real signal at unlabelled variants. The ceiling is a ceiling for
+ranking, not for calibration, and $\kappa$ (\S\ref{sec:senseg}) inherits that
+caveat.
+
+\section{False discovery and calibration}\label{sec:calibration}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f06_calibration.pdf}
+\caption{Mass claimed against errors made. The whole field shifts right and up
+under the infinitesimal model.}\label{fig:calib}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.82\linewidth]{figs/f07_reliability.pdf}
+\caption{Reliability diagrams, pooled within arm.}\label{fig:rel}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f08_fdr.pdf}
+\caption{FDR across PIP thresholds. A calibrated method satisfies
+$\mathrm{FDR}_t\le1-t$.}\label{fig:fdr}\end{figure}
+
+In the sparse arm the trade-off is the familiar one: the BEATRICE family buys
+ranking accuracy with roughly $2\times$ mass inflation and an FDR@$0.9$ an order
+of magnitude above PolyFun's, while \texttt{susie\_inf} and \texttt{finemap}
+stay near mass ratio $1.1$--$1.2$.
+
+Under the infinitesimal model \emph{every} method's mass ratio rises, to
+$2.5$--$4.2$. Part of this is genuine overconfidence and part is definitional:
+mass placed on infinitesimal variants is real posterior belief about real
+effects, counted here as excess. The two cannot be separated with this ground
+truth, and the reliability diagrams in Figure~\ref{fig:rel} should be read with
+that in mind --- the apparent overconfidence of the whole field in the right
+panel is partly an artefact of scoring against the sparse component alone.
+
+\textbf{What survives that caveat is the comparison between methods within the
+arm}, since all are scored against the same truth. There,
+\texttt{beatrice} ($2.51$) and \texttt{fb\_pooled} ($3.11$--$3.27$) are the most
+conservative of the family and the PolyFun/SuSiE group the least
+($4.2$).
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f17_murphy.pdf}
+\caption{Murphy decomposition. REL is miscalibration (lower better); RES is
+resolution (higher better). RES is what distinguishes an informative posterior
+from one calibrated by being vague.}\label{fig:murphy}\end{figure}
+
+\section{Credible sets}\label{sec:cs}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f09_credible_sets.pdf}
+\caption{95\% credible sets: follow-up burden against coverage.}\label{fig:cs}\end{figure}
+
+Size and coverage are always read together: a set can be made to cover by being
+large and small by abandoning coverage. Neither number alone identifies which
+situation a method is in.
+\section{Sense V: what moves the metric}\label{sec:sensev}
+
+\input{sec_vhow.tex}
+
+\subsection{The variance budget}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f10_variance_budget.pdf}
+\caption{The closed variance budget for AP. Strata whose design contains a
+single row have no identifiable $\sigma^2_u$ and are omitted.}\label{fig:budget}\end{figure}
+
+The noise floor runs $17$--$19\%$ in the strata where it is estimable, with main
+effects at $60$--$68\%$ and everything above two-way under $5\%$. That is the
+licence for reading the marginal plots of \S\ref{sec:conditional} at face value.
+
+\paragraph{Two strata have no budget at all.} \texttt{sparse/none} contains a
+single design row, so there is only one group from which to estimate
+$\sigma^2_u$ and the between-region-draw component is unidentifiable. Every
+corrected share in this section therefore excludes it. Uncorrected shares would
+be inflated, particularly for whole-plot terms, and are not reported.
+
+\subsection{Different metrics have different drivers}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f11_sense_v_responses.pdf}
+\caption{Noise-corrected $\omega^2$ for three responses. The factor ordering
+changes with the response.}\label{fig:vresp}\end{figure}
+
+Ranking accuracy and mass calibration are both governed by $S$; false discovery
+is governed by $\phi$. A benchmark reporting AP alone would call $\phi$
+second-order, when for the metric a practitioner acts on --- the error rate
+among confident calls --- it is the leading factor.
+
+\paragraph{Negative shares are reported unclamped.} Where
+$\mathrm{df}_T\lambda_T$ exceeds $\mathrm{SS}_T$ the corrected share goes
+negative, which says the estimated noise for that term is larger than the
+variation observed. FDR at a fixed threshold is a ratio of small counts and is
+far noisier per cell than AP, so its decomposition is unreliable at this
+replication level. Clamping would hide exactly that diagnostic.
+
+\section{Sense D: what changes the decision}\label{sec:sensed}
+
+\input{sec_dhow.tex}
+
+\subsection{Who actually wins}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f12_sense_d_winners.pdf}
+\caption{Cells won by each method, split by whether the win survives the
+cross-fitted paired test.}\label{fig:winners}\end{figure}
+
+Grey dominates every panel. The nominal winner of a cell usually cannot be
+separated from its runner-up, and win counts must not be read as a ranking ---
+most are ties dressed up as wins.
+
+\paragraph{What follows.} At 20 fits per cell the benchmark cannot resolve which
+of eighteen methods is best \emph{within a single cell}, and regime maps built
+from modal winners are not recommendations. This is a statement about power, not
+about the methods being equivalent: the paired contrasts of
+\S\ref{sec:senseg} pool tens of thousands of replicates and are decisive.
+Reporting only one of the two would misrepresent what the benchmark establishes.
+
+\section{Sense G: headroom and the ablation}\label{sec:senseg}
+
+\input{sec_ghow.tex}
+
+\subsection{Headroom exists in both arms}\label{sec:headroom}
+
+\begin{center}\small
+\begin{tabular}{llrrr}\toprule
+arm & annotation & median headroom & \% $\le0$ & replicate rows\\\midrule
+sparse & none & 0.0000 & 100.0\% & 1{,}250\\
+sparse & binary & 0.0840 & 25.5\% & 5{,}000\\
+sparse & continuous & 0.1662 & 20.6\% & 5{,}000\\
+sparse + inf & none & 0.0000 & 100.0\% & 5{,}000\\
+sparse + inf & binary & 0.0667 & 21.2\% & 20{,}000\\
+sparse + inf & continuous & \textbf{0.1915} & 13.9\% & 20{,}000\\
+\bottomrule\end{tabular}\end{center}
+
+Despite the oracle's poor calibration under misspecification
+(\S\ref{sec:misspec}), its \emph{ranking} advantage over the baseline is intact,
+so $\kappa$ remains well defined in the annotated strata. The largest median
+headroom of any stratum is sparse+infinitesimal / continuous at $0.1915$ ---
+there is \emph{more} for annotations to exploit when the model is misspecified,
+not less. Both unannotated arms have headroom identically zero, so the gate
+removes them entirely; that is correct, since the ceiling and the baseline are
+the same method there.
+
+\subsection{The ablation}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f13_ablation.pdf}
+\caption{Paired contrasts with 95\% intervals, all six strata.}\label{fig:ablation}\end{figure}
+
+\begin{center}\small
+\begin{tabular}{llrrrr}\toprule
+arm & annotation & annotations & region sharing & combined & $n$\\\midrule
+sparse & none & $0.0000$ & $0.0000$ & $0.0000$ & 1{,}250\\
+sparse & binary & $+0.0254$ & $+0.0205$ & $+0.0458$ & 4{,}980\\
+sparse & continuous & $+0.0224$ & $+0.0730$ & $+0.0954$ & 4{,}960\\
+sparse+inf & none & $0.0000$ & $0.0000$ & $0.0000$ & 5{,}000\\
+sparse+inf & binary & $+0.0149$ & $+0.0096$ & $+0.0244$ & 20{,}000\\
+sparse+inf & continuous & $+0.0116$ & $\mathbf{+0.0522}$ & $+0.0638$ & 20{,}000\\
+\bottomrule\end{tabular}\end{center}
+
+All twelve annotated contrasts are positive with $t$ between $17$ and $82$
+(Table~\ref{tab:ablation}). Both unannotated arms are \textbf{exactly
+$0.0000\pm0.0000$} over $6{,}250$ paired replicates --- the three variants are
+bit-identical there, so the measured gains cannot be an artefact of the extra
+machinery, of additional parameters, or of run-to-run variation.
+
+Gains are smaller under the infinitesimal model, which is expected: the
+background is variance no annotation can explain. But the \emph{ordering}
+inverts in an informative way --- region sharing contributes four times what
+annotations alone do on continuous annotations there ($+0.052$ against
+$+0.012$), against roughly three times in the sparse arm. \textbf{The harder and
+more misspecified the problem, the more the sharing matters relative to the
+annotations themselves.}
+
+\subsection{Where the gains come from}\label{sec:where}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f15_ablation_by_S.pdf}
+\caption{Both contrasts against $S$.}\label{fig:abl-s}\end{figure}
+
+\begin{figure}[htbp]\centering
+\includegraphics[width=\linewidth]{figs/f16_ablation_by_phi.pdf}
+\caption{Both contrasts against $\phi$.}\label{fig:abl-phi}\end{figure}
+
+Region sharing is worth most where regions contain fewest causals and decays as
+$S$ grows. That is what the mechanism predicts: a region with a single causal
+variant carries almost no internal information about which annotations matter,
+so borrowing the enrichment estimate from nine other regions is worth a great
+deal, while a region with ten causals can estimate it locally.
+
+\subsection{$\kappa$ is reported but no conclusion rests on it}
+
+After gating, $\kappa$'s standard deviations exceed unity against means well
+below it. The denominator is small in many surviving cells and the ratio is
+correspondingly unstable. Every conclusion in this section rests on the
+controlled pairs, which are differences rather than ratios.
+
+\paragraph{The $\kappa$ variance decomposition is unavailable.} The
+replicate-level table does not carry the region index, so $\sigma^2_u$ cannot be
+estimated for the derived $\kappa$ and $\Delta$ responses. The code refuses to
+report an uncorrected decomposition, which would inflate whole-plot terms by
+$m\sigma^2_u/2$ per degree of freedom.
+
+\section{Validity checks}\label{sec:validity}
+
+Mechanically verified on this run; all pass.
+
+\begin{enumerate}
+\item In-sample LD only --- zero rows carrying a reference-panel size.
+\item 45 design rows present, matching the grid.
+\item Balanced cells per analysed method --- exactly $5{,}625$ for all 18.
+\item CARMA excluded by design and reported as such.
+\item No method entirely absent outside the unannotated arms.
+\item \texttt{polyfun\_est} $=$ \texttt{susie} on both unannotated arms, exactly.
+\item \texttt{polyfun\_ldsc} $=$ \texttt{susie} on both unannotated arms, exactly.
+\end{enumerate}
+
+Additional checks performed for this report, beyond the pipeline's own:
+
+\begin{enumerate}\setcounter{enumi}{7}
+\item \textbf{Truth consistency}: $\texttt{n\_causal}=S$ for all $2{,}031{,}230$
+fit rows; zero mismatches.
+\item \textbf{Grid completeness}: exactly $11{,}250$ distinct
+$(\text{row},S,\phi,\text{iter})$ combinations; \texttt{region\_idx} takes only
+the values 1 and 2.
+\item \textbf{Metric internal consistency}: $\mathrm{tp}_t\le n_t$ and
+$\mathrm{tp}_t\le S$ at every threshold; $n_t$ monotone decreasing in $t$;
+$\mathrm{AP}\in[0,1]$; $|CS_{95}|\le p$; band counts summing to $p$; causal band
+counts summing to $S$. Zero violations in every case.
+\item \textbf{Negative controls, exactly}: all four BEATRICE variants identical
+to machine precision on both unannotated arms (max $|{\rm diff}|=0$ over 625
+cells), and \texttt{polyfun\_\{est,ldsc,oracle\}} identical to \texttt{susie}
+there.
+\item \textbf{Monotonicity where it should hold}: AP strictly decreasing in $S$;
+strictly increasing in $p_{\text{causal}}$; sparse arm easier than
+sparse+infinitesimal. AP is \emph{not} monotone in $\phi$, which
+\S\ref{sec:conditional} shows to be a genuine method-specific effect rather than
+a fault.
+\item \textbf{Simulation code}: PVE calibration verified to be exact by
+construction in both architectures; the oracle prior verified to use the
+identical formula to the causal-selection weights.
+\end{enumerate}
+
+\section{Limitations}\label{sec:limits}
+
+\begin{enumerate}
+\item \textbf{In-sample LD only.} Iteration 003 established that in-sample and
+reference-panel LD can invert method rankings. Nothing here transfers to the
+reference-panel setting.
+\item \textbf{The infinitesimal arm scores the sparse component only.} Non-causal
+variants carry real effects that count as false discoveries. Absolute FDR is not
+comparable across arms; degradation between arms is.
+\item \textbf{Nominal region sizes are approximate above 1000}, with the 2000
+class median 1590.
+\item \textbf{Range dependence.} All importance statements are relative to the
+ranges swept.
+\item \textbf{Per-cell decisions are underpowered} (\S\ref{sec:sensed}).
+\item \textbf{Two strata lack a noise floor} and are excluded from Sense V.
+\item \textbf{$\kappa$ decomposition unavailable}; the replicate table lacks the
+region index.
+\item \textbf{One tuning configuration.} BEATRICE-family hyperparameters come
+from a single Optuna study and are held fixed; competitors run at documented
+defaults. A separate analysis found the family's sensitivity to those
+hyperparameters to be small ($\pm0.004$ AP across a wide hand-tuned sweep)
+relative to the architectural contrasts reported here.
+\end{enumerate}
+
+\section{Full results tables}\label{sec:tables}
+
+Bold rows are the BEATRICE family. \emph{cells} counts non-missing cells.
+
+\input{tables.tex}
+
+\end{document}

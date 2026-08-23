@@ -1,0 +1,57 @@
+\subsection{How a cell's winner is decided, in full}\label{sec:dhow}
+
+The unit is again the cell $(\text{job\_dir},S,\phi,\text{region size})$, but
+here it is \emph{not} collapsed to a mean. The procedure per cell is:
+
+\paragraph{Step 1 --- build the replicate matrix.}
+Reshape to a matrix $Y$ with one row per iteration ($R=10$) and one column per
+method, entry $Y_{im}=\mathrm{AP}$ of method $m$ on iteration $i$. Because all
+methods ran on the same simulated data, row $i$ is a genuine paired
+observation across methods. Columns that are entirely non-finite are dropped;
+fewer than two surviving columns means the cell is skipped.
+
+\paragraph{Step 2 --- the nominal winner.}
+$\text{winner}=\arg\max_m \overline{Y}_{\cdot m}$, the column mean over all 10
+iterations. This is the quantity the regime maps display, and on its own it is
+\textbf{not} evidence of anything --- the maximum of $M$ noisy means is upward
+biased by construction.
+
+\paragraph{Step 3 --- cross-fitted testing.}
+If $R<4$ the cell is marked undecided immediately. Otherwise the 10 iterations
+are randomly permuted (once, under \texttt{set.seed(20260806)}, so the result is
+reproducible) and split into halves $A$ and $B$. Then, in each direction:
+\begin{enumerate}
+\item Compute column means on the \emph{selection} half.
+\item Take the top two methods \emph{by that half only}.
+\item On the \emph{other} half form the paired differences
+$d_i = Y_{i,\text{top1}} - Y_{i,\text{top2}}$.
+\item Declare decided iff $|\bar d| > z\cdot\mathrm{SE}(\bar d)$ with $z=2$ and
+$\mathrm{SE}=\mathrm{sd}(d)/\sqrt{n}$.
+\end{enumerate}
+
+\paragraph{Step 4 --- require agreement.}
+The cell counts as decided only if \textbf{both} directions ($A$ selects and $B$
+tests, then $B$ selects and $A$ tests) declare decided \emph{and} both name the
+same winner. Any disagreement means the apparent winner depended on which half
+happened to be used for selection.
+
+\paragraph{Why cross-fitting is necessary.}
+Selecting the top two and testing them on the same data guarantees a positive
+margin: the selection has already sorted the noise. Splitting selection from
+testing removes that bias, and requiring both directions to agree removes the
+residual luck of a single split. This is why the gated rates are so much lower
+than the raw ones --- the raw rate is measuring exactly the bias this procedure
+is designed to eliminate.
+
+\paragraph{Step 5 --- the reported margin.}
+$\bar d$ (\texttt{dbar}) is computed on \emph{all} 10 rows as
+$\overline{Y_{\cdot\text{winner}} - Y_{\cdot\text{runner-up}}}$, using the
+cross-fitted runner-up. It is a descriptive effect size, not the test statistic.
+
+\paragraph{Step 6 --- flip rates.}
+For a factor $f$: hold every other free factor fixed, walk adjacent levels of
+$f$, and record whether the winner changes. \texttt{flip\_raw} is the fraction
+of such adjacent pairs whose nominal winner differs; \texttt{flip\_gated} is the
+same fraction counting only pairs in which the relevant cells were decided.
+\texttt{pct\_cells\_decided} is reported separately as the unconditional
+decidability of the stratum.

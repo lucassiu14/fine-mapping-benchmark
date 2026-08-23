@@ -1,0 +1,111 @@
+\subsection{How the decomposition is computed, in full}\label{sec:vhow}
+
+Every number in this section descends from the per-fit AP values of
+\S\ref{sec:ap} by the following chain. Constants are named as they appear in the
+code: \texttt{N\_ITER}$=10$, \texttt{N\_REGIONS}$=2$ (regions per size class),
+\texttt{N\_FITS}$=20$, \texttt{M\_SHARED}$=25$, \texttt{SUBPLOT\_FACTORS}$=\{S,\phi\}$.
+
+\paragraph{Step 1 --- form cell means.}
+A cell is the tuple $(\text{job\_dir},S,\phi,\text{region size})$. Its value is
+the mean of the $\texttt{N\_FITS}=20$ fits it contains: 10 iterations $\times$ 2
+regions of that size class. This table (L3) is the only input to the ANOVA;
+individual fits are used solely to estimate the two variance components below.
+
+\paragraph{Step 2 --- estimate $\sigma^2_\varepsilon$, the iteration variance.}
+Group the fit table by
+\[
+\mathrm{KEY}=(\text{job\_dir},\,\text{region size},\,\text{region\_idx},\,S,\,\phi),
+\]
+which pins down \emph{one physical region at one design point}, leaving only the
+iteration index free. Within each group take the sample variance across its 10
+iterations; $\hat\sigma^2_\varepsilon$ is the mean of those variances. Note what
+is held fixed: the region, its LD, its variants and its annotations are
+literally identical across those 10 values, so this is pure replicate error from
+the phenotype draw.
+
+\paragraph{Step 3 --- estimate $\sigma^2_u$, the between-region-draw variance.}
+This cannot be read off directly, because a region draw is never replicated
+within a size class --- there are exactly two, and they differ. It is recovered
+from their contrast:
+
+\begin{enumerate}
+\item Average over iterations within each KEY group, giving a region mean
+$\bar y(\text{job},\text{size},\text{idx},S,\phi)$.
+\item Reshape wide on \texttt{region\_idx} and difference the pair:
+$d = \bar y_1 - \bar y_2$ for each $(\text{job},\text{size},S,\phi)$.
+\item In expectation
+$\operatorname{Var}(d) = 2\sigma^2_u + 2\sigma^2_\varepsilon/\texttt{N\_ITER}$,
+so subtracting the second term and halving would give $\sigma^2_u$ --- except
+for the bias in Step 4.
+\item Do this separately for each region size, then average the five estimates
+into $\bar\sigma^2_u$.
+\end{enumerate}
+
+\paragraph{Step 4 --- debias the pair variance.}
+The two region draws of a size class are \emph{reused} across all
+$K$ combinations of $(S,\phi)$ within a job, so those $K$ differences share a
+common draw-level offset $D_j$ and are not independent. With $J$ job rows and
+$K$ cells per job the naive $\operatorname{Var}(d)$ is biased low by
+\[
+c=\frac{K(J-1)}{JK-1},
+\qquad
+\hat\sigma^2_D=\max\!\Bigl(0,\ \frac{\operatorname{Var}(d)-2\sigma^2_\varepsilon/\texttt{N\_ITER}}{c}\Bigr),
+\qquad
+\hat\sigma^2_u=\hat\sigma^2_D/2 .
+\]
+At $J=4$ this is $c=0.758$, i.e.\ the naive estimator recovers only about
+three-quarters of the true component. Verified over 120 simulated replicates:
+corrected $0.0438$ against a true $0.0400$, where the naive estimator gave
+$0.0332$.
+
+\paragraph{Step 5 --- fit the saturated ANOVA on cell means.}
+\texttt{aov(response \textasciitilde{} f1 * f2 * \ldots)} over the stratum's free
+factors, all interactions included. The design is complete and balanced, so the
+model is saturated: \textbf{there is deliberately no residual line}, every degree
+of freedom belongs to a named term, and the orthogonal sums of squares partition
+$\mathrm{SS}_{\text{tot}}$ exactly. If a \texttt{Residuals} row does appear the
+code warns and drops it, because its presence means the stratum is not balanced
+and the closed forms below no longer hold.
+
+\paragraph{Step 6 --- classify each term.}
+\[
+T \text{ is \emph{whole-plot}} \iff T \text{ contains \textbf{no} factor from } \{S,\phi\}.
+\]
+The logic runs through what a contrast differences away. $S$ and $\phi$ are
+re-simulated per scenario \emph{on the same region draw}, so any contrast
+involving them cancels the draw exactly and sees only iteration noise. A term
+built solely from region size and enrichment compares values computed on
+\emph{different} region draws and therefore carries $\sigma^2_u$ as well. Note
+the consequence: \texttt{enrich} alone and
+\texttt{enrich:region\_size} are whole-plot, whereas \texttt{S:region\_size} is
+not, despite containing region size.
+
+\paragraph{Step 7 --- the noise expectation and the corrected share.}
+\[
+\lambda_T=\frac{\sigma^2_\varepsilon}{\texttt{N\_FITS}}
++\mathbf{1}\{T\text{ whole-plot}\}\cdot\frac{\texttt{M\_SHARED}\cdot\bar\sigma^2_u}{2},
+\qquad
+\omega^2_T=\frac{\mathrm{SS}_T-\mathrm{df}_T\lambda_T}{\mathrm{SS}_{\text{tot}}} .
+\]
+\texttt{N\_FITS}$=20$ is the number of fits behind each cell mean;
+\texttt{M\_SHARED}$=25=5\times5$ is the number of $(S,\phi)$ cells sharing one
+region draw, and the $/2$ is the two regions per size class. The noise floor is
+$\sum_T \mathrm{df}_T\lambda_T/\mathrm{SS}_{\text{tot}}$, and it is reported
+split into its iteration and region parts.
+
+\paragraph{Why cell means rather than one replicate-level ANOVA.}
+Both are defensible in principle; only one is safe here. At replicate level each
+noise source enters a mean square multiplied by the number of rows sharing that
+draw --- hundreds of them --- so subtracting a cell-mean-scale $\sigma^2_u/2$
+under-corrects by orders of magnitude \emph{while still looking like a
+correction has been applied}. Working on cell means keeps every quantity on one
+scale, which is why the closed form above is exact rather than approximate.
+
+\paragraph{Sobol indices.}
+$V_T=\max(\omega^2_T,0)$ --- this is the \emph{only} place a clamp is applied,
+and it is applied because the indices are ratios that would otherwise be
+uninterpretable. Then
+$S_i = V_i/\sum_T V_T$ and $S_{Ti}=\sum_{T\ni i}V_T/\sum_T V_T$, so
+$S_{Ti}-S_i$ is the share of variance factor $i$ participates in only through
+interactions. Everywhere else in this report negative $\omega^2$ is reported as
+computed.

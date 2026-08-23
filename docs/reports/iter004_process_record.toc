@@ -1,0 +1,36 @@
+\contentsline {section}{\numberline {1}Overview}{2}{section.1}%
+\contentsline {paragraph}{Determinism.}{2}{section.1}%
+\contentsline {section}{\numberline {2}Software environment}{2}{section.2}%
+\contentsline {paragraph}{This location matters.}{2}{section.2}%
+\contentsline {section}{\numberline {3}Stage 1 --- the design grid}{3}{section.3}%
+\contentsline {paragraph}{The grid is regenerated at every submission, never reused from disk.}{3}{section.3}%
+\contentsline {section}{\numberline {4}Stage 2 --- genotypes}{3}{section.4}%
+\contentsline {paragraph}{Regions can be smaller than requested.}{3}{section.4}%
+\contentsline {paragraph}{Regions are shared across the whole row.}{3}{section.4}%
+\contentsline {section}{\numberline {5}Stage 3 --- annotations}{4}{section.5}%
+\contentsline {section}{\numberline {6}Stage 4 --- causal variant selection}{4}{section.6}%
+\contentsline {section}{\numberline {7}Stage 5 --- phenotypes}{4}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Sparse}{4}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Sparse plus infinitesimal}{4}{subsection.7.2}%
+\contentsline {paragraph}{Consequence for interpretation.}{4}{subsection.7.2}%
+\contentsline {section}{\numberline {8}Stage 6 --- summary statistics and LD}{4}{section.8}%
+\contentsline {section}{\numberline {9}Stage 7 --- fitting the methods}{5}{section.9}%
+\contentsline {paragraph}{Eighteen methods were fitted.}{5}{section.9}%
+\contentsline {paragraph}{The four BEATRICE variants.}{5}{section.9}%
+\contentsline {paragraph}{Hyperparameters}{5}{section.9}%
+\contentsline {paragraph}{Per-task preflight.}{5}{section.9}%
+\contentsline {section}{\numberline {10}Stage 8 --- collection}{6}{section.10}%
+\contentsline {section}{\numberline {11}Stage 9 --- aggregation and analysis}{6}{section.11}%
+\contentsline {section}{\numberline {12}Validity checks performed}{6}{section.12}%
+\contentsline {subsection}{\numberline {12.1}Automatic, on every run}{6}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}Additional checks performed for this report}{7}{subsection.12.2}%
+\contentsline {section}{\numberline {13}Incidents during execution}{7}{section.13}%
+\contentsline {paragraph}{1. Stale grid silently reused.}{7}{section.13}%
+\contentsline {paragraph}{2. CARMA dominating runtime.}{7}{section.13}%
+\contentsline {paragraph}{3. Toolchain on a purging filesystem.}{7}{section.13}%
+\contentsline {paragraph}{4. Dependency list written from memory.}{8}{section.13}%
+\contentsline {paragraph}{5. \texttt {setuptools} 81 removed \texttt {pkg\_resources}.}{8}{section.13}%
+\contentsline {paragraph}{6. Silent all-NA output.}{8}{section.13}%
+\contentsline {paragraph}{7. Scheduler instability.}{8}{section.13}%
+\contentsline {section}{\numberline {14}Reproducing the run}{8}{section.14}%
+\contentsline {section}{\numberline {15}Output manifest}{9}{section.15}%

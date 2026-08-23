@@ -1,0 +1,66 @@
+\subsection{How $\kappa$ and the controlled pairs are computed, in full}\label{sec:ghow}
+
+The input here is the \emph{replicate-level} table (L2): one row per
+$(\text{cell},\text{iteration},\text{method})$, reshaped so that each
+$(\text{cell},\text{iteration})$ carries one column per method. Because every
+method ran on the same simulated data, a row is a set of paired observations ---
+same causal variants, same genotypes, same annotations, same phenotype draw.
+
+\paragraph{Step 1 --- headroom.}
+Per row,
+\[
+h=\mathrm{AP}_{\texttt{polyfun\_oracle}}-\mathrm{AP}_{\texttt{susie}} .
+\]
+\texttt{susie} is the annotation-blind backbone --- what a method achieves
+\emph{without} using annotations at all --- and \texttt{polyfun\_oracle} receives
+the simulator's true prior weights, so it is what is achievable \emph{with
+perfect} annotation information. Their difference is the room annotations
+create on that particular replicate.
+
+\paragraph{Step 2 --- the gate.}
+Rows with $h\le\texttt{HEADROOM\_EPS}=0.02$ (or non-finite $h$) are excluded,
+because $\kappa$ divides by $h$ and is unstable as $h\to0$. The excluded
+fraction and the median headroom are reported rather than dropped silently
+(\S\ref{sec:headroom}); on the unannotated arm the gate removes
+\emph{everything}, which is correct: the ceiling and the baseline are the same
+method there, so $h\equiv0$ and $\kappa$ is undefined by construction.
+
+\paragraph{Step 3 --- $\kappa$.}
+On surviving rows, for each focus method $m\in\{$\texttt{functional\_beatrice},
+\texttt{fb\_xregion}, \texttt{fb\_pooled}$\}$,
+\[
+\kappa_m=\frac{\mathrm{AP}_m-\mathrm{AP}_{\texttt{susie}}}{h} .
+\]
+$\kappa=1$ means $m$ captured all the available headroom; $\kappa=0$ means it
+did no better than ignoring the annotations; $\kappa<0$ means it did worse than
+the annotation-blind baseline on that replicate.
+
+\paragraph{Step 4 --- the controlled pairs, which are NOT gated.}
+Two contrasts are formed on \emph{all} rows, with no headroom gate, because they
+are differences rather than ratios and have no denominator to destabilise:
+\[
+\Delta_{\text{annot}}=\mathrm{AP}_{\texttt{functional\_beatrice}}-\mathrm{AP}_{\texttt{beatrice}},
+\qquad
+\Delta_{\text{joint}}=\mathrm{AP}_{\texttt{fb\_xregion}}-\mathrm{AP}_{\texttt{functional\_beatrice}} .
+\]
+Each isolates exactly one mechanism, because the two methods being differenced
+are identical in every other respect: same inference network, same
+hyperparameters, same data, same seed. $\Delta_{\text{annot}}$ turns the
+annotation prior on; $\Delta_{\text{joint}}$ changes that prior from per-region
+to shared-across-regions.
+
+\paragraph{Step 5 --- inference on the pairs.}
+For a group of $n$ paired rows, $\bar\Delta$, $\mathrm{sd}(\Delta)$,
+$\mathrm{SE}=\mathrm{sd}/\sqrt n$ and $t=\bar\Delta/\mathrm{SE}$. The pairing is
+what supplies the power: the between-scenario variance that dominates marginal
+comparisons cancels exactly, leaving only the within-replicate difference. This
+is why $\S\ref{sec:senseg}$ resolves effects of $0.02$ AP decisively while
+\S\ref{sec:sensed} cannot resolve a $0.13$ gap between two \emph{different}
+methods in a single cell --- $n$ differs by three orders of magnitude and the
+nuisance variance has been removed.
+
+\paragraph{Step 6 --- conditional breakdowns.}
+The figures in \S\ref{sec:where} are $\bar\Delta$ recomputed within levels of one
+design factor at a time, pooling the two annotated strata. $114$ of the $22{,}500$
+$\Delta$ values are missing ($0.5\%$), all at $S\in\{5,10\}$, corresponding to
+the BEATRICE family's small fit-failure rate; those rows are dropped pairwise.
