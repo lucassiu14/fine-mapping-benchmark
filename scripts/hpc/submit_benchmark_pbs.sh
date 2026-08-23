@@ -202,6 +202,15 @@ export FMB_METHODS="${FMB_METHODS:-}"
 # array, or the worker's (row, scenario-block) decode won't line up. Expanded
 # here at submit time to the literal integer.
 export FMB_SCENARIOS_PER_TASK="${SCENARIOS_PER_TASK}"
+# >>> ITERATION 005 ONLY - TEMPORARY (see iteration-005-REVERT.md) <<<
+# Reduced-method-set selector, forwarded for the SAME reason as FMB_METHODS
+# above: there is no "#PBS -V" here, so a login-side export does NOT reach the
+# node. Without this line run_benchmark_job.R sees an unset variable and
+# silently fits all 18 Iteration 004 methods instead of the 11 this iteration
+# asks for - not wrong (the 11 are a strict subset) but ~60% wasted compute,
+# and invisible until the logs land hours later.
+export FMB_ITER005_METHODS="${FMB_ITER005_METHODS:-}"
+# >>> END ITERATION 005 TEMPORARY BLOCK <<<
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}
