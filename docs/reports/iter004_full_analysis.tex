@@ -27,7 +27,9 @@ four annotated strata and \emph{exactly zero} in both unannotated ones, over
 51{,}250 paired replicates; and (iv) the annotation-aware methods that lead under
 the sparse model degrade sharply under misspecification, whereas the
 region-sharing variant does not --- \texttt{fb\_xregion} rises from third to
-second of eighteen and overtakes the entire PolyFun family.
+second of eighteen and overtakes the entire PolyFun-style family.
+Four methods are reimplementations rather than the published software; see
+\S\ref{sec:fidelity}.
 \end{abstract}
 
 \tableofcontents\bigskip
@@ -164,6 +166,67 @@ preflight that imports every module the tool sources actually use --- derived by
 AST from the sources rather than listed by hand --- and aborts the task if any
 fails. All $1{,}800$ tasks reported \texttt{preflight ok}.
 
+\section{What these implementations are}\label{sec:fidelity}
+
+Four of the eighteen methods are \textbf{reimplementations, not the upstream
+software}, and every claim about them in this report is a claim about the
+\emph{approach} rather than about the published tool. This is a deliberate
+design decision, documented in each wrapper, and it is stated here because the
+alternative --- naming them as though they were the originals --- would
+misattribute results.
+
+\begin{center}\small
+\begin{tabular}{lp{10.6cm}}\toprule
+method & what it actually is\\\midrule
+\texttt{polyfun\_oracle} & \emph{Not} PolyFun. Skips PolyFun's Stage 1 entirely
+and passes the simulator's true per-SNP prior
+$\pi_j\propto\exp(A_j^\top\log\gamma)$ to \texttt{susie\_rss()}. A ceiling by
+construction.\\[2pt]
+\texttt{polyfun\_est} & ``LDSC-lite''. Regresses $\chi^2$ on each variant's own
+annotations, clamps negative coefficients, converts to prior variances. Simpler
+than canonical stratified LDSC, which would also model LD scores and
+reference-panel calibration.\\[2pt]
+\texttt{polyfun\_ldsc} & The closest of the three to canonical S-LDSC: regresses
+on annotation \emph{LD scores} $l_{j,c}=\sum_k r^2_{jk}A_{kc}$ by weighted
+non-negative least squares. Still an in-package reimplementation.\\[2pt]
+\texttt{sbayesrc} & An in-R reimplementation of the SBayesRC \emph{algorithm}
+(spike + four normal slabs, annotation-modulated mixture weights). Upstream
+requires a pre-eigen-decomposed genome-wide LD folder tied to a $\sim$7M-SNP
+reference panel, which cannot be pointed at simulated per-locus blocks.\\
+\bottomrule\end{tabular}\end{center}
+
+The reason in every case is the same: the published tools depend on genome-wide
+reference infrastructure --- pre-computed UKB annotation matrices, reference LD
+scores, eigen-decomposed LD folders --- that does not exist for simulated data
+and could not be substituted without changing what is being measured.
+
+\paragraph{They should be read as ``PolyFun-style'' and ``SBayesRC-style''.}
+Where this report writes \texttt{polyfun\_est} or \texttt{sbayesrc} it means
+these implementations. A finding that one of them degrades is evidence about the
+\emph{modelling strategy} --- a per-SNP prior estimated from annotations, or a
+polygenic mixture prior --- not about the correctness or real-world performance
+of the software of the same name.
+
+\paragraph{One case where the difference is material.}\label{sec:sbayesrc-caveat}
+\texttt{sbayesrc}'s posterior inclusion probability is the fraction of retained
+MCMC samples in which a variant occupies \emph{any} non-spike component. Its
+variance grid is $(0.05,\ 0.005,\ 5\times10^{-4},\ 5\times10^{-5})$, so a
+variant assigned to the smallest slab --- an effect of essentially no
+consequence --- counts fully toward its PIP. That quantity answers ``does this
+variant have a non-zero effect?'', whereas every metric in this report scores
+against ``is this variant one of the $S$ sparse causals?''. For a polygenic
+method those are different questions, and the first is true of a great many
+variants.
+
+The consequences are visible and large: total mass ratios of $10$--$18$, and in
+the sparse arm a top-band claim of $0.996$ against a realised causal rate of
+$0.621$ over $78{,}633$ variants, where SuSiE on identical data achieves
+$0.996$ versus $0.995$. \textbf{This is a mismatch of definition, not a coding
+error, and \texttt{sbayesrc}'s calibration figures throughout this report should
+not be read as evidence that the method is miscalibrated.} Its \emph{ranking}
+metrics (AP, and the credible-set quantities) remain interpretable, because
+those depend only on the ordering its PIPs induce.
+
 \section{Overall accuracy}\label{sec:overall}
 
 \begin{figure}[htbp]\centering
@@ -179,7 +242,7 @@ architectures.
 effect: the infinitesimal background is real signal that the metric counts as
 noise (\S\ref{sec:design}).
 
-\textbf{The leaderboard reorders.} Under the sparse model the PolyFun family
+\textbf{The leaderboard reorders.} Under the sparse model the PolyFun-style family
 leads among deployable methods. Under misspecification it collapses and
 \texttt{fb\_xregion} becomes the strongest non-oracle method on continuous
 annotations. This is quantified in \S\ref{sec:misspec}.
@@ -247,20 +310,29 @@ method & sparse & sparse + inf & \\\midrule
 \texttt{susie\_inf}     & 0.7398 & 0.6120 & FDR@.9 $0.005\to0.037$\\
 \bottomrule\end{tabular}\end{center}
 
-\textbf{The PolyFun family's FDR at $\pip\ge0.9$ degrades roughly seventy-fold},
+\textbf{The PolyFun-style family's FDR at $\pip\ge0.9$ degrades roughly seventy-fold},
 from about $0.005$ to $0.35$--$0.38$, and its ranking collapses.
 \texttt{fb\_xregion} loses accuracy too --- everything does --- but its FDR
 moves only from $0.049$ to $0.068$, and it \emph{gains} rank, finishing second
 of eighteen behind only the oracle.
 
-The mechanism is visible in the design. PolyFun-style methods place a per-SNP
-prior derived from a model in which annotation-weighted variants are causal and
-everything else is null. When four-fifths of the heritability sits in unlabelled
-infinitesimal effects that assumption is badly wrong, and a confident prior
-built on it produces confident errors. The BEATRICE family's concrete
+The mechanism is visible in the design. A PolyFun-style method places a
+per-SNP prior derived from a model in which annotation-weighted variants are
+causal and everything else is null. When four-fifths of the heritability sits in
+unlabelled infinitesimal effects that assumption is badly wrong, and a confident
+prior built on it produces confident errors. The BEATRICE family's concrete
 variational posterior does not commit as hard, and the shared prior head in
 \texttt{fb\_xregion} is fitted across ten regions, which appears to regularise
 it further.
+
+\paragraph{What this result does and does not establish.} It is evidence that
+\emph{the strategy} of estimating a per-SNP prior from annotations under a
+sparse generative assumption degrades sharply when that assumption fails, and
+that a jointly-fitted variational prior does not. It is \textbf{not} a
+measurement of the PolyFun software, which is not what was run
+(\S\ref{sec:fidelity}). Whether the published implementation --- with real
+stratified LDSC, reference LD scores and its own calibration machinery --- would
+show the same degradation is a separate question this benchmark cannot answer.
 
 \paragraph{The oracle is itself miscalibrated in this arm.} PolyFun-oracle
 retains the highest AP but its FDR@$0.9$ reaches $0.36$--$0.38$, because it
@@ -287,7 +359,7 @@ $\mathrm{FDR}_t\le1-t$.}\label{fig:fdr}\end{figure}
 
 In the sparse arm the trade-off is the familiar one: the BEATRICE family buys
 ranking accuracy with roughly $2\times$ mass inflation and an FDR@$0.9$ an order
-of magnitude above PolyFun's, while \texttt{susie\_inf} and \texttt{finemap}
+of magnitude above the PolyFun-style methods', while \texttt{susie\_inf} and \texttt{finemap}
 stay near mass ratio $1.1$--$1.2$.
 
 Under the infinitesimal model \emph{every} method's mass ratio rises, to
@@ -301,8 +373,15 @@ panel is partly an artefact of scoring against the sparse component alone.
 \textbf{What survives that caveat is the comparison between methods within the
 arm}, since all are scored against the same truth. There,
 \texttt{beatrice} ($2.51$) and \texttt{fb\_pooled} ($3.11$--$3.27$) are the most
-conservative of the family and the PolyFun/SuSiE group the least
+conservative of the family and the PolyFun-style/SuSiE group the least
 ($4.2$).
+
+\paragraph{\texttt{sbayesrc} is excluded from every calibration comparison.}
+Its mass ratios of $10$--$18$ and its top-band claim of $0.996$ against a
+realised $0.621$ are an artefact of its PIP counting assignment to a
+$5\times10^{-5}$-variance slab as inclusion (\S\ref{sec:sbayesrc-caveat}).
+Those figures appear in the tables for completeness and are not evidence about
+the method's calibration.
 
 \begin{figure}[htbp]\centering
 \includegraphics[width=\linewidth]{figs/f17_murphy.pdf}
@@ -524,6 +603,10 @@ ranges swept.
 \item \textbf{Two strata lack a noise floor} and are excluded from Sense V.
 \item \textbf{$\kappa$ decomposition unavailable}; the replicate table lacks the
 region index.
+\item \textbf{Four methods are reimplementations}, not the published software
+(\S\ref{sec:fidelity}). Findings about them are findings about the modelling
+strategy. \texttt{sbayesrc}'s calibration metrics in particular measure a
+different quantity from the other methods' and should not be compared with them.
 \item \textbf{One tuning configuration.} BEATRICE-family hyperparameters come
 from a single Optuna study and are held fixed; competitors run at documented
 defaults. A separate analysis found the family's sensitivity to those

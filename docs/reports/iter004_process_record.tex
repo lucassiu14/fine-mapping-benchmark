@@ -229,6 +229,36 @@ five scenarios in turn, writing \file{results.rds} per scenario before moving on
 \texttt{beatrice}, \texttt{functional\_beatrice}, \texttt{fb\_pooled},
 \texttt{fb\_xregion}.
 
+\paragraph{Four of these are reimplementations, not the upstream software.}
+\texttt{polyfun\_oracle}, \texttt{polyfun\_est}, \texttt{polyfun\_ldsc} and
+\texttt{sbayesrc} are implemented inside this package, because the published
+tools depend on genome-wide reference infrastructure --- pre-computed UKB
+annotation matrices, reference LD scores, eigen-decomposed LD folders --- that
+does not exist for simulated per-locus data.
+
+\begin{itemize}
+\item \texttt{polyfun\_oracle} skips PolyFun's Stage 1 entirely and passes the
+simulator's true prior to \texttt{susie\_rss()}. It is a ceiling, not PolyFun.
+\item \texttt{polyfun\_est} is ``LDSC-lite'': $\chi^2$ regressed on each
+variant's own annotations.
+\item \texttt{polyfun\_ldsc} follows the canonical S-LDSC model, regressing on
+annotation LD scores by weighted non-negative least squares. Closest of the three.
+\item \texttt{sbayesrc} reimplements the SBayesRC \emph{algorithm} (spike plus
+four normal slabs with annotation-modulated weights) in R.
+\end{itemize}
+
+Results for these four are evidence about the \emph{modelling strategy}, not
+about the software of the same name. One difference is material enough to
+affect interpretation: \texttt{sbayesrc}'s PIP is the fraction of MCMC samples
+in which a variant occupies any non-spike component, and its smallest slab has
+variance $5\times10^{-5}$ --- so a variant with an effect of no consequence
+counts fully toward its PIP. That quantity answers ``does this variant have a
+non-zero effect'', whereas every metric here scores against ``is this variant
+one of the $S$ sparse causals''. Its mass ratios ($10$--$18$) and top-band
+calibration ($0.996$ claimed, $0.621$ realised) follow from that mismatch of
+definition rather than from any error, and are not comparable with the other
+methods'.
+
 CARMA was dropped part-way through on measured cost: $19{,}000$\,s per scenario
 against $9{,}765$\,s for the other eighteen combined, i.e.\ $66\%$ of total
 runtime, for a differentiator (LD-discrepancy outlier detection) that an

@@ -16,21 +16,22 @@
 \contentsline {section}{\numberline {8}Stage 6 --- summary statistics and LD}{4}{section.8}%
 \contentsline {section}{\numberline {9}Stage 7 --- fitting the methods}{5}{section.9}%
 \contentsline {paragraph}{Eighteen methods were fitted.}{5}{section.9}%
-\contentsline {paragraph}{The four BEATRICE variants.}{5}{section.9}%
-\contentsline {paragraph}{Hyperparameters}{5}{section.9}%
-\contentsline {paragraph}{Per-task preflight.}{5}{section.9}%
+\contentsline {paragraph}{Four of these are reimplementations, not the upstream software.}{5}{section.9}%
+\contentsline {paragraph}{The four BEATRICE variants.}{6}{section.9}%
+\contentsline {paragraph}{Hyperparameters}{6}{section.9}%
+\contentsline {paragraph}{Per-task preflight.}{6}{section.9}%
 \contentsline {section}{\numberline {10}Stage 8 --- collection}{6}{section.10}%
-\contentsline {section}{\numberline {11}Stage 9 --- aggregation and analysis}{6}{section.11}%
-\contentsline {section}{\numberline {12}Validity checks performed}{6}{section.12}%
-\contentsline {subsection}{\numberline {12.1}Automatic, on every run}{6}{subsection.12.1}%
+\contentsline {section}{\numberline {11}Stage 9 --- aggregation and analysis}{7}{section.11}%
+\contentsline {section}{\numberline {12}Validity checks performed}{7}{section.12}%
+\contentsline {subsection}{\numberline {12.1}Automatic, on every run}{7}{subsection.12.1}%
 \contentsline {subsection}{\numberline {12.2}Additional checks performed for this report}{7}{subsection.12.2}%
-\contentsline {section}{\numberline {13}Incidents during execution}{7}{section.13}%
-\contentsline {paragraph}{1. Stale grid silently reused.}{7}{section.13}%
-\contentsline {paragraph}{2. CARMA dominating runtime.}{7}{section.13}%
-\contentsline {paragraph}{3. Toolchain on a purging filesystem.}{7}{section.13}%
+\contentsline {section}{\numberline {13}Incidents during execution}{8}{section.13}%
+\contentsline {paragraph}{1. Stale grid silently reused.}{8}{section.13}%
+\contentsline {paragraph}{2. CARMA dominating runtime.}{8}{section.13}%
+\contentsline {paragraph}{3. Toolchain on a purging filesystem.}{8}{section.13}%
 \contentsline {paragraph}{4. Dependency list written from memory.}{8}{section.13}%
 \contentsline {paragraph}{5. \texttt {setuptools} 81 removed \texttt {pkg\_resources}.}{8}{section.13}%
 \contentsline {paragraph}{6. Silent all-NA output.}{8}{section.13}%
 \contentsline {paragraph}{7. Scheduler instability.}{8}{section.13}%
-\contentsline {section}{\numberline {14}Reproducing the run}{8}{section.14}%
+\contentsline {section}{\numberline {14}Reproducing the run}{9}{section.14}%
 \contentsline {section}{\numberline {15}Output manifest}{9}{section.15}%
