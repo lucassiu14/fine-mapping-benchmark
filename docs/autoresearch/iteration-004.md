@@ -347,3 +347,78 @@ Those rows should be updated once the run completes.
 | tuning sweep tooling | [scripts/tuning/sweep_from_study.py](../../scripts/tuning/sweep_from_study.py) |
 | method install recipes | [adding-methods.md](adding-methods.md) |
 | wrapper audit | [iteration-003.md](iteration-003.md) |
+
+---
+
+## 11. Outcome — the run that produced the reported results
+
+**Status: complete.** 45 rows, 11,250 scenarios, 112,500 fits per method, 18
+methods, in-sample LD. All validity checks pass; all 18 analysed methods have
+exactly 5,625 populated cells; declared-failure and silent-NA rates are 0.0%
+throughout.
+
+### What it took to get here
+
+The arm covering rows 10–45 (`sparse_inf`) had to be fitted **three times**.
+
+1. **First attempt** — the toolchain lived behind `~/tools`, a symlink onto
+   `$EPHEMERAL`. Imperial's rolling 30-day purge ate it *mid-run*: sourcing the
+   virtualenv's `activate` kept succeeding while imports inside it stopped
+   resolving, so seven Python-backed methods recorded 38–50% failed fits for
+   hours without the job stopping. Discarded.
+2. **Second attempt** — toolchain rebuilt on project storage, but the package
+   list was written from memory. BEATRICE also needs `imageio`, `seaborn` and
+   `tqdm`; FINEMAP-inf needs `bgzip`. Every fit died on `ModuleNotFoundError`
+   after a check that had passed. Discarded.
+3. **Third attempt** — dependencies derived from the tool sources by AST walk
+   and actually imported rather than merely located; `setuptools` pinned below
+   81 (81+ removed `pkg_resources`); `fine-mapping-inf`'s C extension built with
+   `--no-build-isolation`. All 1,800 tasks reported `preflight ok`.
+
+Each failure is now a guard: `check_toolchain.sh`, the per-task preflight, the
+`bad_pip` column, and `verify_and_analyse.sh`'s gates. Full detail in
+`docs/reports/iter004_process_record.pdf` §11.
+
+### Headline results
+
+| | sparse / cont | sparse_inf / cont |
+|---|---|---|
+| `polyfun_est` | **0.8061** (2nd) | 0.5480, FDR@.9 0.005 → **0.35** |
+| `fb_xregion` | 0.7933 (3rd) | **0.6521 (2nd)**, FDR@.9 0.049 → 0.068 |
+
+**A PolyFun-style per-SNP prior collapses under misspecification; the
+jointly-fitted variational prior does not.** `fb_xregion` rises from third to
+second of eighteen, behind only the oracle.
+
+**The ablation holds in all four annotated strata** (t = 17–82) and is *exactly*
+zero in both unannotated ones over 6,250 paired replicates.
+
+**Region sharing improves calibration as well as accuracy.** Adding the
+annotation prior costs calibration (`beatrice` → `functional_beatrice` takes
+FDR@0.9 from 0.020 to 0.100 on continuous annotations); sharing that prior
+across regions partly repairs it (`fb_xregion` 0.049).
+
+### Caveats that must travel with these numbers
+
+- **Four methods are reimplementations**, not the published software:
+  `polyfun_{oracle,est,ldsc}` and `sbayesrc`. Findings about them are findings
+  about the *modelling strategy*.
+- **`sbayesrc`'s calibration metrics measure a different quantity.** Its PIP
+  counts assignment to any non-spike component and its smallest slab has
+  variance 5e-5, so inconsequential effects count fully. Ranking metrics remain
+  valid; calibration ones are excluded from comparison.
+- **The infinitesimal arm scores the sparse component only.** Non-causal
+  variants carry real effects that count as false discoveries, so absolute FDR
+  is not comparable across arms — degradation between arms is.
+- **Nominal region sizes are approximate above 1000** (the 2000 class has median
+  1590 actual variants), so the swept range is 3.2× not 4×.
+- **AP is not monotone in phi** — it dips at 0.6 for `sbayesrc`, `sparsepro` and
+  `finimom` while `susie_inf` improves. Real and method-specific.
+
+### Deliverables
+
+| file | contents |
+|---|---|
+| `docs/reports/iter004_full_analysis.pdf` | 28pp, 17 figures, all six strata |
+| `docs/reports/iter004_process_record.pdf` | 9pp, simulation → analysis, with the incident log |
+| `docs/reports/iter004_sparse_arm_analysis.pdf` | 24pp, the sparse arm alone (superseded) |
