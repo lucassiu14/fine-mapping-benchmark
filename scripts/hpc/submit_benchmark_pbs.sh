@@ -84,6 +84,22 @@ if [[ ! -f "$GRID_GENERATOR" ]]; then
 fi
 echo "Regenerating params_grid.csv from $(basename "$GRID_GENERATOR") ..."
 "$RSCRIPT" "$GRID_GENERATOR" "$PARAMS_CSV" >/dev/null
+
+# Assert the generated grid carries every column run_benchmark_job.R reads.
+# Iteration 005 lost an entire 240-task array to a generator that emitted
+# enrichment_fold but not enrichment_values: the worker died at
+# run_benchmark_job.R:312 on strsplit(NULL, ...), five lines BEFORE the first
+# dir.create(), so it left no output tree and no partial results - only logs
+# showing the design banner, preflight and method set all healthy. Every check
+# in place passed right up to the failure. This one runs in seconds on the
+# login node and would have caught it at submit time.
+GRID_CHECK="${PROJECT_ROOT}/scripts/hpc/check_grid_columns.R"
+if [[ ! -f "$GRID_CHECK" ]]; then
+  echo "ERROR: check_grid_columns.R missing at $GRID_CHECK" >&2; exit 1
+fi
+"$RSCRIPT" "$GRID_CHECK" "$PARAMS_CSV" \
+    "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" \
+  || { echo "ABORTING: generated grid is missing columns the worker reads." >&2; exit 1; }
 # The array is subdivided by scenario, with all regions kept together in each
 # task and (by default) several scenarios batched per task. SCENARIOS_PER_ROW =
 # |S| * |phi| * n_iter; the chunk size collapses that to TASKS_PER_ROW tasks.

@@ -81,6 +81,20 @@ for (rel in RELATIONSHIPS) for (at in ANNOT_TYPES) {
     # The null arm still SIMULATES annotations and hands them to every method;
     # they simply do not enter causal selection. That is the point of the arm.
     enrichment_fold        = if (rel == "null") NA_real_ else ENRICHMENT,
+    # The PER-ANNOTATION enrichment vector the worker actually parses
+    # (run_benchmark_job.R reads `enrichment_values`, not `enrichment_fold`,
+    # which it uses for display only). Iteration 004's convention: the first
+    # N_INFORMATIVE annotations carry the fold, the rest are inert at 1 - which
+    # is exactly this iteration's "5 informative, 5 meaningless" split.
+    # select_causal_variants() takes lambda = log(mean of the first
+    # n_informative entries), so this yields lambda = log(ENRICHMENT).
+    # The null arm is handed all-ones (the worker overrides it to the same
+    # thing anyway) and .causal_log_weights() short-circuits to uniform.
+    enrichment_values      = paste(
+                               if (rel == "null") rep(1, N_ANNOTATIONS)
+                               else c(rep(ENRICHMENT, N_INFORMATIVE),
+                                      rep(1, N_ANNOTATIONS - N_INFORMATIVE)),
+                               collapse = "|"),
     relationship           = rel,
     n_informative          = N_INFORMATIVE,
     annotation_correlation = 0,
