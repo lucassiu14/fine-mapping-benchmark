@@ -37,6 +37,15 @@ grep -rn "ITER-005\|ITERATION 005" R/ scripts/ docs/
 
 ## What NOT to revert
 
+**`scripts/hpc/check_grid_columns.R` stays, and so does its call in the
+submitter.** It is not Iteration-005-specific: it asserts that whatever grid was
+just generated carries every column `run_benchmark_job.R` reads, deriving the
+required list from the standing generator rather than hardcoding it. Iteration
+005 lost a full 240-task array because its generator emitted `enrichment_fold`
+but not `enrichment_values`; the worker died five lines before its first
+`dir.create()`, so there was no output tree to diagnose from and every existing
+check had passed. Any future alternative generator has the same exposure.
+
 **The `FMB_GRID_GENERATOR` override in `submit_benchmark_pbs.sh` stays.** It is
 not Iteration-005-specific. The submitter regenerates `params_grid.csv`
 unconditionally, which is the safety that stops a stale grid being silently
