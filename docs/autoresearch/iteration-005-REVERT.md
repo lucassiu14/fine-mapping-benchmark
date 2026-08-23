@@ -32,9 +32,16 @@ grep -rn "ITER-005\|ITERATION 005" R/ scripts/ docs/
 | 5 | `R/run_simulation.R` | `relationship` / `n_informative` pass-through | |
 | 6 | `scripts/hpc/generate_params_grid_iter005.R` | delete the file | separate generator; the iteration-004 one is untouched |
 | 7 | `scripts/hpc/run_benchmark_job.R` | the ITER-005 method-set and relationship blocks | |
-| 8 | `scripts/analysis/iter004_lib.R` | the generalised `variance_components()` — **KEEP THIS ONE** | see below |
+| 8 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER005_METHODS` block inside the PBS heredoc | leave the `FMB_GRID_GENERATOR` override in place — see below |
+| 9 | `scripts/analysis/iter004_lib.R` | the generalised `variance_components()` — **KEEP THIS ONE** | see below |
 
 ## What NOT to revert
+
+**The `FMB_GRID_GENERATOR` override in `submit_benchmark_pbs.sh` stays.** It is
+not Iteration-005-specific. The submitter regenerates `params_grid.csv`
+unconditionally, which is the safety that stops a stale grid being silently
+reused; the override lets an alternative *generator* be swapped in without
+weakening that. Only the `FMB_ITER005_METHODS` export (row 8) is temporary.
 
 **The generalised `variance_components()` is an improvement, not a hack.** The
 original estimator required exactly two regions per size class and recovered
