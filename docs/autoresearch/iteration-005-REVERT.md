@@ -33,7 +33,27 @@ grep -rn "ITER-005\|ITERATION 005" R/ scripts/ docs/
 | 6 | `scripts/hpc/generate_params_grid_iter005.R` | delete the file | separate generator; the iteration-004 one is untouched |
 | 7 | `scripts/hpc/run_benchmark_job.R` | the ITER-005 method-set and relationship blocks | |
 | 8 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER005_METHODS` block inside the PBS heredoc | leave the `FMB_GRID_GENERATOR` override in place — see below |
-| 9 | `scripts/analysis/iter004_lib.R` | the generalised `variance_components()` — **KEEP THIS ONE** | see below |
+| 9 | `scripts/analysis/iter005_*.R` | delete all eight files | `iter005_lib.R`, `iter005_report.R`, `iter005_sense_{v,d,g}.R`, `iter005_collect.R`, `test_iter005.R`, `make_test_fixture_iter005.R` |
+| 10 | `scripts/analysis/iter004_lib.R` | the generalised `variance_components()` — **KEEP THIS ONE** | see below |
+
+## The analysis is a FORK, not a modification
+
+Iteration 004 is the project's standard and its analysis scripts are
+byte-identical to what produced the standing results. Iteration 005 is
+exploratory, so it does not touch them: every script it runs is a copy named
+`iter005_*`, including `iter005_collect.R`, which is an UNMODIFIED copy. Collect
+needed no changes at all - it stores the job label verbatim and parses nothing -
+but forking it too means no iteration-005 work ever has a reason to open an
+`iter004_*` file.
+
+The one substantive difference is the stratification. `strata_for()` in
+`iter005_lib.R` returns relationship x annotation_type (12 cells) when the table
+carries a `relationship` column, and `stratum_subset()` reads its constraints
+off the stratum rather than hardcoding `model`/`annotation_type`. It returns
+NULL - never an unfiltered superset - if a constraint column is absent, because
+silently pooling there would invert the iteration's result.
+
+Reverting is therefore just `git rm` on the eight `iter005_*` analysis files.
 
 ## What NOT to revert
 
