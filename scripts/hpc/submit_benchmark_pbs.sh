@@ -69,8 +69,21 @@ if ! command -v "$RSCRIPT" >/dev/null 2>&1; then
   echo "Loaded ${R_MODULE:-R/4.5.2-gfbf-2025b} ($(command -v "$RSCRIPT"))"
 fi
 
-echo "Regenerating params_grid.csv from generate_params_grid.R ..."
-"$RSCRIPT" "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" "$PARAMS_CSV" >/dev/null
+# WHICH generator. Always regenerating is the safety that stops a stale grid
+# from a previous iteration being reused silently - do not weaken it with a
+# skip flag. Instead allow the GENERATOR to be swapped, so an alternative design
+# is still regenerated from source every time.
+#
+# Writing the alternative grid to params_grid.csv beforehand does NOT work: this
+# line overwrites it. Iteration 005 was submitted that way once and ran 2,250
+# tasks of the Iteration 004 design before being killed.
+GRID_GENERATOR="${FMB_GRID_GENERATOR:-${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R}"
+if [[ ! -f "$GRID_GENERATOR" ]]; then
+  echo "ERROR: grid generator not found: $GRID_GENERATOR" >&2
+  exit 1
+fi
+echo "Regenerating params_grid.csv from $(basename "$GRID_GENERATOR") ..."
+"$RSCRIPT" "$GRID_GENERATOR" "$PARAMS_CSV" >/dev/null
 # The array is subdivided by scenario, with all regions kept together in each
 # task and (by default) several scenarios batched per task. SCENARIOS_PER_ROW =
 # |S| * |phi| * n_iter; the chunk size collapses that to TASKS_PER_ROW tasks.
@@ -118,6 +131,12 @@ N_JOBS=$(( N_ROWS * TASKS_PER_ROW ))
               u(ifelse(is.na(g$n_ref), "in-sample", paste0("ref", g$n_ref)))))
   cat(sprintf("        p_causal: %s   annotations: %s\n",
               u(g$p_causal[!is.na(g$p_causal)]), u(g$annotation_type)))
+  # ITERATION 005 (temporary): show the relationship arms when the grid has
+  # them, so submitting the wrong design is visible here rather than after the
+  # array has run.
+  if ("relationship" %in% names(g))
+    cat(sprintf("        relationships: %s   informative annots: %s\n",
+                u(g$relationship), u(g$n_informative)))
 ' "$PARAMS_CSV"
 echo "Grid: ${N_ROWS} rows x ${SCENARIOS_PER_ROW} scenarios; chunk=${SCENARIOS_PER_TASK} scenario(s)/task"
 echo "      -> ${TASKS_PER_ROW} tasks/row x ${N_ROWS} rows = ${N_JOBS} array tasks"
