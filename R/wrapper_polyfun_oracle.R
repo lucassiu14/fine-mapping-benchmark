@@ -135,6 +135,7 @@ run_polyfun_oracle <- function(z,
                                 n,
                                 annotations = NULL,
                                 enrichment  = NULL,
+                                causal_probs = NULL,   # ITER-005 (temporary)
                                 L           = 10,
                                 coverage    = 0.95,
                                 min_abs_corr = 0.5,
@@ -172,6 +173,20 @@ run_polyfun_oracle <- function(z,
   # If we have annotations + enrichment, recover the simulator's per-SNP
   # causal probabilities. Otherwise fall back to uniform.
 
+  # ITERATION 005 (TEMPORARY - see R/simulate_phenotypes.R banner). Prefer the
+  # simulator's STORED selection probabilities when present. Reconstructing
+  # pi_j = exp(A' log gamma) below is only correct for the additive
+  # relationship; under the co-occurrence, non-monotone, mixed-direction or
+  # threshold forms it produces the WRONG prior, and this method silently stops
+  # being a ceiling while still being reported as one. Remove this branch when
+  # Iteration 005 is done and the relationships are withdrawn.
+  if (!is.null(causal_probs) && length(causal_probs) == p &&
+      all(is.finite(causal_probs)) && sum(causal_probs) > 0) {
+    prior_weights   <- causal_probs / sum(causal_probs)
+    prior_source    <- "oracle_stored_probs"
+    enrichment_used <- if (is.numeric(enrichment)) enrichment else NULL
+  } else {
+
   use_oracle <- !is.null(annotations) && !is.null(enrichment) &&
                 is.matrix(annotations) && nrow(annotations) == p &&
                 is.numeric(enrichment) && length(enrichment) == ncol(annotations)
@@ -191,6 +206,7 @@ run_polyfun_oracle <- function(z,
     prior_source  <- "uniform_fallback"
     enrichment_used <- NULL
   }
+  }   # closes the ITERATION 005 stored-probs branch
 
   params <- .polyfun_oracle_params(L, coverage, min_abs_corr, max_iter,
                                     estimate_residual_variance,
@@ -304,12 +320,19 @@ run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
   enrich <- if (!is.null(region_pheno$truth))
     region_pheno$truth$enrichment else NULL
 
+  # ITERATION 005 (TEMPORARY): the simulator stores the exact selection
+  # probabilities it used. Under any non-additive relationship these are the
+  # ONLY correct oracle prior; reconstructing exp(A' log gamma) would be wrong.
+  cprobs <- if (!is.null(region_pheno$truth))
+    region_pheno$truth$causal_probs else NULL
+
   run_polyfun_oracle(
-    z           = region_pheno$z,
-    LD          = region_geno$LD,
-    n           = region_geno$n,
-    annotations = A,
-    enrichment  = enrich,
+    z            = region_pheno$z,
+    LD           = region_geno$LD,
+    n            = region_geno$n,
+    annotations  = A,
+    enrichment   = enrich,
+    causal_probs = cprobs,
     ...
   )
 }

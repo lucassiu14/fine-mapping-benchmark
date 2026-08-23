@@ -356,6 +356,10 @@ simulate_phenotypes <- function(genotypes,
     genotypes[[i]]$truth <- list(
       causal_indices = causal_indices,
       causal_effects = beta_true[causal_indices],
+      # ITERATION 005 (TEMPORARY): the exact per-variant selection probabilities
+      # actually used. polyfun_oracle reads these so it remains a true ceiling
+      # under relationships whose form it cannot reconstruct from gamma alone.
+      causal_probs = causal_result$causal_probs,
       beta_true = beta_true,
       pve = pheno_result$pve_realised,
       S = S[i],
@@ -572,18 +576,153 @@ simulate_annotations_for_region <- function(p,
 # Internal: select causal variants
 # =============================================================================
 
+# ===========================================================================
+# >>> ITERATION 005 ONLY - TEMPORARY. REMOVE WHEN THAT ITERATION IS DONE. <<<
+#
+# Everything between this banner and the matching END banner exists solely to
+# support Iteration 005's question: how do annotation-aware methods behave when
+# the annotation -> causality relationship is NOT the log-linear form they all
+# assume? It is not part of the benchmark's standing design.
+#
+# It is deliberately ADDITIVE and backward-compatible: the default
+# relationship is "additive", which reproduces the pre-existing
+# exp(A' log gamma) behaviour exactly, so nothing that does not ask for a
+# relationship changes. To remove: delete this block, delete the
+# `relationship` / `n_informative` arguments from select_causal_variants(),
+# and drop the `causal_probs` field from the stored truth.
+#
+# Tracked in docs/autoresearch/iteration-005.md.
+# ---------------------------------------------------------------------------
+# Annotation -> causality relationships
+# ---------------------------------------------------------------------------
+#' Log selection weights under a named annotation->causality relationship.
+#'
+#' Every relationship uses ONLY the first `n_informative` annotation columns.
+#' The remainder are present in the data handed to every method but do not
+#' enter selection at all, so a method must learn to ignore them.
+#'
+#' @param A Annotation matrix, p x m.
+#' @param relationship One of additive, cooccur, nonmono, mixed, threshold, null.
+#' @param lambda Scalar strength, log of the row's enrichment fold.
+#' @param n_informative How many leading columns carry signal.
+#' @return Numeric vector of length p: the UNNORMALISED log weight.
+.causal_log_weights <- function(A, relationship, lambda, n_informative = 5L) {
+  p <- nrow(A)
+  if (identical(relationship, "null")) return(rep(0, p))
+  k <- min(n_informative, ncol(A))
+  if (k < 1L) return(rep(0, p))
+  I <- A[, seq_len(k), drop = FALSE]
+
+  switch(relationship,
+    # Every competitor's model can represent this exactly. Control arm, and the
+    # bridge back to Iteration 004's enrichment scheme.
+    additive = lambda * rowSums(I),
+
+    # A variant needs two marks TOGETHER. Written as a cycle so all k columns
+    # participate symmetrically and none is privileged.
+    cooccur = {
+      s <- rep(0, p)
+      for (j in seq_len(k)) s <- s + I[, j] * I[, (j %% k) + 1L]
+      lambda * s
+    },
+
+    # Enrichment peaks at INTERMEDIATE annotation load and falls away on both
+    # sides, so a monotone model finds almost no usable slope.
+    nonmono = {
+      cnt <- rowSums(I)
+      lambda * exp(-((cnt - 2) ^ 2) / 2)
+    },
+
+    # Log-linear, hence representable in principle - but polyfun_est clamps
+    # negative coefficients to zero and polyfun_ldsc constrains non-negativity,
+    # so neither can express the depleting half.
+    mixed = {
+      npos <- ceiling(k / 2)
+      lambda * (rowSums(I[, seq_len(npos), drop = FALSE]) -
+                rowSums(I[, setdiff(seq_len(k), seq_len(npos)), drop = FALSE]))
+    },
+
+    # A step in the annotation count. Partially capturable by a linear slope,
+    # which is the point: it is the mildest of the departures.
+    threshold = lambda * as.numeric(rowSums(I) >= 3),
+
+    stop("unknown relationship: ", relationship, call. = FALSE))
+}
+
+#' Rescale a log-weight vector so the resulting selection distribution has a
+#' TARGET concentration, defined as the share of total probability held by the
+#' top decile of variants.
+#'
+#' WHY THIS IS NECESSARY. The five relationships produce wildly different
+#' enrichment strengths at the same nominal fold. Measured over 30 replicate
+#' regions at p = 1000, top-decile share at fold 10.8 was:
+#'
+#'                binary      continuous
+#'   additive      0.839        0.999
+#'   cooccur       0.793        1.000
+#'   nonmono       0.269        0.333
+#'   mixed         0.723        0.999
+#'   threshold     0.285        0.517
+#'
+#' Continuous annotations saturate (all mass on a tenth of the variants, so
+#' causal location is near-deterministic), and nonmono/threshold are three times
+#' weaker than additive. Left uncorrected, a difference between arms would be
+#' partly a difference in enrichment STRENGTH rather than in the SHAPE of the
+#' relationship - which is the only thing Iteration 005 is trying to measure.
+#'
+#' Bisection on a scalar multiplier makes strength a controlled constant and
+#' leaves shape as the only free variable. The consequence is that
+#' `enrichment_fold` no longer denotes a fold; it indexes a concentration
+#' ladder, calibrated to what the additive/binary form produces at that fold.
+.calibrate_log_weights <- function(log_w, target, tol = 0.005, max_it = 40L) {
+  if (!is.finite(target) || target <= 0.1) return(log_w * 0)   # null / uniform
+  conc <- function(mult) {
+    lw <- log_w * mult
+    w  <- exp(lw - max(lw)); pr <- w / sum(w)
+    sum(sort(pr, decreasing = TRUE)[seq_len(max(1L, round(0.1 * length(pr))))])
+  }
+  if (conc(0) >= target) return(log_w * 0)
+  hi <- 1
+  for (i in seq_len(30L)) { if (conc(hi) >= target) break; hi <- hi * 2 }
+  if (conc(hi) < target) return(log_w * hi)     # cannot reach it; use the max
+  lo <- 0
+  for (i in seq_len(max_it)) {
+    mid <- (lo + hi) / 2; cm <- conc(mid)
+    if (abs(cm - target) < tol) return(log_w * mid)
+    if (cm < target) lo <- mid else hi <- mid
+  }
+  log_w * ((lo + hi) / 2)
+}
+
+#' The concentration ladder. Values are what the ADDITIVE relationship produces
+#' on BINARY annotations at each enrichment fold, so the control arm is
+#' unchanged by calibration and the other arms are matched to it.
+.concentration_target <- function(fold) {
+  ladder <- c("2.7" = 0.349, "5.4" = 0.605, "8.1" = 0.741, "10.8" = 0.839)
+  key <- as.character(fold)
+  if (!is.na(ladder[key])) return(unname(ladder[key]))
+  approx(as.numeric(names(ladder)), unname(ladder), xout = fold, rule = 2)$y
+}
+
+# >>> END ITERATION 005 TEMPORARY BLOCK <<<
+# ===========================================================================
+
+
 select_causal_variants <- function(p,
                                    S,
                                    annotation_matrix,
                                    enrichment,
                                    n_annotations,
-                                   annotation_type) {
+                                   annotation_type,
+                                   relationship = "additive",   # ITER-005 (temp)
+                                   n_informative = NULL) {      # ITER-005 (temp)
 
   # --- No annotations: uniform random selection -------------------------------
 
   if (annotation_type == "none" || is.null(annotation_matrix)) {
     causal_indices <- sort(sample(p, S))
-    return(list(causal_indices = causal_indices, enrichment = NULL))
+    return(list(causal_indices = causal_indices, enrichment = NULL,
+                causal_probs = rep(1 / p, p)))
   }
 
   # --- With annotations: weighted selection -----------------------------------
@@ -597,10 +736,25 @@ select_causal_variants <- function(p,
     enrichment_vals <- enrichment
   }
 
-  # Compute unnormalised weights: w_j = exp(sum_k A_jk * log(enrichment_k))
-  log_enrichment <- log(enrichment_vals)
-  log_weights <- as.numeric(annotation_matrix %*% log_enrichment)
-  weights <- exp(log_weights - max(log_weights))  # subtract max for numerical stability
+  # Compute unnormalised log weights.
+  #
+  # DEFAULT PATH ("additive") is the original behaviour, unchanged:
+  #   w_j = exp(sum_k A_jk log gamma_k)
+  # Any other value routes through the ITERATION 005 temporary block above,
+  # which uses only the first `n_informative` columns and a different
+  # functional form. See the banner there.
+  if (identical(relationship, "additive") && is.null(n_informative)) {
+    log_enrichment <- log(enrichment_vals)
+    log_weights <- as.numeric(annotation_matrix %*% log_enrichment)
+  } else {
+    n_inf  <- n_informative %||% min(5L, ncol(annotation_matrix))
+    fold   <- mean(enrichment_vals[seq_len(min(n_inf, length(enrichment_vals)))])
+    log_weights <- .causal_log_weights(annotation_matrix, relationship,
+                                       log(fold), n_inf)
+    # Match enrichment STRENGTH across relationships so only SHAPE differs.
+    log_weights <- .calibrate_log_weights(log_weights, .concentration_target(fold))
+  }
+  weights <- exp(log_weights - max(log_weights))  # subtract max for stability
 
   # Normalise to probabilities
   probs <- weights / sum(weights)
@@ -608,7 +762,12 @@ select_causal_variants <- function(p,
   # Sample S causal indices without replacement
   causal_indices <- sort(sample(p, S, replace = FALSE, prob = probs))
 
-  return(list(causal_indices = causal_indices, enrichment = enrichment_vals))
+  # causal_probs is stored so polyfun_oracle can be a TRUE oracle under any
+  # relationship. It previously reconstructed exp(A' log gamma) itself, which
+  # is only correct for the additive form - under any other relationship that
+  # reconstruction is wrong and the "ceiling" silently stops being one.
+  return(list(causal_indices = causal_indices, enrichment = enrichment_vals,
+              causal_probs = probs))
 }
 
 
