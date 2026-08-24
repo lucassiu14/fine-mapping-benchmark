@@ -66,6 +66,13 @@ but not `enrichment_values`; the worker died five lines before its first
 `dir.create()`, so there was no output tree to diagnose from and every existing
 check had passed. Any future alternative generator has the same exposure.
 
+**`scripts/hpc/check_pkg_current.R` stays, and so do its call in the submitter
+and the `unknown_args` guard in `run_benchmark_job.R`.** Neither is
+Iteration-005-specific. `run_benchmark_job.R` prefers `library(fmbenchmark)`
+over the source tree whenever the package is installed, so a `git pull` that
+changes anything under `R/` does not reach the compute nodes until the package
+is reinstalled — a trap for every future iteration, not just this one.
+
 **The `FMB_GRID_GENERATOR` override in `submit_benchmark_pbs.sh` stays.** It is
 not Iteration-005-specific. The submitter regenerates `params_grid.csv`
 unconditionally, which is the safety that stops a stale grid being silently

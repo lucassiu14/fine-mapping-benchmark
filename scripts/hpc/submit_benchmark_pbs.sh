@@ -100,6 +100,19 @@ fi
 "$RSCRIPT" "$GRID_CHECK" "$PARAMS_CSV" \
     "${PROJECT_ROOT}/scripts/hpc/generate_params_grid.R" \
   || { echo "ABORTING: generated grid is missing columns the worker reads." >&2; exit 1; }
+
+# Assert the INSTALLED fmbenchmark is not older than the checked-out source.
+# run_benchmark_job.R prefers library(fmbenchmark) over the source tree whenever
+# the package is installed, so a git pull touching R/ has NO effect on the nodes
+# until it is reinstalled. Array 3895282 lost all 240 tasks to this: the source
+# had gained run_simulation()'s `relationship` argument, the installed build had
+# not, and every task died on "unused argument" ~20 minutes in.
+PKG_CHECK="${PROJECT_ROOT}/scripts/hpc/check_pkg_current.R"
+if [[ ! -f "$PKG_CHECK" ]]; then
+  echo "ERROR: check_pkg_current.R missing at $PKG_CHECK" >&2; exit 1
+fi
+"$RSCRIPT" "$PKG_CHECK" "$PROJECT_ROOT" \
+  || { echo "ABORTING: reinstall the package, then resubmit." >&2; exit 1; }
 # The array is subdivided by scenario, with all regions kept together in each
 # task and (by default) several scenarios batched per task. SCENARIOS_PER_ROW =
 # |S| * |phi| * n_iter; the chunk size collapses that to TASKS_PER_ROW tasks.

@@ -433,6 +433,23 @@ if (file.exists(sim_file)) {
   }
   # >>> END ITERATION 005 TEMPORARY BLOCK <<<
 
+  # The loaded fmbenchmark may be an INSTALLED build older than the source tree:
+  # the loader above prefers library(fmbenchmark) whenever the package is
+  # installed, so a `git pull` touching R/ does not reach the node until it is
+  # reinstalled. Array 3895282 lost all 240 tasks here - the source had gained
+  # `relationship` and `n_informative`, the installed build had not, and every
+  # task ran to this line before dying on "unused argument". Name the mismatch
+  # instead of letting do.call report it as an anonymous-closure error.
+  unknown_args <- setdiff(names(sim_args), names(formals(run_simulation)))
+  if (length(unknown_args)) {
+    stop("the loaded fmbenchmark does not accept: ",
+         paste(unknown_args, collapse = ", "),
+         "\n  loaded from: ", dirname(getNamespaceInfo("fmbenchmark", "path")),
+         "\n  This is a STALE INSTALL - the source tree has these arguments but",
+         "\n  the installed build does not. Reinstall from the project root:",
+         "\n    R -e 'install.packages(\".\", repos = NULL, type = \"source\")'",
+         call. = FALSE)
+  }
   sim <- do.call(run_simulation, sim_args)
 
   tmp <- paste0(sim_file, ".tmp.", Sys.getpid())
