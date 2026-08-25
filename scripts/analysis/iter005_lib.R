@@ -398,6 +398,20 @@ variance_components <- function(fits, response) {
   if (!is.finite(n_it) || n_it < 1) n_it <- N_ITER
 
   n_draws <- length(unique(rm$region_idx))
+
+  # FITS PER CELL and the SHARED (S, phi) COUNT, DERIVED - not the module
+  # constants N_FITS / M_SHARED, which encode Iteration 004's design
+  # (10 iterations x 2 regions = 20 fits; 5 S x 5 phi = 25 shared cells).
+  # Iteration 005 runs 25 iterations x 10 regions = 250 fits and 2 S x 2 phi = 4.
+  # decompose() divides sigma^2_eps by n_fits and multiplies sigma^2_u by
+  # m_shared, so the stale constants would over-subtract iteration noise by
+  # 12.5x and whole-plot region noise by 6.25x - inflating the noise floor and
+  # pushing real effects into the residual, i.e. failing to find effects that
+  # are there. Returned in vc so decompose() can use the design it actually has.
+  n_fits   <- n_it * max(n_draws, 1L)
+  m_shared <- length(unique(paste(f$S, f$phi, sep = "\r")))
+  if (!is.finite(m_shared) || m_shared < 1) m_shared <- M_SHARED
+
   if (n_draws >= 3L) {
     sizes <- sort(unique(rm$region_size))
     s2u   <- setNames(rep(NA_real_, length(sizes)), as.character(sizes))
@@ -417,6 +431,7 @@ variance_components <- function(fits, response) {
                 sigma2_u_bar = mean(s2u, na.rm = TRUE),
                 sigma2_job   = mean(s2u, na.rm = TRUE) / 2,
                 n_pairs      = npair,
+                n_fits       = n_fits, m_shared = m_shared, n_iter = n_it,
                 estimator    = sprintf("direct (%d draws per class)", n_draws)))
   }
 
@@ -440,7 +455,8 @@ variance_components <- function(fits, response) {
   list(sigma2_eps = sigma2_eps, sigma2_u = s2u,
        sigma2_u_bar = mean(s2u, na.rm = TRUE),
        sigma2_job   = mean(s2u, na.rm = TRUE) / 2,
-       n_pairs      = npair)
+       n_pairs      = npair,
+       n_fits       = n_fits, m_shared = m_shared, n_iter = n_it)
 }
 
 
@@ -593,14 +609,19 @@ decompose <- function(cells, response, free, vc) {
     keep <- terms_lab != "Residuals"
     warning("residual df present: the stratum is not a complete balanced ",
             "factorial (check n_fits / n_failed). The closed-form correction ",
-            "assumes 20 fits in every cell; use the lmer route instead.",
+            "assumes every cell holds the same number of fits; use the lmer ",
+            "route instead.",
             call. = FALSE)
     terms_lab <- terms_lab[keep]; df_T <- df_T[keep]; ss_T <- ss_T[keep]
   }
 
   wp <- vapply(terms_lab, is_whole_plot, logical(1))
-  lambda <- vc$sigma2_eps / N_FITS +
-            ifelse(wp, M_SHARED * vc$sigma2_u_bar / 2, 0)
+  # Use the design the DATA has, falling back to the Iteration 004 constants
+  # only if variance_components() could not derive them.
+  n_fits   <- if (is.null(vc$n_fits)   || !is.finite(vc$n_fits)   || vc$n_fits   < 1) N_FITS   else vc$n_fits
+  m_shared <- if (is.null(vc$m_shared) || !is.finite(vc$m_shared) || vc$m_shared < 1) M_SHARED else vc$m_shared
+  lambda <- vc$sigma2_eps / n_fits +
+            ifelse(wp, m_shared * vc$sigma2_u_bar / 2, 0)
 
   ss_tot <- sum(ss_T)
   noise  <- df_T * lambda
@@ -636,8 +657,9 @@ decompose <- function(cells, response, free, vc) {
     table = tab,
     ss_tot = ss_tot,
     noise_floor = noise_floor,
-    noise_floor_iter   = sum(df_T * (vc$sigma2_eps / N_FITS)) / ss_tot,
-    noise_floor_region = sum(df_T[wp] * (M_SHARED * vc$sigma2_u_bar / 2)) / ss_tot,
+    n_fits = n_fits, m_shared = m_shared,
+    noise_floor_iter   = sum(df_T * (vc$sigma2_eps / n_fits)) / ss_tot,
+    noise_floor_region = sum(df_T[wp] * (m_shared * vc$sigma2_u_bar / 2)) / ss_tot,
     # Sobol normalisation, for comparing across strata or metrics whose noise
     # floors differ (§7.3 iii).
     pi_T = setNames(tab$omega2 / (1 - noise_floor), tab$term)

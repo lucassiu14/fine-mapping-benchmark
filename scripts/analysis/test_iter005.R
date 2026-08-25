@@ -326,6 +326,54 @@ ok("a filter on an ABSENT column returns NULL, never a superset",
 ok("legacy (model, annot) strata still subset correctly",
    {ss <- stratum_subset(cbind(d4, y = 1), STRATA[[2]])
     !is.null(ss) && nrow(ss$data) == 1L})
+cat("\n=== design constants are derived, not inherited ===\n")
+
+# N_FITS (20) and M_SHARED (25) are Iteration 004's design baked in as module
+# constants. decompose() divides sigma^2_eps by N_FITS and multiplies sigma^2_u
+# by M_SHARED, so on Iteration 005's design (25 iters x 10 regions = 250 fits,
+# 2 S x 2 phi = 4 shared cells) the stale values over-subtract iteration noise
+# by 12.5x and whole-plot region noise by 6.25x. That inflates the noise floor
+# and pushes real effects into the residual - it makes the iteration look like
+# it found nothing.
+mk_fits <- function(S_lv, phi_lv, n_iter, n_reg, p_lv) {
+  g <- expand.grid(job = 1:3, S = S_lv, phi = phi_lv,
+                   region_idx = seq_len(n_reg), region_size = p_lv,
+                   iter = seq_len(n_iter))
+  data.frame(job_dir = paste0("job_", g$job, "_anBinary_e5.4"),
+             region_size = g$region_size, region_idx = g$region_idx,
+             S = g$S, phi = g$phi, iter = g$iter,
+             Y = rnorm(nrow(g), 0.5, 0.3), stringsAsFactors = FALSE)
+}
+set.seed(9)
+v4 <- variance_components(mk_fits(1:5, (1:5)/10, 10, 2, c(500L, 2000L)), "Y")
+ok("iter004 design derives exactly the module constants (20 fits, 25 shared)",
+   v4$n_fits == N_FITS && v4$m_shared == M_SHARED,
+   sprintf("got n_fits=%s m_shared=%s", v4$n_fits, v4$m_shared))
+
+v5 <- variance_components(mk_fits(c(1L,3L), c(0.1,0.4), 25, 10, 1000L), "Y")
+ok("iter005 design derives 250 fits per cell, not 20",
+   v5$n_fits == 250, sprintf("got %s", v5$n_fits))
+ok("iter005 design derives 4 shared (S,phi) cells, not 25",
+   v5$m_shared == 4, sprintf("got %s", v5$m_shared))
+ok("iter005 design derives 25 iterations, not 10",
+   v5$n_iter == 25, sprintf("got %s", v5$n_iter))
+
+# decompose() must consume the derived values, not the globals. Same cells and
+# same sigma^2 either way, so any difference in lambda comes from the constants.
+cl <- expand.grid(S = factor(c(1,3)), phi = factor(c(0.1,0.4)))
+cl$Y <- c(0.60, 0.52, 0.71, 0.66)
+vc_new <- list(sigma2_eps = 0.09, sigma2_u_bar = 0.04,
+               n_fits = 250, m_shared = 4)
+vc_old <- list(sigma2_eps = 0.09, sigma2_u_bar = 0.04)   # forces the fallback
+dn <- decompose(cl, "Y", c("S", "phi"), vc_new)
+do <- decompose(cl, "Y", c("S", "phi"), vc_old)
+ok("decompose() reports the derived design",
+   dn$n_fits == 250 && dn$m_shared == 4)
+ok("decompose() falls back to the constants when vc lacks them",
+   do$n_fits == N_FITS && do$m_shared == M_SHARED)
+ok("the stale constants inflate the noise floor",
+   do$noise_floor > dn$noise_floor,
+   sprintf("derived %.4f vs inherited %.4f", dn$noise_floor, do$noise_floor))
 # >>> END ITERATION 005 TEMPORARY BLOCK <<<
 
 cat(sprintf("\n---------------------------------------------\n%d passed, %d failed\n",
