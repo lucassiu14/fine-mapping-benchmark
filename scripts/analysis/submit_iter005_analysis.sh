@@ -34,8 +34,15 @@ LOG_DIR="${LOG_DIR:-${OUT_DIR}/logs}"
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 RSCRIPT="${RSCRIPT:-Rscript}"
-QUEUE_A="${QUEUE_A:-v1_small24}"
-QUEUE_B="${QUEUE_B:-v1_small24}"
+# v1_small72a, not v1_small24. On 2026-08-24 v1_small24 rejected even the
+# 12-element Stage A array with "qsub: Array job exceeds server or queue size
+# limit", while v1_small72a had accepted a 240-element array the same day. The
+# precise limit was not diagnosed - it may be array size or a resource cap - so
+# this simply defaults to the queue that is known to work. Both stages ask for
+# 6h walltime, comfortably inside a 72h queue; override if a shorter queue
+# starts sooner for you.
+QUEUE_A="${QUEUE_A:-v1_small72a}"
+QUEUE_B="${QUEUE_B:-v1_small72a}"
 SELECT_A="${SELECT_A:-1:ncpus=1:mem=24gb}"
 WALL_A="${WALL_A:-06:00:00}"
 SELECT_B="${SELECT_B:-1:ncpus=1:mem=16gb}"
