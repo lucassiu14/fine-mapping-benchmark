@@ -133,8 +133,6 @@ simulate_phenotypes <- function(genotypes,
                                 inf_model = "beatrice",
                                 relationship = "additive",   # ITER-005 (temporary)
                                 n_informative = NULL,        # ITER-005 (temporary)
-                                target_r2 = NA_real_,        # ITER-006 (temporary)
-                                nl_depth = 2L,               # ITER-006 (temporary)
                                 effect_distribution = "normal",
                                 effect_variance = 0.36,
                                 annotations = "none",
@@ -301,9 +299,7 @@ simulate_phenotypes <- function(genotypes,
       n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
       annotation_type = annotation_type,
       relationship = relationship,      # ITER-005 (temporary)
-      n_informative = n_informative,    # ITER-005 (temporary)
-      target_r2 = target_r2,            # ITER-006 (temporary)
-      nl_depth = nl_depth               # ITER-006 (temporary)
+      n_informative = n_informative     # ITER-005 (temporary)
     )
 
     causal_indices <- causal_result$causal_indices
@@ -379,14 +375,7 @@ simulate_phenotypes <- function(genotypes,
       effect_variance = effect_variance,
       annotation_type = annotation_type,
       enrichment = enrichment_used,
-      annotation_proportions = props_i,
-      # ITER-006 (temporary): the analysis regresses method advantage on the
-      # representability that ACTUALLY occurred in this region, not on the one
-      # that was requested. They differ by up to ~0.02 at low annotation
-      # proportions, where the centred product is noisy.
-      target_r2   = causal_result$target_r2   %||% NA_real_,
-      realised_r2 = causal_result$realised_r2 %||% NA_real_,
-      mixture_w   = causal_result$mixture_w   %||% NA_real_
+      annotation_proportions = props_i
     )
 
     if (verbose) {
@@ -719,107 +708,6 @@ simulate_annotations_for_region <- function(p,
   approx(as.numeric(names(ladder)), unname(ladder), xout = fold, rule = 2)$y
 }
 
-
-# ===========================================================================
-# >>> ITERATION 006 ONLY - TEMPORARY (see iteration-006-REVERT.md) <<<
-#
-# LINEAR REPRESENTABILITY AS A DESIGNED FACTOR.
-#
-# Iteration 005 named its relationships (cooccur, nonmono, ...) and got their
-# linear-representability - the share of the true log-weight vector that the
-# best log-linear-in-A model can explain - as an accident. Every competitor's
-# prior is linear or log-linear in A (PolyFun regresses chi^2 on A, PAINTOR is
-# logistic-linear, SBayesRC multinomial logit, fb_pooled a linear head), so
-# that share IS the ceiling on what they can represent. Measured after the
-# fact, Iteration 005 sampled it at 1.00 (x4), 0.33-0.63 (x5) and 0.001 (x1).
-# The single lowest cell was the only one where the LassoNet won, and with one
-# point there the hypothesis was untested rather than refuted.
-#
-# WORSE: its binary `cooccur` arm was not one relationship. It used a RAW
-# product of marks, and annotation proportions are drawn runif(0.01, 0.30) per
-# region, so realised R^2 ranged about 0.05-0.65 WITHIN the arm.
-#
-# THE FIX. Build the log-weight as a mixture of a linear part and a nonlinear
-# part that is ORTHOGONAL to it, both standardised:
-#
-#     logw = (1 - w) * linear(A) + w * nonlinear(A)
-#
-# Orthogonality gives R^2 = (1-w)^2 / ((1-w)^2 + w^2) exactly, hence a closed
-# form for w at any target r - no bisection, and no dependence on p, on the
-# annotation proportions, or on the realised matrix.
-#
-# The orthogonal parts:
-#   binary      centred product  sum_j prod (A[, idx] - colMean)  over a cyclic
-#               window. Centring makes it orthogonal to every main effect at
-#               ANY proportion (verified 0.05-0.50: R^2 = 0.0002 throughout,
-#               against 0.168-0.801 for the raw product).
-#   continuous  sum A^2. Orthogonal because E[A^3] = 0 for the N(0,1) draws
-#               .simulate_annotation_matrix() uses.
-#
-# This composes with .calibrate_log_weights(): that scales the log-weight
-# vector to hit a concentration target, and R^2 is scale-invariant, so the two
-# calibrations do not interact.
-# ===========================================================================
-
-#' Mixture weight achieving a target linear-representability.
-#'
-#' With `lin` and `nl` standardised and mutually orthogonal,
-#'   Var((1-w) lin + w nl) = (1-w)^2 + w^2  and the linearly-explainable part
-#'   is (1-w)^2, so R^2 = (1-w)^2 / ((1-w)^2 + w^2). Inverting:
-#'   w = sqrt(1-r) / (sqrt(r) + sqrt(1-r)).
-#' r = 1 gives w = 0 (purely linear); r = 0 gives w = 1 (purely nonlinear).
-.w_for_r2 <- function(r) {
-  if (!is.finite(r)) return(0)
-  r <- min(max(r, 0), 1)
-  sqrt(1 - r) / (sqrt(r) + sqrt(1 - r))
-}
-
-#' The orthogonal nonlinear component.
-#'
-#' @param I Informative annotation columns, p x k.
-#' @param annotation_type "binary" or "continuous".
-#' @param depth Window width for the binary centred product (2 or 3).
-.orthogonal_nonlinear <- function(I, annotation_type, depth = 2L) {
-  k <- ncol(I)
-  if (identical(annotation_type, "continuous")) return(rowSums(I^2))
-  # Centred product: subtracting each column mean kills the projection onto
-  # every lower-order term, which is what makes this proportion-invariant.
-  d  <- max(2L, min(as.integer(depth), k))
-  mu <- colMeans(I)
-  s  <- rep(0, nrow(I))
-  for (j in seq_len(k)) {
-    idx <- ((j + seq_len(d) - 2L) %% k) + 1L
-    s <- s + apply(sweep(I[, idx, drop = FALSE], 2, mu[idx], "-"), 1, prod)
-  }
-  s
-}
-
-#' Log-weights at a target linear-representability.
-#'
-#' Returns the mixture AND the realised R^2, which is recorded per region: the
-#' closed form is exact only in expectation, and at very low annotation
-#' proportions (prop 0.05) the centred product is noisy enough to miss the
-#' target by up to 0.02. Storing the realised value means the analysis
-#' regresses on what actually happened, not on what was requested.
-.representability_log_weights <- function(A, target_r2, annotation_type,
-                                          n_informative = 5L, depth = 2L) {
-  k <- min(n_informative, ncol(A))
-  I <- A[, seq_len(k), drop = FALSE]
-  zs <- function(v) { sdv <- stats::sd(v); if (!is.finite(sdv) || sdv == 0) v * 0
-                      else (v - mean(v)) / sdv }
-  lin <- zs(rowSums(I))
-  nl  <- zs(.orthogonal_nonlinear(I, annotation_type, depth))
-  w   <- .w_for_r2(target_r2)
-  lw  <- (1 - w) * lin + w * nl
-  realised <- tryCatch({
-    f <- stats::lm.fit(cbind(1, A), lw)
-    ss <- sum((lw - mean(lw))^2)
-    if (ss > 0) 1 - sum(f$residuals^2) / ss else NA_real_
-  }, error = function(e) NA_real_)
-  list(log_weights = lw, w = w, realised_r2 = realised)
-}
-# >>> END ITERATION 006 TEMPORARY BLOCK <<<
-
 # >>> END ITERATION 005 TEMPORARY BLOCK <<<
 # ===========================================================================
 
@@ -831,9 +719,7 @@ select_causal_variants <- function(p,
                                    n_annotations,
                                    annotation_type,
                                    relationship = "additive",   # ITER-005 (temp)
-                                   n_informative = NULL,        # ITER-005 (temp)
-                                   target_r2 = NA_real_,        # ITER-006 (temp)
-                                   nl_depth = 2L) {             # ITER-006 (temp)
+                                   n_informative = NULL) {      # ITER-005 (temp)
 
   # --- No annotations: uniform random selection -------------------------------
 
@@ -861,30 +747,6 @@ select_causal_variants <- function(p,
   # Any other value routes through the ITERATION 005 temporary block above,
   # which uses only the first `n_informative` columns and a different
   # functional form. See the banner there.
-  # >>> ITERATION 006 ONLY - TEMPORARY <<<
-  # A finite target_r2 overrides `relationship` entirely: the log-weights are
-  # built to a REQUESTED linear-representability instead of to a named
-  # functional form. See the banner above .w_for_r2().
-  if (is.finite(target_r2)) {
-    n_inf <- n_informative %||% min(5L, ncol(annotation_matrix))
-    fold  <- mean(enrichment_vals[seq_len(min(n_inf, length(enrichment_vals)))])
-    mm <- .representability_log_weights(annotation_matrix, target_r2,
-                                        annotation_type, n_inf, nl_depth)
-    log_weights <- mm$log_weights
-    # Same concentration calibration as Iteration 005, so enrichment STRENGTH
-    # stays matched across arms and representability is the only free variable.
-    # R^2 is scale-invariant, so this cannot disturb the target.
-    log_weights <- .calibrate_log_weights(log_weights, .concentration_target(fold))
-    weights <- exp(log_weights - max(log_weights))
-    probs   <- weights / sum(weights)
-    causal_indices <- sort(sample(p, S, replace = FALSE, prob = probs))
-    return(list(causal_indices = causal_indices, enrichment = enrichment_vals,
-                causal_probs = probs,
-                target_r2 = target_r2, realised_r2 = mm$realised_r2,
-                mixture_w = mm$w))
-  }
-  # >>> END ITERATION 006 TEMPORARY BLOCK <<<
-
   if (identical(relationship, "additive") && is.null(n_informative)) {
     log_enrichment <- log(enrichment_vals)
     log_weights <- as.numeric(annotation_matrix %*% log_enrichment)

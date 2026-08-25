@@ -146,8 +146,6 @@ run_simulation <- function(n_regions = 3,
                            inf_model = "beatrice",
                            relationship = "additive",   # ITER-005 (temporary)
                            n_informative = NULL,        # ITER-005 (temporary)
-                           target_r2 = NA_real_,        # ITER-006 (temporary)
-                           nl_depth = 2L,               # ITER-006 (temporary)
                            effect_distribution = "normal",
                            effect_variance = 0.36,
                            annotations = "none",
@@ -420,8 +418,6 @@ run_simulation <- function(n_regions = 3,
       annotation_correlation = annotation_correlation,
       relationship = relationship,      # ITER-005 (temporary)
       n_informative = n_informative,    # ITER-005 (temporary)
-      target_r2 = target_r2,            # ITER-006 (temporary)
-      nl_depth = nl_depth,              # ITER-006 (temporary)
       seed = NULL,  # let the RNG continue sequentially
       verbose = FALSE
     )
