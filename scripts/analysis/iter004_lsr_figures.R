@@ -241,3 +241,69 @@ p5 <- ggplot(fdr, aes(t, m, group = method, colour = grp)) +
 ggsave(file.path(FIG,"fig_fdr.pdf"), p5, width = 9.2, height = 5.6)
 
 cat("figs 4-5 written\n")
+
+## =========================================================================
+## Figure 6  -  the BEATRICE family, one step at a time
+##
+## The three models differ in exactly one respect each, so reading left to
+## right isolates first what the annotations contribute and then what sharing
+## the prior across regions contributes. Five properties, because a ranking
+## gain is not a result until you have said what it cost.
+## =========================================================================
+FAM <- c(beatrice = "uniform\nprior",
+         functional_beatrice = "annotation\nprior",
+         fb_xregion = "shared\nprior")
+
+fam <- L3[L3$method %in% names(FAM) & L3$annotation_type != "none", ]
+prop <- function(r, lab, v, se) data.frame(
+  model = r$model[1], arm = r$arm[1], method = as.character(r$method[1]),
+  prop = lab, m = v, lo = v - 2 * se, hi = v + 2 * se)
+
+fm <- function(x) { x <- x[is.finite(x)]; c(mean(x), sd(x) / sqrt(length(x))) }
+famtab <- do.call(rbind, lapply(
+  split(fam, list(fam$model, fam$arm, fam$method), drop = TRUE), function(r) {
+    a  <- fm(r$ap)
+    pw <- fm(r$power)
+    cv <- fm(r$set_hit_95 / 20)
+    k  <- r$nsel_at_90 > 0
+    fd <- fm(r$fdr_at_90[k])
+    nb <- sum(r$n_band_top); cb <- sum(r$c_band_top)   # pooled, per stratum
+    rbind(prop(r, "Average precision",      a[1],  a[2]),
+          prop(r, "Power",                  pw[1], pw[2]),
+          prop(r, "Coverage",               cv[1], cv[2]),
+          prop(r, "Reliability, top band",  cb / nb,
+               sqrt(pmax(cb / nb * (1 - cb / nb), 1e-9) / nb)),
+          prop(r, "FDR at t = 0.9",         fd[1], fd[2]))
+  }))
+famtab$step <- factor(FAM[famtab$method], levels = FAM)
+famtab$prop <- factor(famtab$prop, c("Average precision", "Power", "Coverage",
+                                     "Reliability, top band", "FDR at t = 0.9"))
+# facet_grid frees y by ROW, which would put average precision and FDR on one
+# 0-1 axis and flatten both. facet_wrap over the model x property interaction
+# frees every panel, at the cost of repeating the model name in each strip.
+SHORT <- c("Sparse" = "Sparse", "Sparse + infinitesimal" = "Sparse+inf")
+famtab$panel <- factor(
+  paste(SHORT[as.character(famtab$model)], famtab$prop, sep = "  \u00b7  "),
+  levels = as.vector(t(outer(unname(SHORT[levels(famtab$model)]),
+                             levels(famtab$prop), paste, sep = "  \u00b7  "))))
+
+p6 <- ggplot(famtab, aes(step, m, colour = arm, group = arm)) +
+  geom_line(linewidth = .5) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), width = .14, linewidth = .4) +
+  geom_point(size = 1.7) +
+  facet_wrap(~ panel, scales = "free_y", ncol = 5) +
+  scale_colour_manual(values = c("Binary annotations" = "#0072B2",
+                                 "Continuous annotations" = "#D55E00"), name = NULL) +
+  labs(x = NULL, y = NULL,
+       title = "The BEATRICE family, one change at a time",
+       subtitle = paste("Each step alters exactly one thing: uniform prior to annotation-derived",
+                        "prior, then single-locus to shared across regions.\nBars are",
+                        "±2 SE over cells; the reliability panel pools counts within",
+                        "stratum. Higher is better everywhere except FDR.")) +
+  th + theme(legend.position = "top",
+             axis.text.x = element_text(size = 6.2, lineheight = .9),
+             strip.text = element_text(size = 6.6, face = "bold"),
+             panel.grid.major.x = element_blank())
+ggsave(file.path(FIG, "fig_family.pdf"), p6, width = 9.4, height = 5.4)
+
+cat("fig 6 written\n")

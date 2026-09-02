@@ -92,6 +92,12 @@ for (sd in scen_dirs) {
         fi_rows[[kf]] <- list(
           job_dir = label, scenario_id = sc_idx, method = m,
           region_id = as.integer(fit$region_id %||% rg),
+          # The cross-region wrappers never return importances from the joint
+          # run itself, so an importance record labelled fb_xregion / fb_pooled
+          # can only have come from the per-region fallback in
+          # wrapper_fb_joint.R. Carry the flag or the row is a single-locus
+          # result wearing a cross-region label.
+          joint_fallback = isTRUE(fit$additional$joint_fallback),
           importance = fi)
       }
     }
