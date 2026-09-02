@@ -128,6 +128,29 @@ Every method returns the same top-level fields:
 Scenario metadata (`scenario_id`, `region_id`, `S`, `phi`, `p_causal`,
 `iter`) is attached to each result by `run_methods()`.
 
+### Rule: a wrapper retains everything its method produces
+
+`additional` is not optional decoration. **If a method emits an output of its
+own — credible sets, per-component posteriors, annotation importances, fitted
+hyperparameters, convergence diagnostics — the wrapper must return it**, even
+when nothing in the benchmark currently consumes it. The analysis that needs it
+is usually written months after the run, and by then the simulation tree has
+been purged; an output that was computed and not returned is unrecoverable
+without re-running the whole design.
+
+This rule was written after `wrapper_fb_joint.R` was found to violate it.
+`joint_trainer.py` computes the shared LassoNet prior head's annotation
+importances and saves them under the run's target directory, but
+`.fb_joint_parse_output()` read only `pip.csv`, `credible_set.txt` and
+`conditional_credible_variants_probability.txt`, and that directory lives under
+`tempfile()`. Iteration 004 therefore has annotation importances for
+`functional_beatrice` and none at all for `fb_xregion`, and the
+annotation-selection analysis could only be done for the single-locus model.
+
+When adding a wrapper, list what the method writes to disk or returns in memory,
+and account for every item: either it is in `additional`, or there is a comment
+saying why it is not.
+
 ---
 
 ## Method-specific details and arguments
