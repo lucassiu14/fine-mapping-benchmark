@@ -7,14 +7,14 @@
 #
 #   Rscript scripts/analysis/iter005_lsr_figure.R <out_dir> [l3_rds]
 #
-# Layout is annotation type down the rows and relationship across the columns.
-# The relationships are the comparison of interest, but annotation type is never
-# pooled with them - they are separate strata and pooling has been shown to
-# invert conclusions.
+# Layout is relationship down the rows and annotation type across the columns,
+# which gives each panel roughly twice the width it had transposed. Annotation
+# type is never pooled with the relationships - they are separate strata and
+# pooling has been shown to invert conclusions.
 #
-# The null column comes first and is shaded: there the annotations are supplied
-# but carry NO information about causality, so it is the arm against which every
-# other column should be read.
+# The null row comes first and is shaded: there the annotations are supplied but
+# carry NO information about causality, so it is the arm against which every
+# other row should be read.
 #
 # Calibration rests on the four PIP bands frozen into iter004_collect.R
 # (lo/mid/hi/top). Finer bands would need the raw PIPs, which for Iteration 005
@@ -61,7 +61,8 @@ th <- theme_bw(base_size = 8) +
         strip.text = element_text(size = 7.2, face = "bold"),
         axis.title = element_text(size = 7.8), axis.text = element_text(size = 6.6),
         legend.text = element_text(size = 6.9), legend.key.size = unit(8, "pt"),
-        legend.position = "right",
+        legend.position = "bottom",
+        legend.box.margin = margin(t = -4),
         plot.title = element_text(size = 9, face = "bold"),
         plot.subtitle = element_text(size = 7.2, colour = "grey35"))
 
@@ -96,17 +97,16 @@ p1 <- ggplot(cal, aes(x, y, group = method, colour = grp)) +
   geom_linerange(data = ~subset(.x, grp != "other methods"),
                  aes(ymin = lo, ymax = hi), linewidth = .35) +
   geom_point(data = ~subset(.x, grp != "other methods"), size = 1.1) +
-  facet_grid(arm ~ rel) +
+  facet_grid(rel ~ arm) +
   scale_colour_manual(values = pal, limits = names(pal), name = NULL) +
   scale_x_continuous(breaks = c(0, .5, 1)) + scale_y_continuous(breaks = c(0, .5, 1)) +
   coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
   labs(x = "Mean PIP assigned within band", y = "Proportion of those variants causal",
        title = "PIP calibration under each annotation-to-causality relationship",
-       subtitle = paste0("Red dashed line is y = x; below it is overconfident. Counts ",
-                         "pooled within stratum, bars are 95% Jeffreys intervals.\n",
-                         "The shaded null column carries no annotation-causality ",
-                         "relationship at all.")) + th
-ggsave(file.path(FIG, "fig_rel_calibration.pdf"), p1, width = 9.4, height = 4.4)
+       subtitle = paste0("Red dashed line is y = x; below it is overconfident.\n",
+                         "Counts pooled within stratum, bars are 95% Jeffreys intervals.\n",
+                         "The shaded null row carries no annotation-causality relationship.")) + th
+ggsave(file.path(FIG, "fig_rel_calibration.pdf"), p1, width = 6.6, height = 9.0)
 
 # ---------------------------------------------------------------------------
 # Figure: false discovery control. Rates formed within a cell then averaged;
@@ -134,16 +134,16 @@ p2 <- ggplot(fdr, aes(pos, m, group = method, colour = grp)) +
   geom_linerange(data = ~subset(.x, grp != "other methods"),
                  aes(ymin = pmax(0, m - 2 * se), ymax = m + 2 * se), linewidth = .3) +
   geom_point(data = ~subset(.x, grp != "other methods"), size = 1.1) +
-  facet_grid(arm ~ rel) +
+  facet_grid(rel ~ arm) +
   scale_colour_manual(values = pal, limits = names(pal), name = NULL) +
   scale_x_continuous(breaks = seq_along(TV),
                      labels = c(".50", ".80", ".90", ".95", ".99")) +
   labs(x = "PIP threshold t", y = "False discovery rate (mean over cells, ±2 SE)",
        title = "False discovery control under each annotation-to-causality relationship",
        subtitle = paste0("Red dashed line is y = 1 - t, the highest rate a calibrated ",
-                         "method can attain at that threshold. Bars are 2 SE over four\n",
-                         "cells, so they are wide by design. Cells selecting nothing are ",
-                         "excluded, not scored zero. Thresholds are evenly spaced.")) + th
-ggsave(file.path(FIG, "fig_rel_fdr.pdf"), p2, width = 9.4, height = 4.4)
+                         "method can attain at that threshold.\nBars are 2 SE over four cells ",
+                         "and wide by design; cells selecting nothing are excluded.\n",
+                         "The shaded null row carries no relationship at all.")) + th
+ggsave(file.path(FIG, "fig_rel_fdr.pdf"), p2, width = 6.6, height = 9.0)
 
 cat("fig_rel_calibration and fig_rel_fdr written\n")
