@@ -1,22 +1,20 @@
 #!/bin/bash
 # =============================================================================
-# scripts/hpc/submit_extract_truth.sh
+# scripts/hpc/submit_extract_aux.sh
 #
-# Rescue the ground truth from a benchmark tree on $EPHEMERAL before it purges.
+# Rescue RUNTIME and ANNOTATION-IMPORTANCE from a benchmark tree on $EPHEMERAL.
 #
-# $EPHEMERAL is deleted 30 days after write and is not backed up. sim.rds is the
-# only copy of the causal variant indices, and it is the OLDEST object in the
-# tree: written once per row at the start of the run and never rewritten, even
-# when results are recomputed. It therefore expires FIRST, and once it goes the
-# surviving results.rds cannot be scored against anything.
+# iter004_collect.R keeps only the accuracy metrics, so two quantities the paper
+# needs survive nowhere but results.rds on ephemeral: per-fit runtime, and the
+# LassoNet annotation importances returned by the Functional BEATRICE family.
+# Neither can be recomputed without re-running the benchmark.
 #
-# One array task per grid row. Each reads that row's sim.rds (large - it carries
-# the genotype matrices) and writes a few-KB truth table, so the output is a
-# rounding error next to the input.
+# Companion to submit_extract_truth.sh, which rescues the causal indices from
+# sim.rds. Run both: they read different files and neither subsumes the other.
 #
 #   BENCH_ROOT=$EPHEMERAL/fmbench_iter004/results/benchmark \
 #   OUT_DIR=$HOME/fine-mapping-benchmark/results/iter004/aux \
-#   bash scripts/hpc/submit_extract_truth.sh
+#   bash scripts/hpc/submit_extract_aux.sh
 # =============================================================================
 set -euo pipefail
 
@@ -36,18 +34,17 @@ EXTRACT="${PROJECT_ROOT}/scripts/hpc/extract_aux.R"
 N_ROWS=$(find "$BENCH_ROOT" -maxdepth 1 -type d -name 'job_*' | wc -l | tr -d ' ')
 (( N_ROWS >= 1 )) || { echo "ERROR: no job_* directories under $BENCH_ROOT" >&2; exit 1; }
 
-# How many rows still HAVE a sim.rds. If this is below N_ROWS, truth has already
-# been lost for the difference and no job can recover it.
-N_SIM=$(find "$BENCH_ROOT" -maxdepth 2 -name sim.rds | wc -l | tr -d ' ')
+# How many scenario results survive. results.rds is rewritten whenever a row is
+# recomputed, so it is younger than sim.rds and expires later - but not by much.
+N_RES=$(find "$BENCH_ROOT" -maxdepth 3 -name results.rds | wc -l | tr -d ' ')
 
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 echo "Benchmark root : $BENCH_ROOT"
-echo "Rows           : $N_ROWS   (sim.rds still present: $N_SIM)"
+echo "Rows           : $N_ROWS   (results.rds present: $N_RES)"
 echo "Output         : $OUT_DIR"
-if (( N_SIM < N_ROWS )); then
-  echo
-  echo "WARNING: $(( N_ROWS - N_SIM )) row(s) have already lost their sim.rds."
-  echo "         Those rows are unrecoverable; the rest will still be extracted."
+if (( N_RES == 0 )); then
+  echo "ERROR: no results.rds found under $BENCH_ROOT - nothing to extract." >&2
+  exit 1
 fi
 
 JOB="$(mktemp -t fmbaux_XXXXXX.sh)"
@@ -73,9 +70,9 @@ qsub "$JOB"
 cat <<EOF
 
 When it finishes, check every row was rescued:
-  ls ${OUT_DIR}/aux_*.rds | wc -l      # should be ${N_SIM}
+  ls ${OUT_DIR}/aux_*.rds | wc -l      # should be ${N_ROWS}
 
-The output is small and lives in project space, which is not purged. It is
-enough to re-score any PIP file that still exists, and to recompute every
-truth-dependent metric in the analysis.
+The output lives in project space, which is not purged, and carries the
+per-fit runtimes and annotation importances that the collected metric tables
+do not retain.
 EOF
