@@ -55,7 +55,7 @@ bump <- function(key, n, cc, sp) {
   acc[[key]] <- if (is.null(v)) c(n, cc, sp) else v + c(n, cc, sp)
 }
 
-n_fits <- 0L; n_skipped <- 0L
+n_fits <- 0L; n_skipped <- 0L; n_bad <- 0L
 for (f in files) {
   obj <- readRDS(f)
   if (!isTRUE(all.equal(obj$floor, EDGES[1]))) {
@@ -69,7 +69,11 @@ for (f in files) {
   for (fit in obj$tail) {
     n_fits <- n_fits + 1L
     base <- paste(stratum, fit$method, sep = "\r")
-    p <- fit$pip; y <- fit$is_causal
+    # Non-finite PIPs (L1's bad_pip fits) would poison every comparison below.
+    ok <- is.finite(fit$pip)
+    n_bad <- n_bad + sum(!ok)
+    if (!any(ok)) next
+    p <- fit$pip[ok]; y <- fit$is_causal[ok]
 
     if (INCLUDE_SUB_FLOOR) {
       below <- p < EDGES[1]                       # retained causal variants only
@@ -83,6 +87,7 @@ for (f in files) {
     }
   }
 }
+if (n_bad) message("dropped ", n_bad, " non-finite PIPs")
 message("fits binned: ", n_fits, if (n_skipped) paste0("  (skipped ", n_skipped, " with no design row)") else "")
 
 keys <- ls(acc)

@@ -42,20 +42,28 @@ BANDS <- list(hi = c(0.5, 0.9), top = c(0.9, 1 + 1e-9))
 obs <- new.env(parent = emptyenv())
 bump <- function(k, v) obs[[k]] <- (obs[[k]] %||% c(0, 0)) + v
 
-n_fits <- 0L; floors <- numeric(0); seen_jobs <- character(0)
+n_fits <- 0L; n_bad <- 0L; floors <- numeric(0); seen_jobs <- character(0)
 for (f in files) {
   o <- readRDS(f); floors <- c(floors, o$floor); seen_jobs <- c(seen_jobs, o$job_dir)
   d <- design[match(o$job_dir, design$job_dir), ]
   for (fit in o$tail) {
     n_fits <- n_fits + 1L
+    # Real fits can carry non-finite PIPs (the bad_pip flag in L1). Drop them
+    # here rather than letting NA propagate into the band comparison, and count
+    # them so a run that is mostly NA is visible rather than silently thin.
+    ok <- is.finite(fit$pip)
+    n_bad <- n_bad + sum(!ok)
+    if (!any(ok)) next
+    pip <- fit$pip[ok]; yy <- fit$is_causal[ok]
     for (b in names(BANDS)) {
-      e <- BANDS[[b]]; sel <- fit$pip >= e[1] & fit$pip < e[2]
+      e <- BANDS[[b]]; sel <- pip >= e[1] & pip < e[2]
       if (any(sel)) bump(paste(d$model[1], d$annotation_type[1], fit$method, b, sep = "\r"),
-                         c(sum(sel), sum(fit$is_causal[sel])))
+                         c(sum(sel), sum(yy[sel])))
     }
   }
 }
-message("fits in tails: ", n_fits)
+message("fits in tails: ", n_fits,
+        if (n_bad) paste0("   (dropped ", n_bad, " non-finite PIPs)") else "")
 if (length(unique(floors)) != 1L) message("  WARNING: mixed floors: ", paste(unique(floors), collapse = ", "))
 
 # Expected, from the frozen band counts, restricted to the rows actually rescued.

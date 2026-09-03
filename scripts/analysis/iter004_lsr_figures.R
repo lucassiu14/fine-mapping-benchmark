@@ -29,6 +29,7 @@ suppressMessages({library(ggplot2); library(grid)})
 FIG <- if (length(.a) >= 1) .a[1] else "figures"
 L3F <- if (length(.a) >= 2) .a[2] else "results/iter004/combined_scenario_metrics_with_power.rds"
 CAL9<- if (length(.a) >= 3) .a[3] else "results/iter004/calibration_bands9.rds"
+FDRT<- if (length(.a) >= 4) .a[4] else "results/iter004/fdr_thresholds.rds"
 dir.create(FIG, showWarnings = FALSE, recursive = TRUE)
 
 DROP <- c("carma", "fb_pooled", "polyfun_est")
@@ -204,21 +205,40 @@ ggsave(file.path(FIG,"fig_calibration.pdf"), p4, width = 9.2, height = 5.6)
 ## =========================================================================
 ## Figure 5  -  false discovery rate against threshold, six strata
 ## =========================================================================
-TH <- c("50","80","90","95","99"); TV <- c(.50,.80,.90,.95,.99)
-fdr <- do.call(rbind, lapply(split(L3, list(L3$model, L3$arm, L3$method), drop = TRUE),
-  function(r) do.call(rbind, lapply(seq_along(TH), function(i) {
-    keep <- r[[paste0("nsel_at_", TH[i])]] > 0        # abstaining cells excluded
-    v <- r[[paste0("fdr_at_", TH[i])]][keep]; v <- v[is.finite(v)]
-    if (length(v) < 20) return(NULL)
-    data.frame(model=r$model[1], arm=r$arm[1], method=as.character(r$method[1]),
-               t=TV[i], m=mean(v), se=sd(v)/sqrt(length(v)), ncell=length(v))}))))
+if (file.exists(FDRT)) {
+  # Finer grid recomputed from the rescued PIP tails. Same estimator as below:
+  # the rate is formed within a cell, then averaged over cells, with cells that
+  # selected nothing excluded rather than scored zero.
+  message("FDR: finer threshold grid from ", FDRT)
+  ft <- readRDS(FDRT)
+  ft <- ft[!ft$method %in% DROP & ft$nsel > 0 & is.finite(ft$fdr), ]
+  ft$model <- factor(ft$model, c("sparse","sparse_inf"),
+                     c("Sparse","Sparse + infinitesimal"))
+  ft$arm   <- factor(ft$annotation_type, c("none","binary","continuous"),
+                     c("No annotations","Binary annotations","Continuous annotations"))
+  fdr <- do.call(rbind, lapply(split(ft, list(ft$model, ft$arm, ft$method, ft$t), drop = TRUE),
+    function(r) if (nrow(r) < 20) NULL else
+      data.frame(model=r$model[1], arm=r$arm[1], method=as.character(r$method[1]),
+                 t=r$t[1], m=mean(r$fdr), se=sd(r$fdr)/sqrt(nrow(r)), ncell=nrow(r))))
+  TV <- sort(unique(fdr$t))
+} else {
+  message("FDR: falling back to the five frozen thresholds (no ", FDRT, ")")
+  TH <- c("50","80","90","95","99"); TV <- c(.50,.80,.90,.95,.99)
+  fdr <- do.call(rbind, lapply(split(L3, list(L3$model, L3$arm, L3$method), drop = TRUE),
+    function(r) do.call(rbind, lapply(seq_along(TH), function(i) {
+      keep <- r[[paste0("nsel_at_", TH[i])]] > 0        # abstaining cells excluded
+      v <- r[[paste0("fdr_at_", TH[i])]][keep]; v <- v[is.finite(v)]
+      if (length(v) < 20) return(NULL)
+      data.frame(model=r$model[1], arm=r$arm[1], method=as.character(r$method[1]),
+                 t=TV[i], m=mean(v), se=sd(v)/sqrt(length(v)), ncell=length(v))}))))
+}
 fdr$grp <- ifelse(fdr$method %in% names(FOCUS), fdr$method, "other methods")
 fdr$grp <- factor(fdr$grp, c(names(FOCUS), "other methods"))
 
-bound <- data.frame(t = seq(.50, .99, length.out = 60))
-bound$m <- 1 - bound$t
-p5 <- ggplot(fdr, aes(t, m, group = method, colour = grp)) +
-  geom_line(data = bound, aes(t, m), inherit.aes = FALSE,
+fdr$pos <- match(fdr$t, TV)
+bound <- data.frame(pos = seq_along(TV), m = 1 - TV)
+p5 <- ggplot(fdr, aes(pos, m, group = method, colour = grp)) +
+  geom_line(data = bound, aes(pos, m), inherit.aes = FALSE,
             colour = REF, linetype = "22", linewidth = .45) +
   geom_line(data = subset(fdr, grp == "other methods"), linewidth = .32, alpha = .75) +
   geom_ribbon(data = subset(fdr, grp != "other methods"),
@@ -230,13 +250,15 @@ p5 <- ggplot(fdr, aes(t, m, group = method, colour = grp)) +
   scale_colour_manual(values = c(FOCUS, `other methods` = GREY),
                       limits = c(names(FOCUS), "other methods"), name = NULL) +
   scale_fill_manual(values = FOCUS, guide = "none") +
-  scale_x_continuous(breaks = TV, labels = c(".50",".80",".90",".95",".99")) +
+  scale_x_continuous(breaks = seq_along(TV),
+                     labels = sub("^0", "", sprintf("%.2f", TV))) +
   labs(x = "PIP threshold t", y = "False discovery rate (mean over cells, ±2 SE)",
        title = "False discovery rate against PIP threshold, six strata",
        subtitle = paste("Red dashed line is y = 1 - t, the highest false discovery rate a",
                         "calibrated method can have at that threshold. Rates formed within a",
-                        "cell then averaged over cells;\ncells selecting nothing are excluded,",
-                        "not scored zero. marginal_z selects nothing anywhere and is absent.")) +
+                        "cell\nthen averaged over cells; cells selecting nothing are excluded,",
+                        "not scored zero. Thresholds are evenly spaced.",
+                        "marginal_z selects nothing anywhere and is absent.")) +
   th + theme(legend.position = "right")
 ggsave(file.path(FIG,"fig_fdr.pdf"), p5, width = 9.2, height = 5.6)
 
