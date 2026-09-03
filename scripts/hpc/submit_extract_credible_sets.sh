@@ -37,7 +37,7 @@ N_ROWS=$(find "$BENCH_ROOT" -maxdepth 1 -type d -name 'job_*' | wc -l | tr -d ' 
 (( N_ROWS >= 1 )) || { echo "ERROR: no job_* directories" >&2; exit 1; }
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 echo "Benchmark root : $BENCH_ROOT"
-echo "Rows           : $N_ROWS   (sim.rds present: $N_SIM)"
+echo "Rows           : $N_ROWS"
 echo "Output         : $OUT_DIR"
 
 JOB="$(mktemp -t fmbcs_XXXXXX.sh)"
@@ -63,7 +63,7 @@ qsub "$JOB"
 cat <<EOF
 
 When it finishes:
-  ls ${OUT_DIR}/credsets_*.rds | wc -l     # should be ${N_ROWS}
+  ls ${OUT_DIR}/cs_*.rds | wc -l     # should be ${N_ROWS}
   du -sh ${OUT_DIR}
 
 Each log line reports how many fits carried at least one reported set.
