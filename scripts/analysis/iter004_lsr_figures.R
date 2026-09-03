@@ -197,8 +197,9 @@ p4 <- ggplot(cal, aes(x, y, group = method, colour = grp)) +
   labs(x = "Mean PIP assigned within band", y = "Proportion of those variants causal",
        title = "Reliability of reported posterior inclusion probabilities, six strata",
        subtitle = paste("Red dashed line is y = x, where a perfectly calibrated method sits.",
-                        "Counts pooled to the stratum before any rate is formed;",
-                        "bars are 95% Jeffreys intervals. Bands under 50 variants are not drawn.")) +
+                        "Reliability formed within a cell then averaged over cells;",
+                        "bars are +/-2 SE.\nA band is drawn only where it rests on at least",
+                        "50 variants and 20 cells.")) +
   th + theme(legend.position = "right")
 ggsave(file.path(FIG,"fig_calibration.pdf"), p4, width = 9.2, height = 5.6)
 
