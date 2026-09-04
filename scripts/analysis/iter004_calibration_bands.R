@@ -33,13 +33,19 @@
 INCLUDE_SUB_FLOOR <- TRUE
 EDGES <- c(0.01, 0.05, 0.1, 0.2, 0.5, 0.8, 0.9, 0.95, 0.99, 1 + 1e-9)
 MIN_N <- 50L        # a stratum-level band thinner than this is not reported
-MIN_CELLS <- 20L    # nor is one resting on fewer cells than this
+# ...nor one resting on fewer cells than MIN_CELLS. This has to track the
+# design: Iteration 004 has 500 cells per stratum and 20 is a sensible floor,
+# but Iteration 005 has only 4, where a floor of 20 rejects everything. Passed
+# as the fourth argument so the caller states it rather than inheriting it.
+MIN_CELLS <- 20L
 
 args <- commandArgs(trailingOnly = TRUE)
 piptail_dir <- args[1]
 l1_file     <- if (length(args) >= 2) args[2] else "results/iter004/combined_fit_metrics.rds"
 out_file    <- if (length(args) >= 3) args[3] else "results/iter004/calibration_bands9.rds"
-stopifnot(dir.exists(piptail_dir), file.exists(l1_file))
+if (length(args) >= 4) MIN_CELLS <- as.integer(args[4])
+stopifnot(dir.exists(piptail_dir), file.exists(l1_file), is.finite(MIN_CELLS))
+message("reporting floor: >= ", MIN_N, " variants and >= ", MIN_CELLS, " cells")
 
 files <- sort(list.files(piptail_dir, pattern = "^piptail_.*\\.rds$", full.names = TRUE))
 if (!length(files)) stop("no piptail_*.rds in ", piptail_dir, call. = FALSE)

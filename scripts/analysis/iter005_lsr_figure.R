@@ -136,13 +136,30 @@ ggsave(file.path(FIG, "fig_rel_calibration.pdf"), p1, width = 6.6, height = 7.8)
 # Figure: false discovery control. Rates formed within a cell then averaged;
 # cells selecting nothing are excluded rather than scored zero.
 # ---------------------------------------------------------------------------
-fdr <- do.call(rbind, lapply(split(L3, list(L3$arm, L3$rel, L3$method), drop = TRUE),
-  function(r) do.call(rbind, lapply(seq_along(TH), function(i) {
-    k <- r[[paste0("nsel_at_", TH[i])]] > 0
-    v <- r[[paste0("fdr_at_", TH[i])]][k]; v <- v[is.finite(v)]
-    if (length(v) < 2L) return(NULL)
-    data.frame(arm = r$arm[1], rel = r$rel[1], method = as.character(r$method[1]),
-               pos = i, m = mean(v), se = sd(v) / sqrt(length(v)))}))))
+if (file.exists(FDRT)) {
+  message("FDR: finer threshold grid from ", FDRT)
+  ft <- readRDS(FDRT)
+  ft <- ft[!ft$method %in% DROP & ft$relationship %in% REL &
+           ft$nsel > 0 & is.finite(ft$fdr), ]
+  ft$rel <- factor(ft$relationship, REL)
+  ft$arm <- factor(ft$annotation_type, c("binary","continuous"),
+                   c("Binary annotations","Continuous annotations"))
+  TV <- sort(unique(ft$t))
+  fdr <- do.call(rbind, lapply(split(ft, list(ft$arm, ft$rel, ft$method, ft$t), drop = TRUE),
+    function(r) if (nrow(r) < 2L) NULL else
+      data.frame(arm = r$arm[1], rel = r$rel[1], method = as.character(r$method[1]),
+                 pos = match(r$t[1], TV), m = mean(r$fdr),
+                 se = sd(r$fdr) / sqrt(nrow(r)))))
+} else {
+  message("FDR: five frozen thresholds (no ", FDRT, ")")
+  fdr <- do.call(rbind, lapply(split(L3, list(L3$arm, L3$rel, L3$method), drop = TRUE),
+    function(r) do.call(rbind, lapply(seq_along(TH), function(i) {
+      k <- r[[paste0("nsel_at_", TH[i])]] > 0
+      v <- r[[paste0("fdr_at_", TH[i])]][k]; v <- v[is.finite(v)]
+      if (length(v) < 2L) return(NULL)
+      data.frame(arm = r$arm[1], rel = r$rel[1], method = as.character(r$method[1]),
+                 pos = i, m = mean(v), se = sd(v) / sqrt(length(v)))}))))
+}
 fdr$grp <- grp(fdr$method)
 fdr <- fdr[order(fdr$grp == "other methods", decreasing = TRUE), ]
 bound <- data.frame(pos = seq_along(TV), m = 1 - TV)
@@ -161,7 +178,7 @@ p2 <- ggplot(fdr, aes(pos, m, group = method, colour = grp)) +
   facet_grid(rel ~ arm) +
   scale_colour_manual(values = pal, limits = names(pal), name = NULL) +
   scale_x_continuous(breaks = seq_along(TV),
-                     labels = c(".50", ".80", ".90", ".95", ".99")) +
+                     labels = sub("^0", "", sprintf("%.2f", TV))) +
   labs(x = "PIP threshold t", y = "False discovery rate (mean over cells, ±2 SE)",
        title = "False discovery control under each annotation-to-causality relationship",
        subtitle = paste0("Red dashed line is y = 1 - t, the highest rate a calibrated ",
