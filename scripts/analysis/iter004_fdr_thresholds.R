@@ -36,8 +36,11 @@ message("piptail files: ", length(files))
 
 message("reading L1 for the cell keys ...")
 L1 <- readRDS(l1_file)
+# See iter004_calibration_bands.R: the stratum is whatever the design varies.
+STRATUM <- intersect(c("model", "annotation_type", "relationship"), names(L1))
+message("stratum keyed on: ", paste(STRATUM, collapse = ", "))
 KEEP <- c("job_dir", "scenario_id", "region_id", "method",
-          "S", "phi", "region_size", "model", "annotation_type")
+          "S", "phi", "region_size", STRATUM)
 L1 <- L1[, KEEP]
 L1$fitkey <- do.call(paste, c(L1[c("job_dir", "scenario_id", "region_id", "method")], sep = "\r"))
 
@@ -60,7 +63,7 @@ for (f in files) {
     i <- idx[[paste(o$job_dir, fit$scenario_id, fit$region_id, fit$method, sep = "\r")]]
     if (is.null(i)) { n_unmatched <- n_unmatched + 1L; next }
     r <- sub[i, ]
-    cell <- paste(r$model, r$annotation_type, r$method, r$job_dir,
+    cell <- paste(paste(unlist(r[STRATUM]), collapse = "\r"), r$method, r$job_dir,
                   r$S, r$phi, r$region_size, sep = "\r")
 
     v <- acc[[cell]]
@@ -80,11 +83,14 @@ if (!length(ls(acc))) stop("nothing accumulated", call. = FALSE)
 
 keys  <- ls(acc)
 parts <- do.call(rbind, strsplit(keys, "\r", fixed = TRUE))
+nS <- length(STRATUM)
 out <- do.call(rbind, lapply(seq_along(keys), function(j) {
   v <- acc[[keys[j]]]
-  data.frame(model = parts[j, 1], annotation_type = parts[j, 2], method = parts[j, 3],
-             job_dir = parts[j, 4], S = as.numeric(parts[j, 5]),
-             phi = as.numeric(parts[j, 6]), region_size = as.numeric(parts[j, 7]),
+  data.frame(setNames(as.list(parts[j, seq_len(nS)]), STRATUM),
+             method = parts[j, nS + 1L],
+             job_dir = parts[j, nS + 2L], S = as.numeric(parts[j, nS + 3L]),
+             phi = as.numeric(parts[j, nS + 4L]),
+             region_size = as.numeric(parts[j, nS + 5L]),
              t = THRESH, nsel = v[, 1], tp = v[, 2], sum_pip_sel = v[, 3],
              stringsAsFactors = FALSE)
 }))

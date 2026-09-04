@@ -54,8 +54,15 @@ BAND_LABELS <- c(if (INCLUDE_SUB_FLOOR) lab(0L), vapply(seq_len(length(EDGES) - 
 
 message("reading L1 for the cell keys ...")
 L1 <- readRDS(l1_file)
+# The stratum is whatever the design actually varies. Iteration 004 varies model
+# and annotation type; Iteration 005 is entirely sparse and varies the
+# annotation-to-causality relationship instead, so `relationship` joins the key
+# wherever the column exists. Omitting it there would collapse every
+# relationship into one stratum and silently average them together.
+STRATUM <- intersect(c("model", "annotation_type", "relationship"), names(L1))
+message("stratum keyed on: ", paste(STRATUM, collapse = ", "))
 L1 <- L1[, c("job_dir", "scenario_id", "region_id", "method",
-             "S", "phi", "region_size", "model", "annotation_type")]
+             "S", "phi", "region_size", STRATUM)]
 L1$fitkey <- do.call(paste, c(L1[c("job_dir","scenario_id","region_id","method")], sep = "\r"))
 
 acc <- new.env(parent = emptyenv())          # cell x band -> c(n, c, sum_pip)
@@ -74,7 +81,7 @@ for (f in files) {
     i <- idx[[paste(o$job_dir, fit$scenario_id, fit$region_id, fit$method, sep = "\r")]]
     if (is.null(i)) { n_unmatched <- n_unmatched + 1L; next }
     r <- sub[i, ]
-    cell <- paste(r$model, r$annotation_type, r$method,
+    cell <- paste(paste(unlist(r[STRATUM]), collapse = "\r"), r$method,
                   r$job_dir, r$S, r$phi, r$region_size, sep = "\r")
 
     ok <- is.finite(fit$pip)                 # the bad_pip fits
@@ -102,7 +109,8 @@ message("fits: ", n_fits,
 
 keys  <- ls(acc)
 parts <- do.call(rbind, strsplit(keys, "\r", fixed = TRUE))
-stratum <- paste(parts[, 1], parts[, 2], parts[, 3], sep = "\r")   # model, annot, method
+nS <- length(STRATUM)
+stratum <- apply(parts[, seq_len(nS + 1L), drop = FALSE], 1, paste, collapse = "\r")
 
 out <- do.call(rbind, lapply(split(seq_along(keys), stratum), function(ix) {
   pr <- parts[ix[1], ]
@@ -114,7 +122,8 @@ out <- do.call(rbind, lapply(split(seq_along(keys), stratum), function(ix) {
     if (!any(k)) return(NULL)
     y_cell <- c_[k] / n[k]; x_cell <- sp[k] / n[k]
     data.frame(
-      model = pr[1], annotation_type = pr[2], method = pr[3],
+      setNames(as.list(pr[seq_len(nS)]), STRATUM),
+      method = pr[nS + 1L],
       band = BAND_LABELS[b],
       # cell-mean estimator, and its SE across cells
       x = mean(x_cell), y = mean(y_cell),
