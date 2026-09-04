@@ -44,6 +44,15 @@ piptail_dir <- args[1]
 l1_file     <- if (length(args) >= 2) args[2] else "results/iter004/combined_fit_metrics.rds"
 out_file    <- if (length(args) >= 3) args[3] else "results/iter004/calibration_bands9.rds"
 if (length(args) >= 4) MIN_CELLS <- as.integer(args[4])
+# Band edges are an argument because the grid a design can support is a
+# property of the design. Iteration 004 supports the ten-band split at 97% or
+# better in every band; Iteration 005, with 25 iterations over four cells, puts
+# a median of 49 variants in [0.9,0.95) and can report it in only 41% of
+# method-by-relationship combinations. Merging the sparse upper bands there
+# keeps the edges a SUBSET of the ten-band set, so the two remain readable
+# against each other.
+if (length(args) >= 5 && nzchar(args[5]))
+  EDGES <- c(as.numeric(strsplit(args[5], ",", fixed = TRUE)[[1]]), 1 + 1e-9)
 stopifnot(dir.exists(piptail_dir), file.exists(l1_file), is.finite(MIN_CELLS))
 message("reporting floor: >= ", MIN_N, " variants and >= ", MIN_CELLS, " cells")
 
