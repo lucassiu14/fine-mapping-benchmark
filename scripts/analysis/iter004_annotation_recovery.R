@@ -23,19 +23,22 @@
 # ------------------------------
 # functional_beatrice returns feature_importance and is fully analysable.
 #
-# fb_xregion IS NOT. wrapper_fb_joint.R's .fb_joint_parse_output reads only
-# pip.csv, credible_set.txt and conditional_..._probability.txt; the shared
-# head's importances are written by joint_trainer.py into <target>/res, and
-# <target> lives under work_dir <- tempfile(), which does not survive the R
-# session. They were computed and discarded.
+# fb_xregion WAS NOT, for runs up to and including Iteration 004.
+# .fb_joint_parse_output read only pip.csv, credible_set.txt and
+# conditional_..._probability.txt; the shared head's importances went into
+# <target>/res under work_dir <- tempfile(), which does not survive the R
+# session. They were computed and discarded. Every importance record labelled
+# fb_xregion in those runs therefore came from the per-region FALLBACK path,
+# which calls run_functional_beatrice_region and tags
+# additional$joint_fallback = TRUE - a single-locus result wearing a
+# cross-region label, which this script still REFUSES to score, because
+# reporting it as cross-region recovery would be a misattribution.
 #
-# So any importance record labelled fb_xregion can only have come from the
-# per-region FALLBACK path (wrapper_fb_joint.R:247), which calls
-# run_functional_beatrice_region and tags additional$joint_fallback = TRUE.
-# extract_aux.R does not carry that flag, so such rows are single-locus
-# results wearing a cross-region label. This script REFUSES to score them and
-# reports the count instead, because reporting them as cross-region recovery
-# would be a straightforward misattribution.
+# From the GPU branch onward this is fixed: joint_trainer.py writes
+# feature_importance.csv for the shared head into every region's target and
+# wrapper_fb_joint.R parses it, returning joint_fallback = FALSE. Those records
+# ARE genuine cross-region importances and ARE scored. The two cases are
+# separated by the joint_fallback flag, which extract_aux.R carries.
 # =============================================================================
 
 N_ANNOT    <- 10L
@@ -61,7 +64,16 @@ for (f in files) {
   o <- readRDS(f)
   d <- design[match(o$job_dir, design$job_dir), ]
   for (r in o$importance) {
-    if (r$method %in% JOINT_METHODS) { n_joint_labelled <- n_joint_labelled + 1L; next }
+    # Skip a JOINT-labelled record only when it is a per-region FALLBACK.
+    # Genuine cross-region importances exist from the GPU branch onward
+    # (joint_trainer.py now writes feature_importance.csv and
+    # wrapper_fb_joint.R parses it), and those are scorable. Iteration 004
+    # aux files are unaffected: the joint path returned no importance at
+    # all then, so extract_aux.R created no row for it, and every
+    # JOINT-labelled record they contain has joint_fallback = TRUE.
+    if (r$method %in% JOINT_METHODS && isTRUE(r$joint_fallback)) {
+      n_joint_labelled <- n_joint_labelled + 1L; next
+    }
     fi <- r$importance
     # data frame (annotation_index, importance), sorted descending by the
     # wrapper - reorder by index so position i is annotation i.
@@ -94,8 +106,8 @@ tab <- do.call(rbind, rows)
 message("scorable fits: ", k)
 if (n_joint_labelled)
   message("SKIPPED ", n_joint_labelled, " records labelled ",
-          paste(JOINT_METHODS, collapse = "/"), " - these are per-region fallbacks, ",
-          "not cross-region fits (see the header)")
+          paste(JOINT_METHODS, collapse = "/"), " with joint_fallback = TRUE",
+          " - these are per-region fallbacks, not cross-region fits (see the header)")
 if (n_malformed) message("skipped ", n_malformed, " malformed importance vectors")
 
 saveRDS(tab, out_file); message("wrote ", out_file)

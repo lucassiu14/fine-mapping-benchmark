@@ -107,7 +107,23 @@
       suppressWarnings(as.numeric(strsplit(trimws(line), "\\s+")[[1]])))
   }
 
-  list(pip = pip, credible_sets = credible_sets, cs_pip = cs_pip)
+  # Annotation importance from the SHARED joint prior head. joint_trainer.py
+  # writes the same feature_importance.csv schema into every region's target as
+  # the single-locus path does, so this mirrors wrapper_functional_beatrice.R's
+  # parser. Before this existed the joint head's importances were computed and
+  # then discarded with work_dir, and every fb_xregion importance row in the
+  # analysis came from the per-region fallback instead (see
+  # scripts/analysis/iter004_annotation_recovery.R).
+  feature_importance <- NULL
+  fi_path <- file.path(out_dir, "feature_importance.csv")
+  if (file.exists(fi_path)) {
+    feature_importance <- tryCatch(
+      utils::read.csv(fi_path, stringsAsFactors = FALSE),
+      error = function(e) NULL)
+  }
+
+  list(pip = pip, credible_sets = credible_sets, cs_pip = cs_pip,
+       feature_importance = feature_importance)
 }
 
 
@@ -231,7 +247,8 @@ run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
       input_type      = "summary",
       params          = list(prior_head = .fb_joint_head, joint = TRUE),
       runtime_seconds = NA_real_,
-      additional      = list(cs_pip = entry$cs_pip, joint_fallback = FALSE)
+      additional      = list(cs_pip = entry$cs_pip, joint_fallback = FALSE,
+                             feature_importance = entry$feature_importance)
     ))
   }
 
