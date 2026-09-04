@@ -231,6 +231,12 @@ export FMB_METHODS="${FMB_METHODS:-}"
 # array, or the worker's (row, scenario-block) decode won't line up. Expanded
 # here at submit time to the literal integer.
 export FMB_SCENARIOS_PER_TASK="${SCENARIOS_PER_TASK}"
+# Target device for the PyTorch-backed BEATRICE family. Forwarded for the same
+# reason as the variables around it: there is no "#PBS -V", so a login-side
+# export does NOT reach the node. Unset/empty means CPU, which is the
+# Iteration 004 behaviour. Set FMBENCH_DEVICE=cuda together with a GPU in
+# PBS_SELECT (e.g. 1:ncpus=4:mem=32gb:ngpus=1) and a GPU queue.
+export FMBENCH_DEVICE="${FMBENCH_DEVICE:-}"
 # >>> ITERATION 005 ONLY - TEMPORARY (see iteration-005-REVERT.md) <<<
 # Reduced-method-set selector, forwarded for the SAME reason as FMB_METHODS
 # above: there is no "#PBS -V" here, so a login-side export does NOT reach the
@@ -267,6 +273,17 @@ if [[ -f "${PROJECT_ROOT}/scripts/hpc/py_deps_check.py" ]]; then
 else
   echo "PREFLIGHT FAILED - py_deps_check.py missing at ${PROJECT_ROOT}/scripts/hpc/" >&2
   exit 1
+fi
+# If a GPU was asked for, PROVE the node has one before spending walltime. Same
+# failure mode the dependency preflight exists for: without this the run falls
+# through to CPU, records CPU timings under a GPU label, and the substitution
+# is only visible hours later. scripts/device.py also raises, but that is
+# per-fit inside a subprocess the R wrapper catches and records as a failed
+# fit - this stops the whole task at second zero.
+if [[ "\${FMBENCH_DEVICE}" == "cuda" || "\${FMBENCH_DEVICE}" == "gpu" ]]; then
+  python -c "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)" \\
+    || { echo "PREFLIGHT FAILED - FMBENCH_DEVICE=\${FMBENCH_DEVICE} but torch.cuda.is_available() is False on \$(hostname)" >&2; exit 1; }
+  echo "preflight ok - gpu \$(python -c 'import torch;print(torch.version.cuda, torch.cuda.get_device_name(0))')" >&2
 fi
 echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} of ${ARRAY_RANGE} starting at \$(date)"
 echo "[node:\$(hostname)] FMB_OUTPUT_ROOT=\${FMB_OUTPUT_ROOT}"
