@@ -24,11 +24,19 @@
 .a  <- commandArgs(TRUE)
 FIG <- if (length(.a) >= 1) .a[1] else "figures"
 L3F <- if (length(.a) >= 2) .a[2] else "results/iter005/combined_scenario_metrics.rds"
+# Optional finer grids, produced from an Iteration 005 PIP-tail rescue exactly
+# as for Iteration 004. Absent, the four bands and five thresholds frozen at
+# collection are used and the figures say so.
+CAL <- if (length(.a) >= 3) .a[3] else "results/iter005/calibration_bands9.rds"
+FDRT<- if (length(.a) >= 4) .a[4] else "results/iter005/fdr_thresholds.rds"
 suppressMessages(library(ggplot2))
 dir.create(FIG, showWarnings = FALSE, recursive = TRUE)
 
 DROP  <- c("carma", "fb_pooled", "polyfun_est")
-REL   <- c("null", "additive", "threshold", "mixed", "cooccur", "nonmono")
+# cooccur is excluded by construction, not on results: its log weight cycles
+# over ADJACENT annotation columns, so permuting the columns changes the
+# relationship while column order carries no meaning.
+REL   <- c("null", "additive", "threshold", "mixed", "nonmono")
 BANDS <- c("lo", "mid", "hi", "top")
 TH    <- c("50", "80", "90", "95", "99"); TV <- c(.50, .80, .90, .95, .99)
 MIN_N <- 50L
@@ -74,15 +82,31 @@ pal <- c(HI, `other methods` = GREY)
 # Figure: PIP calibration. Counts pooled to the stratum before any rate is
 # formed - a reliability estimate inside one cell rests on too few variants.
 # ---------------------------------------------------------------------------
-cal <- do.call(rbind, lapply(split(L3, list(L3$arm, L3$rel, L3$method), drop = TRUE),
-  function(r) do.call(rbind, lapply(BANDS, function(b) {
-    n <- sum(r[[paste0("n_band_", b)]]); c_ <- sum(r[[paste0("c_band_", b)]])
-    sp <- sum(r[[paste0("sum_pip_band_", b)]])
-    if (!is.finite(n) || n < MIN_N) return(NULL)
-    data.frame(arm = r$arm[1], rel = r$rel[1], method = as.character(r$method[1]),
-               x = sp / n, y = c_ / n,
-               lo = qbeta(.025, c_ + .5, n - c_ + .5),
-               hi = qbeta(.975, c_ + .5, n - c_ + .5))}))))
+if (file.exists(CAL)) {
+  message("calibration: finer bands from ", CAL)
+  cal <- readRDS(CAL)
+  cal <- cal[cal$reportable & !cal$method %in% DROP & cal$relationship %in% REL, ]
+  cal$rel <- factor(cal$relationship, REL)
+  cal$arm <- factor(cal$annotation_type, c("binary","continuous"),
+                    c("Binary annotations","Continuous annotations"))
+} else {
+  message("calibration: four frozen bands (no ", CAL, ")")
+  # Reliability formed WITHIN a cell then averaged over cells, with a standard
+  # error across cells - the estimator of the main results section. Iteration
+  # 005 has only four cells per stratum, so the interval is wide by
+  # construction; it is an honest width rather than a tight one.
+  cal <- do.call(rbind, lapply(split(L3, list(L3$arm, L3$rel, L3$method), drop = TRUE),
+    function(r) do.call(rbind, lapply(BANDS, function(b) {
+      n <- r[[paste0("n_band_", b)]]; c_ <- r[[paste0("c_band_", b)]]
+      sp <- r[[paste0("sum_pip_band_", b)]]
+      k <- is.finite(n) & n > 0
+      if (!any(k) || sum(n[k]) < MIN_N) return(NULL)
+      y <- c_[k] / n[k]; x <- sp[k] / n[k]
+      se <- if (sum(k) > 1L) sd(y) / sqrt(sum(k)) else NA_real_
+      data.frame(arm = r$arm[1], rel = r$rel[1], method = as.character(r$method[1]),
+                 x = mean(x), y = mean(y),
+                 lo = mean(y) - 2 * se, hi = mean(y) + 2 * se)}))))
+}
 cal$grp <- grp(cal$method)
 cal <- cal[order(cal$grp == "other methods", decreasing = TRUE), ]
 
@@ -104,9 +128,9 @@ p1 <- ggplot(cal, aes(x, y, group = method, colour = grp)) +
   labs(x = "Mean PIP assigned within band", y = "Proportion of those variants causal",
        title = "PIP calibration under each annotation-to-causality relationship",
        subtitle = paste0("Red dashed line is y = x; below it is overconfident.\n",
-                         "Counts pooled within stratum, bars are 95% Jeffreys intervals.\n",
+                         "Reliability formed within a cell then averaged; bars are +/-2 SE.\n",
                          "The shaded null row carries no annotation-causality relationship.")) + th
-ggsave(file.path(FIG, "fig_rel_calibration.pdf"), p1, width = 6.6, height = 9.0)
+ggsave(file.path(FIG, "fig_rel_calibration.pdf"), p1, width = 6.6, height = 7.8)
 
 # ---------------------------------------------------------------------------
 # Figure: false discovery control. Rates formed within a cell then averaged;
@@ -144,6 +168,6 @@ p2 <- ggplot(fdr, aes(pos, m, group = method, colour = grp)) +
                          "method can attain at that threshold.\nBars are 2 SE over four cells ",
                          "and wide by design; cells selecting nothing are excluded.\n",
                          "The shaded null row carries no relationship at all.")) + th
-ggsave(file.path(FIG, "fig_rel_fdr.pdf"), p2, width = 6.6, height = 9.0)
+ggsave(file.path(FIG, "fig_rel_fdr.pdf"), p2, width = 6.6, height = 7.8)
 
 cat("fig_rel_calibration and fig_rel_fdr written\n")
