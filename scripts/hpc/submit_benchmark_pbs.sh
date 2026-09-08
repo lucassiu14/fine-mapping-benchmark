@@ -297,5 +297,5 @@ qsub "$JOB_SCRIPT"
 
 echo
 echo "Track with:"
-echo "  qstat -tan \$USER          # per-array-element status"
+echo "  qstat -tan -u \$USER          # per-array-element status"
 echo "  ls -lh ${LOG_DIR}          # log files as they land"
