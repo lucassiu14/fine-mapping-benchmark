@@ -68,6 +68,12 @@
   # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
   fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
   fb_xregion      = "run_fb_xregion_region",   # idea #2: shared LassoNet head
+  # Same shared LassoNet head, but emitting ONE logit contrast rather than two
+  # logits, so the L1 threshold and hierarchy gate act on the identifiable
+  # quantity that is also reported as annotation importance. Registered as a
+  # separate method so both parameterisations run on identical simulated data
+  # in the same job and are directly comparable.
+  fb_xregion_id   = "run_fb_xregion_id_region",
 
   # --- Iteration 004 additions: summary-statistic methods ---------------------
   # Chosen to target the constraint the Iteration 003 deep dive identified as

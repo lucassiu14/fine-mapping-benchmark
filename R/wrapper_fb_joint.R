@@ -131,7 +131,8 @@
 # Returns list(.fb_joint_cache = <fingerprint -> parsed result>,
 #              .fb_joint_annotated = TRUE/FALSE, .fb_joint_head = head).
 # Empty annotated-arm cache means the joint run failed -> per-region fallback.
-.fb_joint_scenario_setup <- function(genotypes, regions, user_args, prior_head) {
+.fb_joint_scenario_setup <- function(genotypes, regions, user_args, prior_head,
+                                    identifiable = FALSE) {
   n_regions <- length(regions)
 
   # collect regions that have an annotation matrix (joint prior needs annotations)
@@ -193,6 +194,12 @@
     "--lambda_l1",            as.character(gv("lambda_l1", 0.01)),
     "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0))
   )
+  # absl booleans: pass the flag only when set. With it, the LassoNet prior head
+  # emits ONE logit contrast, so the L1 threshold and the hierarchy gate act on
+  # the same identifiable quantity that is reported as feature importance,
+  # rather than on the raw two-column theta which also spans a direction with no
+  # effect on p_0. Same model class, different regulariser.
+  if (isTRUE(identifiable)) args <- c(args, "--identifiable_head")
 
   run_output <- tryCatch(
     system2(py, args = args, stdout = TRUE, stderr = TRUE),
@@ -228,6 +235,11 @@ run_fb_pooled_scenario_setup <- function(genotypes, regions, user_args) {
 #' @export
 run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
   .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+run_fb_xregion_id_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
+                           identifiable = TRUE)
 }
 
 
@@ -275,4 +287,8 @@ run_fb_pooled_region <- function(region_geno, region_pheno, ...) {
 #' @export
 run_fb_xregion_region <- function(region_geno, region_pheno, ...) {
   .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion", ...)
+}
+#' @export
+run_fb_xregion_id_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id", ...)
 }
