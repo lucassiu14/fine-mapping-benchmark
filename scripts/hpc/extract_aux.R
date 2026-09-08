@@ -47,11 +47,25 @@ rt_rows  <- vector("list", length(scen_dirs) * 400L)   # per fit
 fi_rows  <- vector("list", length(scen_dirs) * 400L)   # per fit, FB family only
 kr <- 0L; kf <- 0L; n_read <- 0L
 
+n_supp_used <- 0L
 for (sd in scen_dirs) {
   f <- file.path(sd, "results.rds")
   if (!file.exists(f)) next
   r <- tryCatch(readRDS(f), error = function(e) NULL)
   if (is.null(r)) next
+  # Supplemental re-runs (FMB_METHODS=...) write results_supp.rds beside the
+  # originals; collect_results.R already overlays them and this must match, or
+  # a re-run method's runtimes and annotation importances are written and then
+  # silently ignored here. Overlay per method, exactly as collect_results.R
+  # does, so methods absent from the re-run keep their original records.
+  fs <- file.path(sd, "results_supp.rds")
+  if (file.exists(fs)) {
+    rs <- tryCatch(readRDS(fs), error = function(e) NULL)
+    if (!is.null(rs)) {
+      for (sm in names(rs)) r[[sm]] <- rs[[sm]]
+      n_supp_used <- n_supp_used + 1L
+    }
+  }
   n_read <- n_read + 1L
   sc_idx <- suppressWarnings(as.integer(sub("^scenario_", "", basename(sd))))
 
@@ -111,3 +125,5 @@ saveRDS(list(job_dir = label, scenarios_read = n_read,
              runtime = rt_rows, importance = fi_rows), out)
 message(sprintf("  wrote %s  (%d scenarios, %d runtime records, %d importance records, %.1f MB)",
                 basename(out), n_read, kr, kf, file.size(out) / 1024^2))
+if (n_supp_used) message(sprintf("  overlaid results_supp.rds in %d of %d scenarios",
+                                 n_supp_used, n_read))
