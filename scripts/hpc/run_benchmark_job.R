@@ -213,6 +213,14 @@ METHOD_ARGS <- list(
 # shared LassoNet head (idea #2). On the `none` arm they fall back to plain FB.
 METHOD_ARGS$fb_pooled         <- .FBv
 METHOD_ARGS$fb_xregion        <- .FBv
+# Identifiable-head arms. Identical to fb_xregion in every respect except the
+# prior head's parameterisation and lambda_l1, so any difference is attributable
+# to those two things alone. lambda_l1 = 0.1223 is the production value carried
+# from .FBv; the others bracket it.
+METHOD_ARGS$fb_xregion_id     <- .FBv                                   # 0.1223
+METHOD_ARGS$fb_xregion_id_l03 <- modifyList(.FBv, list(lambda_l1 = 0.03))
+METHOD_ARGS$fb_xregion_id_l06 <- modifyList(.FBv, list(lambda_l1 = 0.06))
+METHOD_ARGS$fb_xregion_id_l25 <- modifyList(.FBv, list(lambda_l1 = 0.25))
 
 # --- Iteration 004: additional summary-statistic methods ---------------------
 # CARMA is registered in .FM_REGISTRY already but has never been installed, so

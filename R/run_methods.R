@@ -74,6 +74,15 @@
   # separate method so both parameterisations run on identical simulated data
   # in the same job and are directly comparable.
   fb_xregion_id   = "run_fb_xregion_id_region",
+  # lambda_l1 sweep for the identifiable head. At the production value (0.1223)
+  # the L1 crushes every importance to ~0.001; at 0.06 they are ~0.17 and
+  # nothing is zeroed - a ~100x difference in the quantity the annotation
+  # analysis reads. These arms bracket production to test whether the tuned
+  # penalty, selected by Optuna against the LEAKY two-column parameterisation,
+  # is too strong once the leak is closed.
+  fb_xregion_id_l03 = "run_fb_xregion_id_l03_region",
+  fb_xregion_id_l06 = "run_fb_xregion_id_l06_region",
+  fb_xregion_id_l25 = "run_fb_xregion_id_l25_region",
 
   # --- Iteration 004 additions: summary-statistic methods ---------------------
   # Chosen to target the constraint the Iteration 003 deep dive identified as
