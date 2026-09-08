@@ -256,6 +256,21 @@ run_fb_xregion_id_l25_scenario_setup <- function(genotypes, regions, user_args) 
   .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
                            identifiable = TRUE)
 }
+#' @export
+run_fb_xregion_id_l50_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
+                           identifiable = TRUE)
+}
+#' @export
+run_fb_xregion_id_l100_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
+                           identifiable = TRUE)
+}
+#' @export
+run_fb_xregion_id_l200_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
+                           identifiable = TRUE)
+}
 
 
 # --- the shared per-region core ----------------------------------------------
@@ -318,4 +333,16 @@ run_fb_xregion_id_l06_region <- function(region_geno, region_pheno, ...) {
 #' @export
 run_fb_xregion_id_l25_region <- function(region_geno, region_pheno, ...) {
   .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l25", ...)
+}
+#' @export
+run_fb_xregion_id_l50_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l50", ...)
+}
+#' @export
+run_fb_xregion_id_l100_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l100", ...)
+}
+#' @export
+run_fb_xregion_id_l200_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l200", ...)
 }

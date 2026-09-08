@@ -83,6 +83,14 @@
   fb_xregion_id_l03 = "run_fb_xregion_id_l03_region",
   fb_xregion_id_l06 = "run_fb_xregion_id_l06_region",
   fb_xregion_id_l25 = "run_fb_xregion_id_l25_region",
+  # Larger penalties, to see how many annotations are driven to exactly zero and
+  # whether that changes fine-mapping accuracy. Full collapse (10 of 10 zeroed)
+  # was measured at lambda = 2.0; between production and 1.0 the count moves
+  # non-monotonically on a single fit, so the sparsity path needs the full grid
+  # to resolve.
+  fb_xregion_id_l50  = "run_fb_xregion_id_l50_region",
+  fb_xregion_id_l100 = "run_fb_xregion_id_l100_region",
+  fb_xregion_id_l200 = "run_fb_xregion_id_l200_region",
 
   # --- Iteration 004 additions: summary-statistic methods ---------------------
   # Chosen to target the constraint the Iteration 003 deep dive identified as

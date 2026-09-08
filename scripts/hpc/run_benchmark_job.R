@@ -221,6 +221,9 @@ METHOD_ARGS$fb_xregion_id     <- .FBv                                   # 0.1223
 METHOD_ARGS$fb_xregion_id_l03 <- modifyList(.FBv, list(lambda_l1 = 0.03))
 METHOD_ARGS$fb_xregion_id_l06 <- modifyList(.FBv, list(lambda_l1 = 0.06))
 METHOD_ARGS$fb_xregion_id_l25 <- modifyList(.FBv, list(lambda_l1 = 0.25))
+METHOD_ARGS$fb_xregion_id_l50  <- modifyList(.FBv, list(lambda_l1 = 0.5))
+METHOD_ARGS$fb_xregion_id_l100 <- modifyList(.FBv, list(lambda_l1 = 1.0))
+METHOD_ARGS$fb_xregion_id_l200 <- modifyList(.FBv, list(lambda_l1 = 2.0))
 
 # --- Iteration 004: additional summary-statistic methods ---------------------
 # CARMA is registered in .FM_REGISTRY already but has never been installed, so
