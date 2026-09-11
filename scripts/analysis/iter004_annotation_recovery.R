@@ -71,7 +71,12 @@ for (f in files) {
     # aux files are unaffected: the joint path returned no importance at
     # all then, so extract_aux.R created no row for it, and every
     # JOINT-labelled record they contain has joint_fallback = TRUE.
-    if (r$method %in% JOINT_METHODS && isTRUE(r$joint_fallback)) {
+    # Keyed on the flag, not the method name: the lambda sweep added
+    # fb_xregion_id and fb_xregion_id_l* arms, which a name list would miss,
+    # scoring their per-region fallbacks as cross-region importances. Only
+    # the joint wrapper ever sets joint_fallback, so for every other method
+    # isTRUE(NULL) is FALSE and nothing changes.
+    if (isTRUE(r$joint_fallback)) {
       n_joint_labelled <- n_joint_labelled + 1L; next
     }
     fi <- r$importance
@@ -105,8 +110,7 @@ tab <- do.call(rbind, rows)
 
 message("scorable fits: ", k)
 if (n_joint_labelled)
-  message("SKIPPED ", n_joint_labelled, " records labelled ",
-          paste(JOINT_METHODS, collapse = "/"), " with joint_fallback = TRUE",
+  message("SKIPPED ", n_joint_labelled, " records with joint_fallback = TRUE",
           " - these are per-region fallbacks, not cross-region fits (see the header)")
 if (n_malformed) message("skipped ", n_malformed, " malformed importance vectors")
 

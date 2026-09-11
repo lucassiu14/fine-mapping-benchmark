@@ -16,7 +16,16 @@
 # floor exactly, at a small fraction of the size. Below the floor only the
 # COUNTS are kept, which is all that any threshold above it needs.
 #
-#   Rscript scripts/hpc/extract_pip_tail.R <array_idx> <bench_root> <out_dir> [floor]
+#   Rscript scripts/hpc/extract_pip_tail.R <array_idx> <bench_root> <out_dir> [floor] [source]
+#
+# source selects which per-scenario results file is read:
+#   results  results.rds only                         (default; Iteration 004)
+#   supp     results_supp.rds only - the methods of a supplemental re-run
+#            (FMB_METHODS=...), which writes beside the originals
+#   overlay  results.rds with results_supp.rds laid over it per method, as
+#            collect_results.R and extract_aux.R do
+# Reading results.rds alone after a supplemental run silently extracts none
+# of the re-run methods, which is why the source has to be stated.
 #
 # Default floor 0.01. Thresholds below it cannot be recovered; nothing in
 # fine-mapping practice uses them.
@@ -29,6 +38,9 @@ idx        <- suppressWarnings(as.integer(args[1]))
 bench_root <- args[2]
 out_dir    <- args[3]
 floor_pip  <- if (length(args) >= 4) as.numeric(args[4]) else 0.01
+src        <- if (length(args) >= 5 && nzchar(args[5])) args[5] else "results"
+if (!src %in% c("results", "supp", "overlay"))
+  stop("source must be results, supp or overlay, not ", src, call. = FALSE)
 stopifnot(!is.na(idx), dir.exists(bench_root), is.finite(floor_pip))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -39,7 +51,7 @@ if (idx > length(job_dirs)) {
   quit(save = "no", status = 0L)
 }
 job_dir <- job_dirs[idx]; label <- basename(job_dir)
-message("row ", idx, ": ", label, "   floor = ", floor_pip)
+message("row ", idx, ": ", label, "   floor = ", floor_pip, "   source = ", src)
 
 # Truth comes from sim.rds; without it the tail cannot be scored.
 sim_file <- file.path(job_dir, "sim.rds")
@@ -52,10 +64,19 @@ scen_dirs <- scen_dirs[grepl("/scenario_[0-9]+", scen_dirs)]
 rows <- vector("list", length(scen_dirs) * 400L)
 k <- 0L; n_kept <- 0; n_tot <- 0
 
+read_results <- function(sd) {
+  rd <- function(f) if (file.exists(f)) tryCatch(readRDS(f), error = function(e) NULL) else NULL
+  base <- if (src != "supp")    rd(file.path(sd, "results.rds"))      else NULL
+  supp <- if (src != "results") rd(file.path(sd, "results_supp.rds")) else NULL
+  if (src == "results") return(base)
+  if (src == "supp")    return(supp)
+  if (is.null(base))    return(supp)
+  if (!is.null(supp)) for (m in names(supp)) base[[m]] <- supp[[m]]
+  base
+}
+
 for (sd in scen_dirs) {
-  f <- file.path(sd, "results.rds")
-  if (!file.exists(f)) next
-  r <- tryCatch(readRDS(f), error = function(e) NULL)
+  r <- read_results(sd)
   if (is.null(r)) next
   sc_idx <- suppressWarnings(as.integer(sub("^scenario_", "", basename(sd))))
   sc <- if (!is.null(sim) && sc_idx <= length(sim$scenarios)) sim$scenarios[[sc_idx]] else NULL
@@ -92,6 +113,6 @@ for (sd in scen_dirs) {
 }
 rows <- rows[seq_len(k)]
 out <- file.path(out_dir, sprintf("piptail_%s.rds", label))
-saveRDS(list(job_dir = label, floor = floor_pip, fits = k, tail = rows), out)
+saveRDS(list(job_dir = label, floor = floor_pip, source = src, fits = k, tail = rows), out)
 message(sprintf("  wrote %s  (%d fits, %.2f%% of PIPs retained, %.1f MB)",
                 basename(out), k, 100 * n_kept / max(n_tot, 1), file.size(out) / 1024^2))

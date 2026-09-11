@@ -26,6 +26,14 @@ BENCH_ROOT="${BENCH_ROOT:-${EPHEMERAL}/fmbench_iter004/results/benchmark}"
 OUT_DIR="${OUT_DIR:-${PROJECT_ROOT}/results/iter004/piptail}"
 LOG_DIR="${LOG_DIR:-${OUT_DIR}/logs}"
 FLOOR="${FLOOR:-0.01}"
+# results | supp | overlay - see extract_pip_tail.R. Expanded at submit time into
+# the job script, so no #PBS -V is needed for it to reach the node.
+SOURCE="${SOURCE:-results}"
+if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004/piptail" ]]; then
+  echo "ERROR: SOURCE=$SOURCE would write into $OUT_DIR, Iteration 004's tails." >&2
+  echo "       Set a separate OUT_DIR, e.g. OUT_DIR=\$PWD/results/fb_lambda_sweep/piptail" >&2
+  exit 1
+fi
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 QUEUE="${QUEUE:-v1_small72a}"
 SELECT="${SELECT:-1:ncpus=1:mem=32gb}"
@@ -43,6 +51,7 @@ mkdir -p "$OUT_DIR" "$LOG_DIR"
 echo "Benchmark root : $BENCH_ROOT"
 echo "Rows           : $N_ROWS   (sim.rds present: $N_SIM)"
 echo "PIP floor      : $FLOOR"
+echo "Source         : $SOURCE"
 echo "Output         : $OUT_DIR"
 if (( N_SIM < N_ROWS )); then
   echo
@@ -65,7 +74,7 @@ set -euo pipefail
 cd "${PROJECT_ROOT}"
 module load ${R_MODULE}
 echo "[tail \${PBS_ARRAY_INDEX} on \$(hostname)] start \$(date)"
-Rscript scripts/hpc/extract_pip_tail.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${OUT_DIR}" "${FLOOR}"
+Rscript scripts/hpc/extract_pip_tail.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${OUT_DIR}" "${FLOOR}" "${SOURCE}"
 echo "[tail \${PBS_ARRAY_INDEX}] done \$(date)"
 EOF
 echo

@@ -23,7 +23,13 @@
 # per row and holds the truth for all 250 of that row's scenarios.
 #
 # Usage:
-#   Rscript scripts/analysis/iter004_collect.R <array_idx> <bench_root> <out_dir>
+#   Rscript scripts/analysis/iter004_collect.R <array_idx> <bench_root> <out_dir> [source]
+#
+# source: results (default; results.rds only, as Iteration 004 ran), supp
+# (results_supp.rds only - the methods of an FMB_METHODS supplemental re-run,
+# written beside the originals) or overlay (results.rds with results_supp.rds
+# laid over it per method). Reading results.rds alone after a supplemental run
+# silently collects none of the re-run methods.
 #
 # STATUS: written, never executed.
 # =============================================================================
@@ -37,7 +43,23 @@ args       <- commandArgs(trailingOnly = TRUE)
 array_idx  <- as.integer(args[1])
 bench_root <- args[2]
 out_dir    <- args[3]
+src        <- if (length(args) >= 4 && nzchar(args[4])) args[4] else "results"
 stopifnot(!is.na(array_idx), dir.exists(bench_root))
+if (!src %in% c("results", "supp", "overlay"))
+  stop("source must be results, supp or overlay, not ", src, call. = FALSE)
+message("results source: ", src)
+
+# One scenario's method results under the chosen source; NULL if none.
+read_results <- function(sd, src) {
+  rd <- function(f) if (file.exists(f)) tryCatch(readRDS(f), error = function(e) NULL) else NULL
+  base <- if (src != "supp")    rd(file.path(sd, "results.rds"))      else NULL
+  supp <- if (src != "results") rd(file.path(sd, "results_supp.rds")) else NULL
+  if (src == "results") return(base)
+  if (src == "supp")    return(supp)
+  if (is.null(base))    return(supp)
+  if (!is.null(supp)) for (m in names(supp)) base[[m]] <- supp[[m]]
+  base
+}
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Decision thresholds (§4.6 P1) and calibration bands (§4.3 Q2). Counts are stored,
@@ -138,9 +160,7 @@ for (sd in scen_dirs) {
   }
   sc <- sim$scenarios[[sc_idx]]
 
-  rf <- file.path(sd, "results.rds")
-  if (!file.exists(rf)) { n_skipped <- n_skipped + 1L; next }
-  res <- tryCatch(readRDS(rf), error = function(e) NULL)
+  res <- read_results(sd, src)
   if (is.null(res)) { n_skipped <- n_skipped + 1L; next }
 
   for (m in names(res)) {

@@ -15,6 +15,12 @@
 #   BENCH_ROOT=$EPHEMERAL/fmbench_iter004/results/benchmark \
 #   OUT_DIR=$HOME/fine-mapping-benchmark/results/iter004/aux \
 #   bash scripts/hpc/submit_extract_aux.sh
+#
+# extract_aux.R overlays results_supp.rds onto results.rds per method, so after
+# a supplemental re-run the extract is no longer Iteration 004's: point OUT_DIR
+# somewhere new. The script refuses an OUT_DIR that already holds aux_*.rds
+# (OVERWRITE=1 to allow). SKIP_COUNT=1 skips the results.rds count, which reads
+# one directory per scenario.
 # =============================================================================
 set -euo pipefail
 
@@ -36,13 +42,26 @@ N_ROWS=$(find "$BENCH_ROOT" -maxdepth 1 -type d -name 'job_*' | wc -l | tr -d ' 
 
 # How many scenario results survive. results.rds is rewritten whenever a row is
 # recomputed, so it is younger than sim.rds and expires later - but not by much.
-N_RES=$(find "$BENCH_ROOT" -maxdepth 3 -name results.rds | wc -l | tr -d ' ')
+# The count reads one directory per scenario (~11,000 on RDS) - not for a login
+# node. SKIP_COUNT=1 skips it; extract_aux.R logs scenarios read per row.
+if [[ "${SKIP_COUNT:-0}" == "1" ]]; then
+  N_RES="count skipped"
+else
+  N_RES=$(find "$BENCH_ROOT" -maxdepth 3 -name results.rds | wc -l | tr -d ' ')
+fi
+
+# An existing extract is not overwritten by accident: after a supplemental
+# re-run the overlay would silently replace the re-run methods' records.
+if compgen -G "${OUT_DIR}/aux_*.rds" > /dev/null && [[ "${OVERWRITE:-0}" != "1" ]]; then
+  echo "ERROR: $OUT_DIR already holds aux_*.rds. Choose a new OUT_DIR, or set OVERWRITE=1." >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 echo "Benchmark root : $BENCH_ROOT"
 echo "Rows           : $N_ROWS   (results.rds present: $N_RES)"
 echo "Output         : $OUT_DIR"
-if (( N_RES == 0 )); then
+if [[ "$N_RES" == "0" ]]; then
   echo "ERROR: no results.rds found under $BENCH_ROOT - nothing to extract." >&2
   exit 1
 fi

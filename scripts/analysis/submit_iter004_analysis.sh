@@ -23,6 +23,12 @@
 #   bash scripts/analysis/submit_iter004_analysis.sh
 #   BENCH_ROOT=/path/to/results/benchmark bash scripts/analysis/submit_iter004_analysis.sh
 #
+# A supplemental re-run (FMB_METHODS=...) writes results_supp.rds beside the
+# originals. Collect it with SOURCE=supp or SOURCE=overlay (see
+# iter004_collect.R) and a separate OUT_DIR - the script refuses to write a
+# non-default SOURCE into results/iter004. SKIP_COUNT=1 skips the completeness
+# count, which reads one directory per scenario.
+#
 # Run it only once the fitting array has finished. Check first:
 #   Rscript scripts/hpc/qc_run.R $BENCH_ROOT --sample 300
 # =============================================================================
@@ -39,6 +45,15 @@ OUT_DIR="${OUT_DIR:-${PROJECT_ROOT}/results/iter004}"
 L1_DIR="${L1_DIR:-${OUT_DIR}/L1}"
 LOG_DIR="${LOG_DIR:-${OUT_DIR}/logs}"
 GRID_CSV="${GRID_CSV:-${PROJECT_ROOT}/scripts/hpc/params_grid.csv}"
+# results | supp | overlay - expanded at submit time into the Stage A script.
+SOURCE="${SOURCE:-results}"
+# Iteration 004 is the standard. A collect of anything else must not land on
+# its tables, and results/iter004 is the default OUT_DIR.
+if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004" ]]; then
+  echo "ERROR: SOURCE=$SOURCE would write into $OUT_DIR, Iteration 004's tables." >&2
+  echo "       Set a separate OUT_DIR, e.g. OUT_DIR=\$PWD/results/fb_lambda_sweep" >&2
+  exit 1
+fi
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 QUEUE_A="${QUEUE_A:-v1_small24}"
@@ -82,11 +97,23 @@ fi
 # Refuse to analyse an unfinished run by accident. A partial grid is not a
 # smaller version of the answer - the design is balanced by construction and the
 # §7 closed-form correction assumes it.
-N_SCEN=$(find "$BENCH_ROOT" -name 'results.rds' | wc -l | tr -d ' ')
 EXPECTED=$(( N_ROWS * 250 ))
 echo "Benchmark root : $BENCH_ROOT"
 echo "Rows           : $N_ROWS"
-echo "Scenarios      : $N_SCEN of $EXPECTED expected"
+echo "Results source : $SOURCE"
+if [[ "${SKIP_COUNT:-0}" == "1" ]]; then
+  # The count reads one directory per scenario (~11,000 on RDS) - not for a
+  # login node. Skip it once completion is established some other way, e.g.
+  # every fitting task exiting 0; Stage A logs report skipped scenarios per row.
+  echo "Scenarios      : count skipped (SKIP_COUNT=1)"
+  N_SCEN=$EXPECTED
+else
+  # Bounded to job_*/scenario_*/ (the old count was an unbounded recursive find)
+  # and counting the file Stage A will actually read.
+  CFILE="results.rds"; [[ "$SOURCE" == "supp" ]] && CFILE="results_supp.rds"
+  N_SCEN=$(find "$BENCH_ROOT" -mindepth 3 -maxdepth 3 -path "*/job_*/scenario_*/$CFILE" | wc -l | tr -d ' ')
+  echo "Scenarios      : $N_SCEN of $EXPECTED expected ($CFILE)"
+fi
 if (( N_SCEN < EXPECTED )); then
   echo
   echo "WARNING: the run is INCOMPLETE ($(( 100 * N_SCEN / EXPECTED ))%)."
@@ -120,7 +147,7 @@ cd "${PROJECT_ROOT}"
 module load ${R_MODULE}
 echo "[collect \${PBS_ARRAY_INDEX} on \$(hostname)] start \$(date)"
 Rscript scripts/analysis/iter004_collect.R \\
-    "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${L1_DIR}"
+    "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${L1_DIR}" "${SOURCE}"
 echo "[collect \${PBS_ARRAY_INDEX}] done \$(date)"
 EOF
 A_ID="$(qsub "$A_SCRIPT")"
