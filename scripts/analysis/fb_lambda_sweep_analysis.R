@@ -22,6 +22,10 @@
 #                    Iteration 004's fb_xregion, beatrice and polyfun_ldsc.
 #   4. Fit by fit    the rerun against Iteration 004's fb_xregion, and _l200
 #                    against beatrice.
+# Plus the two checks the conclusions lean on, saved with the tables: the mean
+# importance of each track (the raw pattern behind the ranking metrics), and that
+# fb_xregion equals beatrice fit for fit on Iteration 004's no-annotation rows,
+# which is why the sweep skipped them.
 #
 # Conventions, with their sources:
 #   * The no-annotation rows are left out. There every arm falls back to
@@ -143,8 +147,11 @@ L1s <- L1s[L1s$job_dir %in% JOBS, c(KEY_FIT, "model", "annotation_type", "method
 message("reading Iteration 004 ...")
 L3r <- readRDS(file.path(I004, "combined_scenario_metrics.rds"))
 L3r <- L3r[L3r$method %in% REF & L3r$job_dir %in% JOBS, ]
-L1r <- readRDS(file.path(I004, "combined_fit_metrics.rds"))
-L1r <- L1r[L1r$method %in% REF & L1r$job_dir %in% JOBS, c(KEY_FIT, "method", "ap")]
+L1r_all  <- readRDS(file.path(I004, "combined_fit_metrics.rds"))
+L1r_none <- L1r_all[L1r_all$annotation_type == "none" & L1r_all$method %in% c("fb_xregion", "beatrice"),
+                    c(KEY_FIT, "model", "method", "ap")]
+L1r <- L1r_all[L1r_all$method %in% REF & L1r_all$job_dir %in% JOBS, c(KEY_FIT, "method", "ap")]
+rm(L1r_all)
 
 aux_files <- function(dir) {
   fs <- sort(list.files(dir, "^aux_.*[.]rds$", full.names = TRUE))
@@ -335,6 +342,20 @@ show_by_stratum(do.call(rbind, lapply(split(by_enrich, list(by_enrich$model, by_
     row
   })))
 
+cat("\n-- mean |contrast| per track (1-5 enriched, 6-10 inert), and how often the largest is enriched\n")
+TR <- data.frame(meta[keep, c("model", "annotation_type", "method")], V[keep, , drop = FALSE])
+names(TR)[3L + seq_len(N_ANNOT)] <- paste0("t", seq_len(N_ANNOT))
+per_track <- per_stratum(TR, function(s) per_method(s, function(m) {
+  M <- as.matrix(m[paste0("t", seq_len(N_ANNOT))])
+  # ties at the maximum (all zero under _l200) share the credit, as in rank_metrics
+  data.frame(method = m$method[1], n = nrow(M), as.list(colMeans(M)),
+             largest_enriched = mean(apply(M, 1, function(v) mean(TRUTH[v == max(v)]))))
+}))
+pt <- per_track
+for (k in paste0("t", seq_len(N_ANNOT))) pt[[k]] <- sprintf("%.4f", pt[[k]])
+pt$largest_enriched <- sprintf("%.0f%%", 100 * pt$largest_enriched)
+show_by_stratum(pt)
+
 # ---- 3. accuracy ---------------------------------------------------------------
 section("3. Average precision: mean ± 2 SE across cells, and paired differences (SE) cell by cell")
 cols  <- c(KEY_CELL, "model", "annotation_type", "method", "ap", "n_fits", "n_failed")
@@ -381,10 +402,24 @@ print(within(fitwise, {
   mean_abs_diff <- sprintf("%.4f", mean_abs_diff); correlation <- sprintf("%.4f", correlation)
 }), row.names = FALSE, right = FALSE)
 
+# ---- 5. the skipped rows -------------------------------------------------------
+section("5. Why the no-annotation rows were skipped: there, Iteration 004's fb_xregion IS beatrice")
+nr <- merge(L1r_none[L1r_none$method == "fb_xregion", c(KEY_FIT, "model", "ap")],
+            L1r_none[L1r_none$method == "beatrice", c(KEY_FIT, "ap")],
+            by = KEY_FIT, suffixes = c("", "_beatrice"))
+nr <- nr[is.finite(nr$ap) & is.finite(nr$ap_beatrice), ]
+none_check <- do.call(rbind, lapply(split(nr, nr$model), function(s) data.frame(
+  model = s$model[1], fits = nrow(s), identical_ap = mean(s$ap == s$ap_beatrice),
+  max_abs_diff = max(abs(s$ap - s$ap_beatrice)))))
+print(within(none_check, identical_ap <- sprintf("%.1f%%", 100 * identical_ap)), row.names = FALSE, right = FALSE)
+cat("With no annotations every arm falls back to per-region Functional BEATRICE, which builds no\n",
+    "LassoNet and never reads lambda_l1, so all eight arms would repeat beatrice there.\n", sep = "")
+
 sink()
 saveRDS(list(arms = ARMS, collected = collected, runtime_per_scenario = rt, runtime = runtime,
              fallback = fallback, importance_per_scenario = IM, importance_fb_iter004 = FBR,
              importance = importance, importance_by_enrichment = by_enrich,
-             shared_head_disagreements = n_disagree, ap = ap, ap_paired = paired, fitwise = fitwise),
+             shared_head_disagreements = n_disagree, importance_per_track = per_track,
+             ap = ap, ap_paired = paired, fitwise = fitwise, none_rows_check = none_check),
         file.path(OUT, "sweep_analysis.rds"))
 message("wrote ", report, " and ", file.path(OUT, "sweep_analysis.rds"))
