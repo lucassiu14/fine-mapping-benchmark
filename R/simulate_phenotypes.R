@@ -616,6 +616,8 @@ simulate_annotations_for_region <- function(p,
   k <- min(n_informative, ncol(A))
   if (k < 1L) return(rep(0, p))
   I <- A[, seq_len(k), drop = FALSE]
+  if (relationship %in% .ITER006_RELATIONSHIPS)                  # ITER-006 (temp)
+    return(lambda * .iter006_score(I, relationship))             # ITER-006 (temp)
 
   switch(relationship,
     # Every competitor's model can represent this exactly. Control arm, and the
@@ -709,6 +711,72 @@ simulate_annotations_for_region <- function(p,
 }
 
 # >>> END ITERATION 005 TEMPORARY BLOCK <<<
+# ===========================================================================
+
+
+# >>> ITERATION 006 ONLY - TEMPORARY. REMOVE WHEN THAT ITERATION IS DONE. <<<
+#
+# Iteration 006 asks Iteration 005's question - how do annotation-aware methods
+# behave when the annotation -> causality relationship is not the log-linear form
+# they assume - with relationships the user specified, on continuous annotations.
+# Each scores a variant from the first `n_informative` annotation columns, summed
+# over those columns; .causal_log_weights() multiplies the score by lambda and
+# select_causal_variants() treats the result exactly as it treats Iteration 005's.
+#
+#   wavg2            weighted average of the variant and 2 neighbours each side,
+#                    weights 1/3, 2/3, 1, 2/3, 1/3 (linear fall-off)
+#   valthresh        a * 1{a > 1}: a value counts only above 1 (1 SD here)
+#   valthresh_wavg2  valthresh applied to each variant first, then wavg2
+#   square           a^2
+#   cubic            a^3
+#   cosine10         weighted average over +-10 variants, weight
+#                    exp(-|d|/5) * (1 + cos(2 pi d / 10)) / 2 - a variant 10 steps
+#                    away counts again, as if brought close by the helix, but less
+#                    than the variant itself
+#
+# The control arm is Iteration 005's `additive` and the null arm its `null`.
+#
+# Distance is in variant steps. A region keeps its variants in genomic order
+# (simulate_genotypes.R sorts the sampled indices) but not their base-pair
+# positions. Near a region's ends, the weights of the neighbours that exist are
+# renormalised.
+#
+# No method sees a variant's neighbours' annotations - every prior maps a variant's
+# own annotations to its own prior - so under wavg2, valthresh_wavg2 and cosine10
+# only part of the signal is learnable by any method.
+#
+# Tracked in docs/autoresearch/iteration-006.md; undo with iteration-006-REVERT.md.
+.ITER006_RELATIONSHIPS <- c("wavg2", "valthresh", "valthresh_wavg2", "square", "cubic", "cosine10")
+.ITER006_W_WAVG2 <- (3 - abs(-2:2)) / 3
+.ITER006_W_COS10 <- exp(-abs(-10:10) / 5) * (1 + cos(2 * pi * (-10:10) / 10)) / 2
+
+# Weighted average of x over a symmetric window of weights w centred on each
+# position, renormalised over the positions that exist.
+.iter006_neighbour_avg <- function(x, w) {
+  h <- (length(w) - 1L) %/% 2L
+  p <- length(x)
+  pad <- rep(0, h)
+  num <- stats::filter(c(pad, x, pad), w, sides = 2)
+  den <- stats::filter(c(pad, rep(1, p), pad), w, sides = 2)
+  keep <- h + seq_len(p)
+  as.numeric(num[keep] / den[keep])
+}
+
+# Unscaled score of each variant (row of I) under an Iteration 006 relationship.
+.iter006_score <- function(I, relationship) {
+  thr <- function(a) a * (a > 1)
+  per_column <- switch(relationship,
+    wavg2           = function(a) .iter006_neighbour_avg(a, .ITER006_W_WAVG2),
+    valthresh       = thr,
+    valthresh_wavg2 = function(a) .iter006_neighbour_avg(thr(a), .ITER006_W_WAVG2),
+    square          = function(a) a^2,
+    cubic           = function(a) a^3,
+    cosine10        = function(a) .iter006_neighbour_avg(a, .ITER006_W_COS10),
+    stop("unknown Iteration 006 relationship: ", relationship, call. = FALSE))
+  rowSums(apply(I, 2, per_column))
+}
+
+# >>> END ITERATION 006 TEMPORARY BLOCK <<<
 # ===========================================================================
 
 
