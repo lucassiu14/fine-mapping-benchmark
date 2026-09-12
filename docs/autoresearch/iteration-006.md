@@ -53,9 +53,10 @@ renormalised.
 
 **100 scenarios/row × 8 rows = 800 scenarios.**
 
-**Methods (11)** — Iteration 005's set: `susie`, `beatrice` (annotation-blind
-controls); `polyfun_oracle`, `polyfun_est`, `polyfun_ldsc`, `paintor`,
-`sbayesrc`, `funmap`; `functional_beatrice`, `fb_pooled`, `fb_xregion`.
+**Methods (9)** — Iteration 005's set without `polyfun_est` and `fb_pooled`, which
+the LSR leaves out of every figure: `susie`, `beatrice` (annotation-blind
+controls); `polyfun_oracle`, `polyfun_ldsc`, `paintor`, `sbayesrc`, `funmap`;
+`functional_beatrice`, `fb_xregion`. Selected with `FMB_ITER006_METHODS=1`.
 `polyfun_oracle` reads the exact selection probabilities the simulator stores, so
 it stays a true ceiling under every relationship.
 
@@ -129,7 +130,7 @@ bash scripts/hpc/check_toolchain.sh                           # must print RESUL
 Rscript scripts/analysis/test_iter006_relationships.R          # must print 34 passed, 0 failed
 
 FMB_GRID_GENERATOR=$PWD/scripts/hpc/generate_params_grid_iter006.R \
-FMB_ITER005_METHODS=1 FMB_SCENARIOS_PER_TASK=5 \
+FMB_ITER006_METHODS=1 FMB_SCENARIOS_PER_TASK=5 \
 PBS_QUEUE=v1_small72a PBS_WALLTIME=72:00:00 \
 FMB_SCRATCH=$EPHEMERAL/fmbench_iter006 \
   bash scripts/hpc/submit_benchmark_pbs.sh
@@ -139,9 +140,13 @@ Check the echoed design before the array queues. It must show `S={1,3}`,
 `phi={0.1,0.4}`, annotations `continuous`, the eight relationships, and
 `20 tasks/row x 8 rows = 160 array tasks`.
 
-At Iteration 005's planning estimate of ~1.5 h per scenario for these methods,
-a task of 5 scenarios takes about 7.5 h, well inside 72 h. The whole run is
-about 1,200 CPU-hours.
+Iteration 005 planned ~1.5 h per scenario for its 11 methods. Dropping `fb_pooled`
+(about 11% of those methods' runtime in Iteration 004) and `polyfun_est` (seconds)
+brings that down, so a task of 5 scenarios takes under 7.5 h - well inside 72 h -
+and the run under 1,200 CPU-hours.
+
+The job logs print `[iter006] reduced method set: 9 methods` and, because the
+relationships run through Iteration 005's code, `[iter005] relationship=...`.
 
 ## 7. Afterwards — before ephemeral deletes anything
 

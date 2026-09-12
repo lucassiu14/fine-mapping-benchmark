@@ -78,6 +78,12 @@ ITER005_METHODS <- c(
   "functional_beatrice", "fb_pooled", "fb_xregion"        # the focus
 )
 # >>> END ITERATION 005 TEMPORARY BLOCK <<<
+# >>> ITERATION 006 ONLY - TEMPORARY (see iteration-006-REVERT.md) <<<
+# Iteration 006 fits Iteration 005's set without polyfun_est and fb_pooled - the
+# user's decision; both are left out of every LSR figure. Set
+# FMB_ITER006_METHODS=1 to select it. It takes precedence over FMB_ITER005_METHODS.
+ITER006_METHODS <- setdiff(ITER005_METHODS, c("polyfun_est", "fb_pooled"))
+# >>> END ITERATION 006 TEMPORARY BLOCK <<<
 
 METHODS <- c(
   # summary-statistic baselines
@@ -131,6 +137,12 @@ if (nzchar(Sys.getenv("FMB_ITER005_METHODS", ""))) {
   METHODS <- ITER005_METHODS
   cat(sprintf("[iter005] reduced method set: %d methods\n", length(METHODS)))
 }
+# ITERATION 006 (TEMPORARY): Iteration 005's set less polyfun_est and fb_pooled.
+if (nzchar(Sys.getenv("FMB_ITER006_METHODS", ""))) {                 # ITER-006 (temp)
+  METHODS <- ITER006_METHODS
+  cat(sprintf("[iter006] reduced method set: %d methods: %s\n",
+              length(METHODS), paste(METHODS, collapse = ", ")))
+}                                                                    # ITER-006 (temp)
 
 METHOD_ARGS <- list(
   susie               = list(L = 10, coverage = 0.95),

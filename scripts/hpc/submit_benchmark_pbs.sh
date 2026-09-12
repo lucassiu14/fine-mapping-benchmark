@@ -246,6 +246,10 @@ export FMBENCH_DEVICE="${FMBENCH_DEVICE:-}"
 # and invisible until the logs land hours later.
 export FMB_ITER005_METHODS="${FMB_ITER005_METHODS:-}"
 # >>> END ITERATION 005 TEMPORARY BLOCK <<<
+# >>> ITERATION 006 ONLY - TEMPORARY (see iteration-006-REVERT.md) <<<
+# Iteration 006's method-set selector, forwarded for the same reason.
+export FMB_ITER006_METHODS="${FMB_ITER006_METHODS:-}"
+# >>> END ITERATION 006 TEMPORARY BLOCK <<<
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}
