@@ -24,6 +24,11 @@
 #      not an annotation gain. polyfun_ldsc and funmap both show one on continuous
 #      annotations, in Iteration 005 as well.
 #
+# AP here is the pipeline's: .compute_ap_exact scores tied PIPs as one block, as
+# sklearn does. susie's causal variant is tied with a non-causal one in 22-33% of
+# fits, so every comparison against susie - including the headroom in section 2 -
+# is inflated. iter006_ap_ties.R recomputes AP with ties broken at random.
+#
 # Conventions, with sources:
 #   * The unit is one scenario draw - S x phi x iteration, ten regions - i.e. L2
 #     (combined_replicate_metrics.rds), the per-iteration unit the LSR adopted for
@@ -140,6 +145,9 @@ for (r in REL) {
 }
 show(tab2)
 cat("A share is shown only where the headroom exceeds 2 SE; under null there is no gain to recover.\n")
+cat("CAUTION: susie, the floor here, ties the causal variant in 22-33% of fits and this AP scores a tie as a block,\n",
+    "so the headroom and these shares are inflated. With ties broken at random the headroom roughly halves:\n",
+    "see iter006_ap_ties.txt.\n", sep = "")
 
 # ---- 3. paired contrasts --------------------------------------------------------
 section("3. Paired differences in average precision, draw by draw: mean (SE)")
@@ -220,6 +228,8 @@ cat("Every fit starts from the same weights (torch.manual_seed(1) in joint_train
 section("5. Advantage over susie in each relationship, minus the same advantage under null: mean (SE)")
 cat("Under null the annotations carry no information, so an advantage over susie there is not an annotation gain.\n",
     "The rows are independent simulations, so SE = sqrt(SE_relationship^2 + SE_null^2).\n", sep = "")
+cat("With tied PIPs broken at random (iter006_ap_ties.txt), polyfun_ldsc's null-arm gap over susie vanishes (+0.004)\n",
+    "and funmap's reverses (-0.019): those gaps are susie's ties, not annotation use.\n", sep = "")
 did_rows <- c(setdiff(METHODS, "susie"), "fb_xregion - polyfun_ldsc")
 pair_of  <- function(lab) if (grepl(" - ", lab)) strsplit(lab, " - ")[[1]] else c(lab, "susie")
 null_gap <- do.call(rbind, lapply(did_rows, function(lab) { ab <- pair_of(lab); b <- paired(ab[1], ab[2], "null")
