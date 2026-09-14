@@ -48,8 +48,8 @@ if (( ${#ou[@]} )); then
   grep -h 'n_fits=.*failed=' "${ou[@]}" | awk '
     {sub("n_fits=", "", $2); sub("failed=", "", $3); n[$1] += $2; f[$1] += $3}
     END {for (m in n) printf "      %-22s fits=%d failed=%d\n", m, n[m], f[m]}' | sort
-  echo "   relationships simulated (each row logs it once per task that built the row):"
-  grep -h '\[iter005\] relationship=' "${ou[@]}" | awk '{sub("relationship=", "", $2); print $2}' | sort | uniq -c | sed 's/^ */      /'
+  echo "   relationships simulated (one line per task that built its row's simulation):"
+  grep -ho 'relationship=[^ ]*' "${ou[@]}" | sed 's/^relationship=//' | sort | uniq -c | sed 's/^ */      /'
 fi
 sims=( "$BENCH"/job_*/sim.rds )
 echo "   row simulations (sim.rds): ${#sims[@]} (expect $EXP_ROWS)"
@@ -62,7 +62,7 @@ else
   files=( "$OUT"/aux/aux_*.rds ); ers=( "$OUT"/aux/logs/*.ER )
   echo "   aux      files: ${#files[@]} (expect $EXP_ROWS)"
   if (( ${#ers[@]} )); then
-    t=$(grep -h 'wrote aux_' "${ers[@]}" | awk '{gsub(/\(/, "", $3); t += $3} END {print t + 0}')
+    t=$(grep -h 'wrote aux_' "${ers[@]}" | awk '{gsub(/\(/, "", $3); v[$2] = $3} END {for (k in v) t += v[k]; print t + 0}')
     echo "            scenarios read: $t (expect $EXP_SCEN)"
     echo "            killed or failed tasks: $(n_killed "${ers[@]}")"
   fi
@@ -70,10 +70,10 @@ else
   files=( "$OUT"/piptail/piptail_*.rds ); ers=( "$OUT"/piptail/logs/*.ER )
   echo "   piptail  files: ${#files[@]} (expect $EXP_ROWS)"
   if (( ${#ers[@]} )); then
-    grep -h 'floor = ' "${ers[@]}" | awk -v e="$EXP_ROWS" '{c["floor=" $6 " source=" $9]++}
-      END {for (k in c) printf "            %d rows at %s  (expect %d at floor=0 source=results)\n", c[k], k, e}'
-    grep -h 'wrote piptail' "${ers[@]}" | awk -v e="$EXP_FITS" '{gsub(/\(/, "", $3); f += $3; mb += $(NF-1)}
-      END {printf "            fits: %d (expect %d), size: %.1f GB\n", f, e, mb / 1024}'
+    grep -h 'floor = ' "${ers[@]}" | awk -v e="$EXP_ROWS" '{row[$3] = "floor=" $6 " source=" $9}
+      END {for (r in row) c[row[r]]++; for (k in c) printf "            %d rows at %s  (expect %d at floor=0 source=results)\n", c[k], k, e}'
+    grep -h 'wrote piptail' "${ers[@]}" | awk -v e="$EXP_FITS" '{gsub(/\(/, "", $3); f[$2] = $3; mb[$2] = $(NF-1)}
+      END {for (k in f) {F += f[k]; MB += mb[k]}; printf "            fits: %d (expect %d), size: %.1f GB\n", F, e, MB / 1024}'
     echo "            killed or failed tasks: $(n_killed "${ers[@]}")"
   fi
 
@@ -81,9 +81,9 @@ else
   for f in "$OUT"/logs/*.ER; do [[ "$f" == *\[* ]] || ersB+=( "$f" ); done
   echo "   collect  L1 partials: ${#l1[@]} (expect $EXP_ROWS)"
   if (( ${#ersA[@]} )); then
-    grep -h 'wrote L1_' "${ersA[@]}" | awk -v e="$EXP_ROWS" '
-      {n++; s += $6; if ($6 > 0) printf "            INCOMPLETE %s: %d scenarios missing\n", $2, $6}
-      END {printf "            rows collected: %d, scenarios missing: %d (expect %d, 0)\n", n, s, e}'
+    grep -h 'wrote L1_' "${ersA[@]}" | awk -v e="$EXP_ROWS" '{m[$2] = $6}
+      END {for (k in m) {n++; s += m[k]; if (m[k] > 0) printf "            INCOMPLETE %s: %d scenarios missing\n", k, m[k]}
+           printf "            rows collected: %d, scenarios missing: %d (expect %d, 0)\n", n, s, e}'
     echo "            killed or failed Stage A tasks: $(n_killed "${ersA[@]}")"
   fi
   if (( ${#ersB[@]} )); then
