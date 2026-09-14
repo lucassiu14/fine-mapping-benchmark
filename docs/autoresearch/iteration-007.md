@@ -4,8 +4,8 @@
 **Scope:** exploratory and TEMPORARY, like Iterations 005 and 006. Nothing in `R/`
 changes and Iteration 004's grid is untouched; see
 [iteration-007-REVERT.md](iteration-007-REVERT.md). Iteration 004 remains the
-standard. **The design below (n = 1000, small regions, reference-panel LD) is for
-Iteration 007 only.**
+standard. **The design below (n = 1000, small regions, reference-panel LD, sparse
+model only) is for Iteration 007 only.**
 
 > **Not comparable to Iteration 004**: n, region sizes, the S and φ levels, the
 > enrichment and the LD all differ. Nor is it comparable to Iterations 005 or 006.
@@ -22,12 +22,12 @@ the panel?
 
 ## 2. Design (user-specified 2026-09-14)
 
-**20 rows** = 5 LD levels × 2 models × 2 annotation types.
+**10 rows** = 5 LD levels × 2 annotation types, sparse model only.
 
 | factor | levels |
 |---|---|
 | LD | in-sample; independent reference panel of 500, 750, 1500 or 2000 individuals |
-| model | sparse; sparse_inf with p_causal = 0.6 |
+| model | sparse only (sparse_inf was dropped before submission) |
 | annotations | binary, continuous; 10 tracks, the first 5 at fold 5.4 and the rest inert |
 
 Within each row:
@@ -40,7 +40,7 @@ Within each row:
 | regions | 10: two each of 100, 150, 200, 300 and 400 variants |
 | n (GWAS) | 1000 |
 
-**60 scenarios/row × 20 rows = 1,200 scenarios.**
+**60 scenarios/row × 10 rows = 600 scenarios.**
 
 The region sizes are Iteration 004's divided by 5, so p/n ≤ 0.4, as in Iteration
 004. Every region is smaller than every sample, GWAS or panel.
@@ -93,20 +93,21 @@ Checked wrapper by wrapper:
 
 ## 4. Checks
 
-- **Grid:** `generate_params_grid_iter007.R` writes 20 rows. They pass
+- **Grid:** `generate_params_grid_iter007.R` writes 10 rows. They pass
   `check_grid_columns.R` against the standing generator, and the labels keep
   Iteration 004's format.
 - **Method set:** the 12 names match the user's list exactly, and all are in the
   standard set and the method registry. The worker parses, and the submitter
   passes `bash -n`.
-- **Smoke test:** `run_simulation()` with the worker's arguments at n = 1000 and
-  regions of 100 and 400 variants, using the bundled VCFs:
+- **Smoke test:** `run_simulation()` with the worker's arguments (sparse model) at
+  n = 1000 and regions of 100 and 400 variants, using the bundled VCFs. In every
+  case the z-scores match the LD's dimensions.
 
-  | LD | LD given to methods | mean (LD − LD_true)² | NaN |
-  |---|---|---|---|
-  | in-sample | identical to LD_true | 0 | 0 |
-  | panel 500 | cor(X_ref), 500 × p | 3.4e-3 | 0 |
-  | panel 2000 | cor(X_ref), 2000 × p | 1.6e-3 | 0 |
+  | LD | annotations | LD given to methods | mean (LD − LD_true)² | NaN |
+  |---|---|---|---|---|
+  | in-sample | binary | identical to LD_true | 0 | 0 |
+  | panel 500 | binary and continuous | cor(X_ref), 500 × p | 3.4e-3 | 0 |
+  | panel 2000 | binary | cor(X_ref), 2000 × p | 1.6e-3 | 0 |
 
 - **Rank:** LD matrices are singular through perfectly correlated variant pairs,
   not through sample size, and at the same rate as in Iteration 004:
@@ -140,21 +141,22 @@ Check the echoed design before the array queues. It must show:
 DESIGN: n=1000   regions={100,100,150,150,200,200,300,300,400,400}
         S={1,3,5}   phi={0.1,0.4}
         LD: in-sample, ref1500, ref2000, ref500, ref750
-        p_causal: 0.6   annotations: binary, continuous
-Grid: 20 rows x 60 scenarios; chunk=5 scenario(s)/task
-      -> 12 tasks/row x 20 rows = 240 array tasks
+        p_causal:    annotations: binary, continuous
+Grid: 10 rows x 60 scenarios; chunk=5 scenario(s)/task
+      -> 12 tasks/row x 10 rows = 120 array tasks
 ```
 
-The job logs print `[iter007] reduced method set: 12 methods: ...`.
+`p_causal` is blank because it does not apply to the sparse model. The job logs
+print `[iter007] reduced method set: 12 methods: ...`.
 
-**Cost.** In Iteration 004 these twelve methods took 1.5–1.8 CPU-h per scenario, at
-regions five times larger and n five times larger. The expectation is well below
-that here, so a 5-scenario task should finish far inside 72 h and the run should
-cost under about 2,000 CPU-h. A mismatched LD can slow some methods' convergence,
-so check the runtimes of the first tasks to finish.
+**Cost.** In Iteration 004 these twelve methods took about 1.5 CPU-h per sparse
+scenario, at regions five times larger and n five times larger. The expectation is
+well below that here, so a 5-scenario task should finish far inside 72 h and the
+run should cost under about 900 CPU-h. A mismatched LD can slow some methods'
+convergence, so check the runtimes of the first tasks to finish.
 
 ## 6. Afterwards — before ephemeral deletes anything
 
 Results land on `$EPHEMERAL`, which deletes files after 30 days. The completion
 checker and the analysis are written when the jobs finish. The analysis must
-stratify by LD level as well as by model × annotation type.
+stratify by LD level × annotation type.
