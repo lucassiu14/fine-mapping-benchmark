@@ -131,8 +131,7 @@
 # Returns list(.fb_joint_cache = <fingerprint -> parsed result>,
 #              .fb_joint_annotated = TRUE/FALSE, .fb_joint_head = head).
 # Empty annotated-arm cache means the joint run failed -> per-region fallback.
-.fb_joint_scenario_setup <- function(genotypes, regions, user_args, prior_head,
-                                    identifiable = FALSE) {
+.fb_joint_scenario_setup <- function(genotypes, regions, user_args, prior_head) {
   n_regions <- length(regions)
 
   # collect regions that have an annotation matrix (joint prior needs annotations)
@@ -194,12 +193,6 @@
     "--lambda_l1",            as.character(gv("lambda_l1", 0.01)),
     "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0))
   )
-  # absl booleans: pass the flag only when set. With it, the LassoNet prior head
-  # emits ONE logit contrast, so the L1 threshold and the hierarchy gate act on
-  # the same identifiable quantity that is reported as feature importance,
-  # rather than on the raw two-column theta which also spans a direction with no
-  # effect on p_0. Same model class, different regulariser.
-  if (isTRUE(identifiable)) args <- c(args, "--identifiable_head")
 
   run_output <- tryCatch(
     system2(py, args = args, stdout = TRUE, stderr = TRUE),
@@ -236,40 +229,37 @@ run_fb_pooled_scenario_setup <- function(genotypes, regions, user_args) {
 run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
   .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
+# The fb_xregion_id* names come from the lambda_l1 sweep, which compared a
+# single-logit LassoNet head with a two-logit one. The two-logit head has since
+# been removed and every LassoNet head is single-logit, so fb_xregion_id is now
+# identical to fb_xregion and the _lNN arms differ from it only in lambda_l1.
 #' @export
 run_fb_xregion_id_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l03_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l06_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l25_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l50_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l100_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 #' @export
 run_fb_xregion_id_l200_scenario_setup <- function(genotypes, regions, user_args) {
-  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet",
-                           identifiable = TRUE)
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 
 

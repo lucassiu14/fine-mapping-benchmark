@@ -239,10 +239,10 @@ METHOD_ARGS <- list(
 # shared LassoNet head (idea #2). On the `none` arm they fall back to plain FB.
 METHOD_ARGS$fb_pooled         <- .FBv
 METHOD_ARGS$fb_xregion        <- .FBv
-# Identifiable-head arms. Identical to fb_xregion in every respect except the
-# prior head's parameterisation and lambda_l1, so any difference is attributable
-# to those two things alone. lambda_l1 = 0.1223 is the production value carried
-# from .FBv; the others bracket it.
+# The lambda_l1 sweep's arms. Every LassoNet head is single-logit now (the
+# two-logit head was removed), so these differ from fb_xregion only in
+# lambda_l1: fb_xregion_id carries the production value 0.1223 from .FBv and is
+# identical to fb_xregion; the others bracket it.
 METHOD_ARGS$fb_xregion_id     <- .FBv                                   # 0.1223
 METHOD_ARGS$fb_xregion_id_l03 <- modifyList(.FBv, list(lambda_l1 = 0.03))
 METHOD_ARGS$fb_xregion_id_l06 <- modifyList(.FBv, list(lambda_l1 = 0.06))

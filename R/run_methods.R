@@ -68,18 +68,11 @@
   # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
   fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
   fb_xregion      = "run_fb_xregion_region",   # idea #2: shared LassoNet head
-  # Same shared LassoNet head, but emitting ONE logit contrast rather than two
-  # logits, so the L1 threshold and hierarchy gate act on the identifiable
-  # quantity that is also reported as annotation importance. Registered as a
-  # separate method so both parameterisations run on identical simulated data
-  # in the same job and are directly comparable.
+  # The lambda_l1 sweep's arm names. The sweep compared a single-logit LassoNet
+  # head (fb_xregion_id*) with a two-logit one (fb_xregion); the two-logit head
+  # has since been removed, so fb_xregion_id is now identical to fb_xregion and
+  # the _lNN arms below differ from it only in lambda_l1.
   fb_xregion_id   = "run_fb_xregion_id_region",
-  # lambda_l1 sweep for the identifiable head. At the production value (0.1223)
-  # the L1 crushes every importance to ~0.001; at 0.06 they are ~0.17 and
-  # nothing is zeroed - a ~100x difference in the quantity the annotation
-  # analysis reads. These arms bracket production to test whether the tuned
-  # penalty, selected by Optuna against the LEAKY two-column parameterisation,
-  # is too strong once the leak is closed.
   fb_xregion_id_l03 = "run_fb_xregion_id_l03_region",
   fb_xregion_id_l06 = "run_fb_xregion_id_l06_region",
   fb_xregion_id_l25 = "run_fb_xregion_id_l25_region",
