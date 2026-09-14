@@ -250,6 +250,10 @@ export FMB_ITER005_METHODS="${FMB_ITER005_METHODS:-}"
 # Iteration 006's method-set selector, forwarded for the same reason.
 export FMB_ITER006_METHODS="${FMB_ITER006_METHODS:-}"
 # >>> END ITERATION 006 TEMPORARY BLOCK <<<
+# >>> ITERATION 007 ONLY - TEMPORARY (see iteration-007-REVERT.md) <<<
+# Iteration 007's method-set selector, forwarded for the same reason.
+export FMB_ITER007_METHODS="${FMB_ITER007_METHODS:-}"
+# >>> END ITERATION 007 TEMPORARY BLOCK <<<
 module load ${R_MODULE}
 module load ${GSL_MODULE}
 module load ${PYTHON_MODULE}

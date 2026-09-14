@@ -143,6 +143,20 @@ if (nzchar(Sys.getenv("FMB_ITER006_METHODS", ""))) {                 # ITER-006 
   cat(sprintf("[iter006] reduced method set: %d methods: %s\n",
               length(METHODS), paste(METHODS, collapse = ", ")))
 }                                                                    # ITER-006 (temp)
+# >>> ITERATION 007 ONLY - TEMPORARY (see iteration-007-REVERT.md) <<<
+# Iteration 007 (LD misspecification) fits the twelve methods the user named. Set
+# FMB_ITER007_METHODS=1 to select it. It takes precedence over the 005 and 006 sets.
+ITER007_METHODS <- c(
+  "susie", "susie_inf", "finemap", "finemap_inf", "finimom", "sparsepro",
+  "funmap", "paintor", "polyfun_oracle", "polyfun_ldsc",
+  "beatrice", "fb_xregion"
+)
+if (nzchar(Sys.getenv("FMB_ITER007_METHODS", ""))) {
+  METHODS <- ITER007_METHODS
+  cat(sprintf("[iter007] reduced method set: %d methods: %s\n",
+              length(METHODS), paste(METHODS, collapse = ", ")))
+}
+# >>> END ITERATION 007 TEMPORARY BLOCK <<<
 
 METHOD_ARGS <- list(
   susie               = list(L = 10, coverage = 0.95),
