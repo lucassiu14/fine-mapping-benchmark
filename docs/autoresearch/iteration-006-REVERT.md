@@ -32,7 +32,11 @@ grep -rn "ITERATION 006\|ITER-006" R/ scripts/ docs/
 | 8 | `scripts/analysis/submit_iter006_analysis.sh` | delete the file |
 | 9 | `scripts/analysis/iter006_relationship_results.R` | delete the file |
 | 10 | `scripts/analysis/iter006_ap_ties.R` | delete the file |
-| 11 | `docs/autoresearch/iteration-006.md` and this file | archive with the report |
+| 11 | `scripts/analysis/iter006_lsr_figures.R` | delete the file |
+| 12 | `docs/autoresearch/iteration-006.md` and this file | archive with the report |
+
+`scripts/analysis/lsr_palette.R` is NOT Iteration 006's and stays: it is the LSR's palette, copied
+unchanged from `lsr/feedback1-figures` so the Iteration 006 figures use the same colours.
 
 ## Revert it together with Iteration 005
 
