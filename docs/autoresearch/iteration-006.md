@@ -150,17 +150,39 @@ relationships run through Iteration 005's code, `[iter005] relationship=...`.
 
 ## 7. Afterwards — before ephemeral deletes anything
 
-Results land on `$EPHEMERAL`, which deletes files after 30 days. Once every task
-has finished, copy the PIPs and the runtimes/importances into home space:
+Results land on `$EPHEMERAL`, which deletes files after 30 days.
+
+**1. Confirm every task finished**, from the logs only:
+
+```bash
+bash scripts/hpc/check_iter006.sh
+```
+
+Section 1 must show:
+- 160 task logs, none unfinished and none killed
+- 160 tasks with 5 scenarios each, all on the 9-method set
+- 8,000 fits for every method
+- 8 row simulations
+
+**2. Copy the results into home space and run the analysis.** The three submissions
+can run at the same time:
 
 ```bash
 BENCH_ROOT=$EPHEMERAL/fmbench_iter006/results/benchmark FLOOR=0 WALLTIME=12:00:00 \
   OUT_DIR=$PWD/results/iter006/piptail bash scripts/hpc/submit_extract_pip_tail.sh
 BENCH_ROOT=$EPHEMERAL/fmbench_iter006/results/benchmark SKIP_COUNT=1 \
   OUT_DIR=$PWD/results/iter006/aux bash scripts/hpc/submit_extract_aux.sh
+SKIP_COUNT=1 bash scripts/analysis/submit_iter006_analysis.sh
 ```
 
-The analysis reuses Iteration 005's pipeline, which stratifies by relationship
-from the grid. `submit_iter005_analysis.sh` still needs pointing at this
-iteration before it is used: its generator path, its output folder, and a
-completeness count that walks the whole results tree from the login node.
+`submit_iter006_analysis.sh` is Iteration 005's analysis submitter pointed at this
+iteration. It runs the same `iter005_collect.R`, `iter005_report.R` and senses,
+which take their strata from the relationships and annotation types present:
+8 × 1 here.
+
+**3. Re-run the checker** when the jobs finish. Section 2 should show:
+- 8 files each for aux, piptail and L1
+- 800 scenarios read
+- 72,000 PIP fits at floor 0
+- 0 scenarios missing
+- the validity checks passed

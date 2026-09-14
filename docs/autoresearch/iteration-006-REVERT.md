@@ -28,7 +28,9 @@ grep -rn "ITERATION 006\|ITER-006" R/ scripts/ docs/
 | 4 | `scripts/analysis/test_iter006_relationships.R` | delete the file |
 | 5 | `scripts/hpc/run_benchmark_job.R` | the ITERATION 006 block (`ITER006_METHODS`) and the `FMB_ITER006_METHODS` selector tagged `# ITER-006 (temp)` |
 | 6 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER006_METHODS` block inside the PBS heredoc |
-| 7 | `docs/autoresearch/iteration-006.md` and this file | archive with the report |
+| 7 | `scripts/hpc/check_iter006.sh` | delete the file |
+| 8 | `scripts/analysis/submit_iter006_analysis.sh` | delete the file |
+| 9 | `docs/autoresearch/iteration-006.md` and this file | archive with the report |
 
 ## Revert it together with Iteration 005
 
