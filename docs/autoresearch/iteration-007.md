@@ -157,6 +157,43 @@ convergence, so check the runtimes of the first tasks to finish.
 
 ## 6. Afterwards — before ephemeral deletes anything
 
-Results land on `$EPHEMERAL`, which deletes files after 30 days. The completion
-checker and the analysis are written when the jobs finish. The analysis must
-stratify by LD level × annotation type.
+Results land on `$EPHEMERAL`, which deletes files after 30 days.
+
+**1. Confirm every task finished**, from the logs only:
+
+```bash
+bash scripts/hpc/check_iter007.sh
+```
+
+Section 1 must show:
+- 120 task logs, none unfinished and none killed
+- 120 tasks with 5 scenarios each, all on the 12-method set
+- 6,000 fits for every method
+- 24 tasks at each LD level
+- 10 row simulations
+
+**2. Copy the results into home space.** The three submissions can run at the same time:
+
+```bash
+BENCH_ROOT=$EPHEMERAL/fmbench_iter007/results/benchmark FLOOR=0 \
+  OUT_DIR=$PWD/results/iter007/piptail bash scripts/hpc/submit_extract_pip_tail.sh
+BENCH_ROOT=$EPHEMERAL/fmbench_iter007/results/benchmark SKIP_COUNT=1 \
+  OUT_DIR=$PWD/results/iter007/aux bash scripts/hpc/submit_extract_aux.sh
+SKIP_COUNT=1 bash scripts/analysis/submit_iter007_collect.sh
+```
+
+The collect runs `iter004_collect.R` only. Neither existing report is used,
+because both assume in-sample LD: they drop `n_ref` from the aggregation keys and
+overwrite it with NA. L1 is therefore bound and analysed locally, stratified by
+LD level × annotation type.
+
+**3. Re-run the checker** when those jobs finish. Section 2 should show:
+- 10 files each for aux, piptail and L1
+- 600 scenarios read
+- 72,000 PIP fits at floor 0, and 72,000 L1 fit rows
+- 0 scenarios skipped and no rows reporting non-finite PIPs
+
+Then copy `results/iter007` to the local machine for the analysis.
+
+**Head used.** `fb_xregion` here ran the two-logit head: the array was submitted
+before that head was removed, and the cluster was not updated while it ran.

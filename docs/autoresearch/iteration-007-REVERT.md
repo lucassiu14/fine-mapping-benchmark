@@ -26,9 +26,11 @@ grep -rn "ITERATION 007\|iter007" R/ scripts/ docs/
 | 1 | `scripts/hpc/generate_params_grid_iter007.R` | delete the file |
 | 2 | `scripts/hpc/run_benchmark_job.R` | the ITERATION 007 block: `ITER007_METHODS` and the `FMB_ITER007_METHODS` selector |
 | 3 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER007_METHODS` block inside the PBS heredoc |
-| 4 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
+| 4 | `scripts/hpc/check_iter007.sh` | delete the file |
+| 5 | `scripts/analysis/submit_iter007_collect.sh` | delete the file |
+| 6 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
 
-Rows for the checker and the analysis scripts are added when those are written.
+Rows for the analysis scripts are added when those are written.
 
 ## Independent of Iterations 005 and 006
 
