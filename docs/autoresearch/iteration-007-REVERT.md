@@ -28,9 +28,10 @@ grep -rn "ITERATION 007\|iter007" R/ scripts/ docs/
 | 3 | `scripts/hpc/submit_benchmark_pbs.sh` | the `export FMB_ITER007_METHODS` block inside the PBS heredoc |
 | 4 | `scripts/hpc/check_iter007.sh` | delete the file |
 | 5 | `scripts/analysis/submit_iter007_collect.sh` | delete the file |
-| 6 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
+| 6 | `scripts/analysis/iter007_ld_results.R` | delete the file |
+| 7 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
 
-Rows for the analysis scripts are added when those are written.
+Rows for any further analysis scripts are added when those are written.
 
 ## Independent of Iterations 005 and 006
 
