@@ -77,7 +77,7 @@ p1 <- ggplot(ap, aes(m, method, colour = grp, shape = grp)) +
   scale_shape_manual(values = c(SHP7[HL], setNames(16, OTH)), limits = c(HL, OTH), name = NULL) +
   labs(x = "Mean average precision over iterations (95% CI)", y = NULL) +
   th + theme(panel.grid.major.y = element_line(linewidth = .2, colour = "grey93"))
-suppressWarnings(ggsave(file.path(FIG, "fig_ld_auprc.pdf"), p1, width = W, height = H))
+suppressWarnings(ggsave(file.path(FIG, "fig_ld_auprc.pdf"), p1, width = W, height = H, device = cairo_pdf))
 message("figure 1 written")
 
 # ---- figure 2: false discovery rate ----------------------------------------------
@@ -113,7 +113,7 @@ p3 <- ggplot(ca, aes(x, y, group = method, colour = method, shape = method)) +
   facet_grid(ldf ~ annf) + hl_scales() +
   coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
   labs(x = "Mean PIP assigned within band", y = "Proportion of those variants causal") + th
-suppressWarnings(ggsave(file.path(FIG, "fig_ld_calibration.pdf"), p3, width = W, height = H))
+suppressWarnings(ggsave(file.path(FIG, "fig_ld_calibration.pdf"), p3, width = W, height = H, device = cairo_pdf))
 message("figure 3 written")
 message(sprintf("highlighted: %s; others: %s", paste(HL, collapse = ", "),
                 paste(setdiff(present, HL), collapse = ", ")))
