@@ -29,7 +29,8 @@ grep -rn "ITERATION 007\|iter007" R/ scripts/ docs/
 | 4 | `scripts/hpc/check_iter007.sh` | delete the file |
 | 5 | `scripts/analysis/submit_iter007_collect.sh` | delete the file |
 | 6 | `scripts/analysis/iter007_ld_results.R` | delete the file |
-| 7 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
+| 7 | `scripts/analysis/iter007_lsr_figures.R` | delete the file |
+| 8 | `docs/autoresearch/iteration-007.md` and this file | archive with the report |
 
 Rows for any further analysis scripts are added when those are written.
 
