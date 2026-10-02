@@ -19,7 +19,13 @@ LOG_DIR="${FMB_LOG_DIR:-${FMB_SCRATCH}/logs/benchmark}"
 export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
 
 # Config (override with env vars: PBS_QUEUE=... bash submit_benchmark_pbs.sh)
-PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
+# Queue. Imperial routes jobs to a queue from the resource request, so naming
+# one is optional and only works while you have access to that specific queue.
+# v1_small72a stopped accepting this account on 2026-10-02 ("qsub: Access to
+# queue is denied") having run Iteration 007 two weeks earlier, so the default
+# is now to name no queue and let PBS route the job. Set PBS_QUEUE=<name> to
+# force one back.
+PBS_QUEUE="${PBS_QUEUE-}"
 PBS_WALLTIME="${PBS_WALLTIME:-72:00:00}"       # queue max; BEATRICE-family
                                                 # is compute-heavy so start
                                                 # generous, cut later if fine.
@@ -207,10 +213,14 @@ echo "Output root: $OUTPUT_ROOT"
 echo "Log dir:     $LOG_DIR"
 
 JOB_SCRIPT="$(mktemp -t fmbench_pbs_XXXXXX.sh)"
+# An empty PBS_QUEUE means "no -q line at all", so PBS picks the queue from the
+# resource request. A blank "#PBS -q" would be a syntax error, not a no-op.
+QUEUE_DIRECTIVE="# no queue named: PBS routes this job from its resource request"
+if [[ -n "$PBS_QUEUE" ]]; then QUEUE_DIRECTIVE="#PBS -q ${PBS_QUEUE}"; fi
 cat > "$JOB_SCRIPT" <<PBS_EOF
 #!/bin/bash
 #PBS -N fmbench
-#PBS -q ${PBS_QUEUE}
+${QUEUE_DIRECTIVE}
 #PBS -l select=${PBS_SELECT}
 #PBS -l walltime=${PBS_WALLTIME}
 #PBS -J ${ARRAY_RANGE}
@@ -300,7 +310,7 @@ echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} finished at \$(date)"
 PBS_EOF
 
 echo "Job script: $JOB_SCRIPT"
-echo "Submitting array ${ARRAY_RANGE} to queue ${PBS_QUEUE} ..."
+echo "Submitting array ${ARRAY_RANGE} to ${PBS_QUEUE:-the queue PBS selects from the resource request} ..."
 qsub "$JOB_SCRIPT"
 
 echo
