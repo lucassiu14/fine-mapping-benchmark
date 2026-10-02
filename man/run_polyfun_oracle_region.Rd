@@ -17,7 +17,7 @@ containing at minimum \code{z} and (when annotations are simulated)
 accepted as a fallback location for the matrix.}
 
 \item{...}{Additional arguments passed to \code{\link{run_polyfun_oracle}}
-(e.g. \code{L}, \code{coverage}, \code{min_abs_corr}).}
+(e.g. \code{L}, \code{hess}).}
 }
 \value{
 The output of \code{\link{run_polyfun_oracle}}.

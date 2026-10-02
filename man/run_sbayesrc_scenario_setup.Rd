@@ -2,36 +2,21 @@
 % Please edit documentation in R/wrapper_sbayesrc.R
 \name{run_sbayesrc_scenario_setup}
 \alias{run_sbayesrc_scenario_setup}
-\title{Fit a pooled annotation regression for sbayesrc across the scenario}
+\title{Scenario-level SBayesRC fit}
 \usage{
 run_sbayesrc_scenario_setup(genotypes, regions, user_args)
 }
 \arguments{
-\item{genotypes}{List of region_geno.}
+\item{genotypes}{List of per-region genotype data.}
 
-\item{regions}{List of region_pheno for this scenario.}
+\item{regions}{List of per-region phenotype data for one scenario.}
 
-\item{user_args}{User's method_args for sbayesrc.}
+\item{user_args}{Named list of arguments for \code{\link{sbayesrc}}.}
 }
 \value{
-List with a single element \code{pooled_gamma} = list(alpha, gamma),
-or an empty list.
+A named list merged into each region's arguments.
 }
 \description{
-Runs a short-burn Gibbs on every region with region-local annotation
-refits, pools the resulting per-SNP component assignments across all
-regions, and does one final multinomial regression on the pooled data to
-obtain the shared \code{(alpha, gamma)} - i.e., the annotation-to-prior
-mapping learned genome-wide-style from the whole scenario.
-}
-\details{
-Downstream calls (per region) use those shared coefficients as
-\code{pooled_gamma}, so each region's Gibbs skips the per-region
-annotation refit and its priors are set from the cross-region model. This
-implements the plan's §0.1 requirement that SBayesRC's annotation prior
-be learned jointly across regions and fed back per-block.
-
-Returns an empty list (no forwarding) when there are fewer than 2 regions,
-when annotation matrices are missing/inconsistent, or when the pilot Gibbs
-fails - the per-region wrapper then does its own single-region refit.
+Fits all regions of a scenario jointly, one LD block per region, and
+returns the per-region results keyed by z fingerprint.
 }

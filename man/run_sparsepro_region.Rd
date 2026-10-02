@@ -4,23 +4,47 @@
 \alias{run_sparsepro_region}
 \title{Run SparsePro on a single region from simulation data structures}
 \usage{
-run_sparsepro_region(region_geno, region_pheno, ...)
+run_sparsepro_region(
+  region_geno,
+  region_pheno,
+  .sparsepro_cache = NULL,
+  .sparsepro_note = NULL,
+  .sparsepro_error = NULL,
+  use_annotations = TRUE,
+  pthres = 1e-05,
+  prior = "significant",
+  ...
+)
 }
 \arguments{
 \item{region_geno}{List. One element of \code{simulation$genotypes},
-containing \code{LD}, \code{n}, and optionally \code{variant_ids}.}
+containing \code{LD}, \code{n}, optionally \code{variant_ids} and
+\code{annotations_matrix}.}
 
 \item{region_pheno}{List. One element of a scenario's \code{regions},
 containing \code{z}.}
+
+\item{.sparsepro_cache, .sparsepro_note, .sparsepro_error}{Set by
+\code{\link{run_sparsepro_scenario_setup}}; not for direct use.}
+
+\item{use_annotations}{Logical. Use the regions' annotations when present.
+Default: TRUE. Set to FALSE to reproduce runs made before the annotation
+workflow was added (Iterations 004 to 007).}
+
+\item{pthres, prior}{Passed to \code{\link{run_sparsepro_annotated}}.}
 
 \item{...}{Additional arguments passed to \code{\link{run_sparsepro}}
 (e.g. \code{sparsepro_dir}, \code{python}, \code{K}, \code{cthres}).}
 }
 \value{
-The output of \code{\link{run_sparsepro}}.
+A standardised result list; \code{additional$annotation_mode}
+records whether and how annotations were used.
 }
 \description{
-Thin adapter that extracts the appropriate inputs from the simulation's
-\code{region_geno} and \code{region_pheno} objects and calls
-\code{\link{run_sparsepro}}.
+Adapter called by \code{\link{run_methods}}. When the scenario hook
+\code{\link{run_sparsepro_scenario_setup}} has run SparsePro's annotation
+workflow, the region's result is taken from it. When the region carries
+0/1 annotations but no hook result is available (a direct call), the
+annotation workflow is run on this region alone. Otherwise the region is
+fine-mapped without annotations by \code{\link{run_sparsepro}}.
 }

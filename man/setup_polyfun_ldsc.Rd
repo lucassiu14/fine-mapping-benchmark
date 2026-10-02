@@ -2,13 +2,17 @@
 % Please edit documentation in R/wrapper_polyfun_ldsc.R
 \name{setup_polyfun_ldsc}
 \alias{setup_polyfun_ldsc}
-\title{Check that susieR is available for polyfun_ldsc}
+\title{Check that the dependencies of polyfun_ldsc are available}
 \usage{
-setup_polyfun_ldsc()
+setup_polyfun_ldsc(packages = c("susieR", "Ckmeans.1d.dp"))
+}
+\arguments{
+\item{packages}{Character. Packages to check. Default both.}
 }
 \value{
-Invisible TRUE if susieR is available.
+Invisible TRUE if all are available.
 }
 \description{
-Check that susieR is available for polyfun_ldsc
+PolyFun needs susieR for fine-mapping and Ckmeans.1d.dp for the binning
+step (the same R package the released PolyFun calls).
 }

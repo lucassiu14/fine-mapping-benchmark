@@ -2,25 +2,24 @@
 % Please edit documentation in R/wrapper_polyfun_ldsc.R
 \name{run_polyfun_ldsc_scenario_setup}
 \alias{run_polyfun_ldsc_scenario_setup}
-\title{Fit LOCO tau values across the scenario for polyfun_ldsc}
+\title{Scenario-level PolyFun priors}
 \usage{
 run_polyfun_ldsc_scenario_setup(genotypes, regions, user_args)
 }
 \arguments{
-\item{genotypes}{List of region_geno objects.}
+\item{genotypes}{List of per-region genotype data.}
 
-\item{regions}{List of region_pheno objects for the current scenario.}
+\item{regions}{List of per-region phenotype data for one scenario.}
 
-\item{user_args}{User's method_args for polyfun_ldsc (unused here).}
+\item{user_args}{Named list of method arguments (\code{num_bins},
+\code{q} are honoured).}
 }
 \value{
-A list with one element - \code{pooled_tau} - itself a list of
-per-region tau vectors, or an empty list to signal "not applicable".
+A named list merged into each region's arguments.
 }
 \description{
-For each region i, fit S-LDSC tau on the pooled (chi^2, LD-score) rows
-from all regions except i, and return the per-region tau vectors so
-each region's prior is built from data that never touched it. When
-fewer than two regions carry an annotation matrix, returns an empty
-list and the per-region wrapper falls back to a single-region fit.
+Runs \code{\link{polyfun_priors}} over all regions of a scenario and
+returns the priors keyed by z fingerprint. Returns an empty list when the
+scenario has no annotations (PolyFun then runs non-functionally), and an
+error message when the priors cannot be estimated.
 }

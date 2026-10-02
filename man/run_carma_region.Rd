@@ -4,23 +4,44 @@
 \alias{run_carma_region}
 \title{Run CARMA on a single region from simulation data structures}
 \usage{
-run_carma_region(region_geno, region_pheno, ...)
+run_carma_region(
+  region_geno,
+  region_pheno,
+  .carma_cache = NULL,
+  .carma_error = NULL,
+  use_annotations = TRUE,
+  input.alpha = 0,
+  ...
+)
 }
 \arguments{
 \item{region_geno}{List. One element of \code{simulation$genotypes},
-containing \code{LD} and \code{n}.}
+containing \code{LD}, \code{n} and optionally \code{annotations_matrix}.}
 
 \item{region_pheno}{List. One element of a scenario's \code{regions},
 containing \code{z}.}
+
+\item{.carma_cache, .carma_error}{Set by
+\code{\link{run_carma_scenario_setup}}; not for direct use.}
+
+\item{use_annotations}{Logical. Use the regions' annotations when present.
+Default: TRUE. Set to FALSE to reproduce runs made before the annotation
+model was added (Iterations 004 to 007).}
+
+\item{input.alpha}{Passed to \code{\link{run_carma_annotated}}.}
 
 \item{...}{Additional arguments passed to \code{\link{run_carma}}
 (e.g. \code{rho.index}, \code{num.causal}, \code{tau}).}
 }
 \value{
-The output of \code{\link{run_carma}}.
+A standardised result list; \code{additional$annotation_mode}
+records whether annotations were used.
 }
 \description{
-Thin adapter that extracts the appropriate inputs from the simulation's
-\code{region_geno} and \code{region_pheno} objects and calls
-\code{\link{run_carma}}.
+Adapter called by \code{\link{run_methods}}. When the scenario hook
+\code{\link{run_carma_scenario_setup}} has fitted CARMA with annotations,
+the region's result is taken from it. When the region carries annotations
+but no hook result is available (a direct call), CARMA is fitted with the
+annotations of this region alone. Otherwise the region is fine-mapped
+without annotations by \code{\link{run_carma}}.
 }

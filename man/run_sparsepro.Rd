@@ -61,6 +61,8 @@ sizes per variant per credible set (the \code{effect_size} column
 of the \code{.cs} file). NULL if not parseable.}
 \item{run_log}{Character. Captured stdout/stderr from the SparsePro
 invocation; useful for debugging unexpected failures.}
+\item{annotation_mode}{Character. Always \code{"none"} here; see
+\code{\link{run_sparsepro_annotated}} for the annotation workflow.}
 }
 }
 \item{error}{Character or NULL. Error message if SparsePro failed.}

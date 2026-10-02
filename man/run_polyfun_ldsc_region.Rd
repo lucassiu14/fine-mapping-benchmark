@@ -2,23 +2,34 @@
 % Please edit documentation in R/wrapper_polyfun_ldsc.R
 \name{run_polyfun_ldsc_region}
 \alias{run_polyfun_ldsc_region}
-\title{Adapter for run_methods() - forwards to run_polyfun_ldsc}
+\title{Region adapter for PolyFun + SuSiE}
 \usage{
-run_polyfun_ldsc_region(region_geno, region_pheno, pooled_tau = NULL, ...)
+run_polyfun_ldsc_region(
+  region_geno,
+  region_pheno,
+  .polyfun_cache = NULL,
+  .polyfun_error = NULL,
+  ...
+)
 }
 \arguments{
-\item{region_geno}{One element of \code{simulation$genotypes}.}
+\item{region_geno}{List. Genotype-side region data.}
 
-\item{region_pheno}{One element of a scenario's regions.}
+\item{region_pheno}{List. Phenotype-side region data (contains \code{z}).}
 
-\item{pooled_tau}{Numeric or NULL. LOCO-fitted per-region coefficients
-supplied by the scenario_setup hook.}
+\item{.polyfun_cache}{Named list of priors keyed by z fingerprint, from
+the scenario setup. Default NULL.}
 
-\item{...}{Forwarded to run_polyfun_ldsc().}
+\item{.polyfun_error}{Character or NULL. Error from the scenario setup.}
+
+\item{...}{Passed to \code{\link{run_polyfun_ldsc}}.}
 }
 \value{
-Output of run_polyfun_ldsc.
+The output of \code{\link{run_polyfun_ldsc}}.
 }
 \description{
-Adapter for run_methods() - forwards to run_polyfun_ldsc
+Looks up the region's prior in the scenario-level result of
+\code{run_polyfun_ldsc_scenario_setup()}. A region with annotations but
+no prior fails, because PolyFun's prior needs every region of the
+scenario.
 }

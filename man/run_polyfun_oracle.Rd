@@ -10,13 +10,12 @@ run_polyfun_oracle(
   n,
   annotations = NULL,
   enrichment = NULL,
+  causal_probs = NULL,
   L = 10,
-  coverage = 0.95,
-  min_abs_corr = 0.5,
-  max_iter = 100,
-  estimate_residual_variance = TRUE,
-  estimate_prior_variance = TRUE,
-  verbose_susie = FALSE
+  hess = TRUE,
+  hess_iter = 100L,
+  max_iter = 100L,
+  ...
 )
 }
 \arguments{
@@ -33,21 +32,22 @@ When NULL, the method runs with a uniform prior.}
 used by the simulator (length m). When NULL, the method runs with a
 uniform prior.}
 
+\item{causal_probs}{Numeric vector or NULL. The simulator's stored
+selection probabilities; used in preference to \code{enrichment}.}
+
 \item{L}{Integer. Maximum number of single-effect components. Default: 10.}
 
-\item{coverage}{Numeric. Coverage level for credible sets. Default: 0.95.}
+\item{hess}{Logical. Set the causal effect variance by PolyFun's modified
+HESS estimator. Default: TRUE.}
 
-\item{min_abs_corr}{Numeric. Purity threshold for filtering credible sets.
-Default: 0.5.}
+\item{hess_iter}{Integer. HESS draws to average. Default: 100.}
 
 \item{max_iter}{Integer. Maximum IBSS iterations. Default: 100.}
 
-\item{estimate_residual_variance}{Logical. Default: TRUE.}
+\item{...}{Ignored (for wrapper compatibility).
 
-\item{estimate_prior_variance}{Logical. Default: TRUE.}
-
-\item{verbose_susie}{Logical. Print SuSiE's own progress messages.
-Default: FALSE.}
+The fine-mapping step is \code{\link{run_polyfun_ldsc}}'s, so that
+polyfun_oracle and polyfun_ldsc differ only in the prior.}
 }
 \value{
 A list with the standardised fine-mapping output. The
@@ -80,7 +80,7 @@ fine-mapping on the benchmark.
 }
 \details{
 If \code{annotations} is \code{NULL} or \code{enrichment} is \code{NULL},
-the method falls back to a uniform prior — i.e. plain SuSiE-RSS — and
-records this in the \code{params$prior_source} field. This makes the
+the method falls back to a uniform prior (PolyFun's non-functionally
+informed mode) and records this in the \code{params$prior_source} field. This makes the
 wrapper safe to call on \code{annotations = "none"} simulations.
 }

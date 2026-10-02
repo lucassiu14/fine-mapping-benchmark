@@ -2,57 +2,39 @@
 % Please edit documentation in R/wrapper_polyfun_ldsc.R
 \name{run_polyfun_ldsc}
 \alias{run_polyfun_ldsc}
-\title{Run corrected LD-score PolyFun on a single region}
+\title{Run PolyFun + SuSiE on a single region}
 \usage{
 run_polyfun_ldsc(
   z,
   LD,
   n,
-  annotations = NULL,
-  pooled_tau = NULL,
-  region_id = NULL,
+  prior = NULL,
   L = 10,
-  coverage = 0.95,
-  min_abs_corr = 0.5,
-  max_iter = 100,
-  estimate_residual_variance = TRUE,
-  estimate_prior_variance = TRUE,
+  hess = TRUE,
+  hess_iter = 100L,
+  max_iter = 100L,
   variant_ids = NULL,
   ...
 )
 }
 \arguments{
-\item{z}{Numeric vector. Marginal z-scores (length p).}
+\item{z}{Numeric vector. Marginal z-scores.}
 
-\item{LD}{Matrix. LD correlation matrix (p x p).}
+\item{LD}{Matrix. LD correlation matrix.}
 
-\item{n}{Integer. Sample size.}
+\item{n}{Integer. GWAS sample size.}
 
-\item{annotations}{Matrix or NULL. Functional annotation matrix (p x m).
-NULL runs with a uniform prior (reports prior_source =
-"uniform_fallback").}
+\item{prior}{Numeric vector or NULL. Prior causal probabilities for the
+region (from \code{polyfun_priors()}); NULL gives a uniform prior.}
 
-\item{pooled_tau}{Numeric vector, named list, or NULL. If numeric, used
-directly as the (length m + 1) coefficient vector. If a named list
-(as returned by \code{run_polyfun_ldsc_scenario_setup()}), the entry
-keyed by \code{region_id} is looked up. Default: NULL.}
+\item{L}{Integer. Maximum number of causal SNPs. Default 10 (paper).}
 
-\item{region_id}{Character/integer or NULL. Identifier used to look up
-the correct per-region tau vector inside a list-valued
-\code{pooled_tau}. Ignored when \code{pooled_tau} is numeric or NULL.
-Automatically forwarded by \code{run_polyfun_ldsc_region()}.}
+\item{hess}{Logical. Set the causal effect variance by modified HESS.
+Default TRUE (paper).}
 
-\item{L}{Integer. Max single-effect components. Default: 10.}
+\item{hess_iter}{Integer. HESS draws to average. Default 100.}
 
-\item{coverage}{Numeric. Credible-set coverage. Default: 0.95.}
-
-\item{min_abs_corr}{Numeric. Purity threshold. Default: 0.5.}
-
-\item{max_iter}{Integer. IBSS iterations. Default: 100.}
-
-\item{estimate_residual_variance}{Logical. Default: TRUE.}
-
-\item{estimate_prior_variance}{Logical. Default: TRUE.}
+\item{max_iter}{Integer. SuSiE IBSS iterations. Default 100.}
 
 \item{variant_ids}{Character or NULL. Optional variant labels.}
 
@@ -60,15 +42,11 @@ Automatically forwarded by \code{run_polyfun_ldsc_region()}.}
 }
 \value{
 List with pip, credible_sets, method = "polyfun_ldsc", params,
-runtime_seconds, additional (prior_weights, tau, prior_source, ...).
+runtime_seconds and additional (prior_weights, prior_var, h2_hess,
+prior_source).
 }
 \description{
-Estimates per-annotation contributions by regressing chi-squared on
-annotation-weighted LD scores (S-LDSC), converts them into per-SNP prior
-variances, and runs \code{susieR::susie_rss} with those priors.
-}
-\details{
-Typically called via \code{run_polyfun_ldsc_region()} from
-\code{run_methods()}, which uses the scenario-setup hook to compute
-LOCO-fitted \code{pooled_tau} values per region.
+Fine-maps one region with SuSiE as PolyFun does (finemapper.py), using
+the prior causal probabilities from \code{\link{polyfun_priors}}. With
+\code{prior = NULL} this is PolyFun's non-functionally-informed mode.
 }

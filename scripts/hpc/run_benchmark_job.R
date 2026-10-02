@@ -169,8 +169,9 @@ METHOD_ARGS <- list(
   polyfun_oracle      = list(L = 10),
   polyfun_est         = list(L = 10),
   polyfun_ldsc        = list(L = 10),
-  sbayesrc            = list(n_iter = 300L, burn_in = 150L,
-                             gamma_update_every = 10L),
+  # SBayesRC at the paper's settings (3,000 iterations, 1,000 burn-in,
+  # rho tuned by pseudo-validation); see R/wrapper_sbayesrc.R.
+  sbayesrc            = list(),
   finemap             = list(finemap_path = file.path(TOOLS_ROOT,
                                 "finemap_v1.4.2_x86_64/finemap_v1.4.2_x86_64"),
                              n_causal = 5, n_iter = 100000,

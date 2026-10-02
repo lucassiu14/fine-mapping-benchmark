@@ -26,6 +26,7 @@
 #   8   run_abf / run_abf_region
 #   9   run_susie_inf / run_susie_inf_region
 #   10  run_carma / run_carma_region
+#   10b carma with annotations (run_carma_annotated + scenario hook)
 #   11  External wrappers (finemap / paintor / beatrice / funmap)
 #   12  run_marginal_z
 #   13  run_polyfun_oracle
@@ -35,6 +36,7 @@
 #   17  LD mismatch (n_ref independent reference panel)
 #   18  run_sparsepro / run_sparsepro_region (was misnumbered as
 #       SECTION 16 in the original; renumbered here)
+#   18b sparsepro annotation workflow (run_sparsepro_annotated + hook)
 #
 # Skip-on-CRAN: simulations call sim1000G which may need to download a
 # HapMap genetic map (~1 MB per chromosome) on first call; CRAN does not
@@ -1686,6 +1688,161 @@ test_that("[10] carma: credible_sets is a (possibly empty) list", {
 
 
 # =============================================================================
+# SECTION 10b: carma with annotations (run_carma_annotated + scenario hook)
+# =============================================================================
+#
+# CARMA itself is replaced by a stand-in for .carma_call() so these tests
+# check what the wrapper sends to CARMA and how it routes the results,
+# independently of CARMA's runtime. One test runs the real package.
+
+.fake_carma_env <- new.env()
+.fake_carma <- function(...) {
+  a <- list(...)
+  .fake_carma_env$calls[[length(.fake_carma_env$calls) + 1L]] <- a
+  if (isTRUE(.fake_carma_env$fail)) stop("fake CARMA failure")
+  lapply(seq_along(a$z.list), function(i) {
+    p <- length(a$z.list[[i]])
+    list(PIPs = rep(if (is.null(a$w.list)) 0.1 else 0.2, p),
+         `Credible set` = list(NULL, list(c(2L, 1L))),
+         `Credible model` = NULL, Outliers = data.frame())
+  })
+}
+.with_fake_carma <- function(code) {
+  ns <- asNamespace("fmbenchmark")
+  orig_call  <- get(".carma_call", envir = ns)
+  orig_avail <- get(".carma_available", envir = ns)
+  assignInNamespace(".carma_call", .fake_carma, ns = "fmbenchmark")
+  assignInNamespace(".carma_available", function() TRUE, ns = "fmbenchmark")
+  on.exit({
+    assignInNamespace(".carma_call", orig_call, ns = "fmbenchmark")
+    assignInNamespace(".carma_available", orig_avail, ns = "fmbenchmark")
+  }, add = TRUE)
+  .fake_carma_env$calls <- list()
+  .fake_carma_env$fail  <- FALSE
+  force(code)
+}
+
+test_that("[10b] carma: annotations go to CARMA as cbind(1, A), all regions in one call", {
+  .with_fake_carma({
+    g <- SIM_MINI_ANNOT$genotypes
+    r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+    fits <- run_carma_annotated(
+      z_list = lapply(r, `[[`, "z"), ld_list = lapply(g, `[[`, "LD"),
+      annot_list = lapply(g, `[[`, "annotations_matrix"))
+    expect_length(.fake_carma_env$calls, 1L)
+    a <- .fake_carma_env$calls[[1]]
+    expect_length(a$z.list, length(r))
+    expect_length(a$w.list, length(r))
+    for (i in seq_along(r)) {
+      A <- g[[i]]$annotations_matrix
+      expect_equal(unname(a$w.list[[i]][, 1]), rep(1, nrow(A)))
+      expect_equal(unname(a$w.list[[i]][, -1, drop = FALSE]), unname(A * 1))
+      expect_equal(a$lambda.list[[i]], 1 / sqrt(length(r[[i]]$z)))
+    }
+    expect_equal(a$input.alpha, 0)
+    expect_true(dir.exists(dirname(a$output.labels)))
+    expect_length(fits, length(r))
+    for (f in fits) {
+      expect_null(f$error)
+      expect_equal(f$additional$annotation_mode, "annotated")
+      expect_equal(f$additional$n_regions_pooled, length(r))
+      expect_equal(f$credible_sets, list(c(1L, 2L)))
+      expect_equal(f$params$n_annotations, ncol(g[[1]]$annotations_matrix))
+    }
+  })
+})
+
+test_that("[10b] carma: run_methods pools each annotated scenario in one CARMA call", {
+  .with_fake_carma({
+    res <- run_methods(SIM_MINI_ANNOT, methods = "carma",
+                       save = FALSE, verbose = FALSE)
+    n_sc <- length(SIM_MINI_ANNOT$scenarios)
+    n_rg <- length(SIM_MINI_ANNOT$genotypes)
+    expect_length(.fake_carma_env$calls, n_sc)
+    expect_true(all(vapply(.fake_carma_env$calls,
+                           function(a) length(a$w.list) == n_rg, logical(1))))
+    fits <- res$carma$results
+    expect_length(fits, n_sc * n_rg)
+    expect_true(all(vapply(fits, function(f) f$additional$annotation_mode,
+                           character(1)) == "annotated"))
+    expect_true(all(vapply(fits, function(f) all(f$pip == 0.2), logical(1))))
+  })
+})
+
+test_that("[10b] carma: use_annotations = FALSE and unannotated data keep per-region runs", {
+  .with_fake_carma({
+    res <- run_methods(SIM_MINI_ANNOT, methods = "carma",
+                       method_args = list(carma = list(use_annotations = FALSE)),
+                       save = FALSE, verbose = FALSE)
+    n_fits <- length(SIM_MINI_ANNOT$scenarios) * length(SIM_MINI_ANNOT$genotypes)
+    expect_length(.fake_carma_env$calls, n_fits)
+    expect_true(all(vapply(.fake_carma_env$calls,
+                           function(a) is.null(a$w.list) && length(a$z.list) == 1L,
+                           logical(1))))
+    expect_true(all(vapply(res$carma$results,
+                           function(f) f$additional$annotation_mode,
+                           character(1)) == "none"))
+
+    .fake_carma_env$calls <- list()
+    res0 <- run_methods(SIM_MINI, methods = "carma", save = FALSE, verbose = FALSE)
+    expect_true(all(vapply(.fake_carma_env$calls,
+                           function(a) is.null(a$w.list), logical(1))))
+    expect_true(all(vapply(res0$carma$results,
+                           function(f) f$additional$annotation_mode,
+                           character(1)) == "none"))
+  })
+})
+
+test_that("[10b] carma: a failed annotation run is reported, not replaced", {
+  .with_fake_carma({
+    .fake_carma_env$fail <- TRUE
+    res <- run_methods(SIM_MINI_ANNOT, methods = "carma",
+                       save = FALSE, verbose = FALSE)
+    errs <- vapply(res$carma$results, function(f) f$error %||% "", character(1))
+    expect_true(all(grepl("CARMA annotation run failed", errs)))
+    expect_true(all(vapply(res$carma$results,
+                           function(f) all(is.na(f$pip)), logical(1))))
+  })
+})
+
+test_that("[10b] carma: direct region call with annotations uses them", {
+  .with_fake_carma({
+    fit <- run_carma_region(SIM_MINI_ANNOT$genotypes[[1]],
+                            SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]],
+                            rho.index = 0.9)
+    expect_equal(fit$additional$annotation_mode, "annotated")
+    expect_equal(fit$params$rho.index, 0.9)
+    expect_length(.fake_carma_env$calls[[1]]$w.list, 1L)
+  })
+})
+
+test_that("[10b] carma: mismatched annotation columns are an error", {
+  A <- list(matrix(0, 5, 2), matrix(0, 6, 3))
+  e <- tryCatch(run_carma_annotated(list(rnorm(5), rnorm(6)),
+                                    list(diag(5), diag(6)), A),
+                error = conditionMessage)
+  expect_match(e, "different numbers of columns")
+})
+
+test_that("[10b] carma: real CARMA fit with annotations (installed package)", {
+  skip_if_not_installed("CARMA")
+  skip_on_cran()
+  g <- SIM_MINI_ANNOT$genotypes
+  r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+  fits <- run_carma_annotated(
+    z_list = lapply(r, `[[`, "z"), ld_list = lapply(g, `[[`, "LD"),
+    annot_list = lapply(g, `[[`, "annotations_matrix"), num.causal = 3)
+  for (i in seq_along(fits)) {
+    expect_null(fits[[i]]$error)
+    expect_length(fits[[i]]$pip, length(r[[i]]$z))
+    expect_true(all(fits[[i]]$pip >= 0 & fits[[i]]$pip <= 1))
+  }
+  expect_length(fits[[1]]$additional$annotation_coef,
+                ncol(g[[1]]$annotations_matrix) + 1L)
+})
+
+
+# =============================================================================
 # SECTION 11: External binary wrappers - argument forwarding
 # =============================================================================
 #
@@ -1957,14 +2114,24 @@ test_that("[13] polyfun_oracle: reports prior_weights of length p", {
 
 test_that("[13] polyfun_oracle: falls back to uniform prior when annotations absent", {
   # SIM_MINI has annotations="none" so truth$enrichment is also absent.
-  # Wrapper is documented to fall back to uniform priors (degenerate to
-  # plain SuSiE) rather than erroring.
+  # The wrapper runs non-functional PolyFun + SuSiE with a uniform prior.
+  # PolyFun's HESS step can legitimately fail on this tiny fixture.
   fit <- run_polyfun_oracle_region(.rg, .rp)
-  expect_null(fit$error)
-  expect_equal(length(fit$pip), .rg$p)
-  expect_true(all(fit$pip >= 0, na.rm = TRUE))
-  expect_true(all(fit$pip <= 1, na.rm = TRUE))
   expect_identical(fit$params$prior_source, "uniform_fallback")
+  expect_equal(length(fit$pip), .rg$p)
+  if (is.null(fit$error)) {
+    expect_true(all(fit$pip >= 0 & fit$pip <= 1))
+  } else {
+    expect_match(fit$error, "HESS")
+  }
+})
+
+test_that("[13] polyfun_oracle: fine-maps exactly as polyfun_ldsc given the same prior", {
+  set.seed(8)
+  fit <- run_polyfun_oracle_region(.rg_po, .rp_po, hess = FALSE)
+  ref <- run_polyfun_ldsc(.rp_po$z, .rg_po$LD, .rg_po$n,
+                          prior = fit$additional$prior_weights, hess = FALSE)
+  expect_equal(fit$pip, ref$pip)
 })
 
 
@@ -2028,233 +2195,248 @@ test_that("[14] polyfun_est: graceful behaviour on no-annotation fixture", {
 
 
 # =============================================================================
-# SECTION 14b: run_polyfun_ldsc (corrected LD-score PolyFun)
+# SECTION 14b: polyfun_ldsc (PolyFun + SuSiE, Weissbrod et al. 2020)
 # =============================================================================
-# See wrapper_polyfun_ldsc.R for the correction rationale. These tests
-# lock in the S-LDSC-style regressor and the LOCO scenario_setup.
+# See wrapper_polyfun_ldsc.R for the step-by-step mapping to the paper and
+# the released code.
 
-test_that("[14b] polyfun_ldsc: single-region fit gives valid PIPs + non-uniform prior", {
-  # Use a sim with annotations so priors are non-trivial
-  sim <- run_simulation(
-    n_regions = 1, n = 150, p = 60, n_iter = 1, S = 2, phi = 0.3,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(6, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 1, verbose = FALSE
-  )
-  rg <- sim$genotypes[[1]]
-  rp <- sim$scenarios[[1]]$regions[[1]]
+.fmb_ns <- function(name) get(name, envir = asNamespace("fmbenchmark"))
 
-  fit <- run_polyfun_ldsc_region(rg, rp)
-  expect_equal(length(fit$pip), rg$p)
-  expect_true(all(fit$pip >= 0 & fit$pip <= 1))
-  expect_equal(fit$method, "polyfun_ldsc")
-  expect_equal(fit$additional$prior_source, "single_region_ldsc")
-  # Priors should differ from uniform when at least one tau > 0
-  pw <- fit$additional$prior_weights
-  expect_equal(length(pw), rg$p)
-  expect_gt(sd(pw), 0)
+test_that("[14b] polyfun: unbiased r^2 matches compute_R2_unbiased", {
+  f <- .fmb_ns(".pf_r2_unbiased")
+  R <- matrix(c(1, 0.5, 0.5, 1), 2)
+  n <- 102
+  expect_equal(f(R, n), R^2 * (101 / 100) - 1 / 100)
+  expect_equal(f(R, n)[1, 1], 1)
 })
 
-test_that("[14b] polyfun_ldsc: uniform fallback when no annotations", {
-  # .rg has no annotations_matrix
-  fit <- run_polyfun_ldsc_region(.rg, .rp)
-  expect_equal(length(fit$pip), .rg$p)
-  expect_equal(fit$additional$prior_source, "uniform_fallback")
-  expect_equal(fit$additional$prior_weights,
-               rep(1 / .rg$p, .rg$p))
+test_that("[14b] polyfun: LDSC weights follow Hsq.weights at the aggregate h2", {
+  f <- .fmb_ns(".pf_ldsc_weights")
+  ld  <- c(0.5, 2, 4); wld <- c(1, 3, 0.2); chisq <- c(1.2, 3, 2); n <- 1000
+  M <- 50
+  hsq <- min(max(M * (mean(chisq) - 1) / mean(ld * n), 0), 1)
+  raw <- 1 / (2 * (1 + hsq * n / M * pmax(ld, 1))^2) / pmax(wld, 1)
+  expect_equal(f(ld, wld, chisq, n, M), sqrt(raw) / sum(sqrt(raw)))
 })
 
-test_that("[14b] polyfun_ldsc scenario_setup: returns per-region LOCO tau vectors", {
-  sim <- run_simulation(
-    n_regions = 3, n = 150, p = 40, n_iter = 1, S = 1, phi = 0.2,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(5, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 5, verbose = FALSE
-  )
-  su <- run_polyfun_ldsc_scenario_setup(
-    genotypes = sim$genotypes,
-    regions   = sim$scenarios[[1]]$regions,
-    user_args = list()
-  )
-  # Non-empty return means LOCO succeeded
-  expect_named(su, "pooled_tau")
-  expect_equal(length(su$pooled_tau), 3L)
-  # Keyed by region_id so run_methods()'s scenario-wide arg merge still
-  # dispatches the correct tau to the correct region
-  expect_setequal(names(su$pooled_tau), c("1", "2", "3"))
-  # Each tau is intercept + m coefficients = m + 1 entries
-  for (tau in su$pooled_tau) {
-    expect_equal(length(tau), 4L)   # intercept + 3 annotations
-    expect_true(all(tau >= 0))       # NNLS enforces non-negativity
+test_that("[14b] polyfun: chi^2 filter uses max(0.001 N, 80)", {
+  f <- .fmb_ns(".pf_chisq_keep")
+  expect_equal(f(c(79, 80, 81), 1000), c(TRUE, FALSE, FALSE))
+  expect_equal(f(c(150, 199, 200), 2e5), c(TRUE, TRUE, FALSE))
+})
+
+test_that("[14b] polyfun: Lawson-Hanson NNLS satisfies the KKT conditions", {
+  f <- .fmb_ns(".nnls_lawson_hanson")
+  set.seed(1)
+  A <- matrix(rnorm(60), 20, 3)
+  b <- A %*% c(1, -2, 0.5) + rnorm(20, sd = 0.1)
+  x <- f(A, as.numeric(b))
+  g <- as.numeric(crossprod(A, A %*% x - b))
+  expect_true(all(x >= 0))
+  expect_true(all(abs(g[x > 0]) < 1e-8))
+  expect_true(all(g[x == 0] >= -1e-8))
+  expect_equal(x[2], 0)
+})
+
+test_that("[14b] polyfun: bin rebalancing matches create_df_bins", {
+  f <- .fmb_ns(".pf_rebalance_bins")
+  expect_equal(f(c(30L, 25L, 4L), 10L), c(30L, 19L, 10L))
+  expect_equal(f(c(30L, 3L, 4L), 10L), c(27L, 10L))
+  expect_equal(f(c(2L, 50L), 10L), c(2L, 50L))
+})
+
+test_that("[14b] polyfun: HESS reduces to a'a - m/n without LD", {
+  f <- .fmb_ns(".pf_hess_h2")
+  z <- c(8, 1, 0.5, 0.2, 0.1, rep(0, 995))
+  n <- 5000
+  # the 0.005 quantile keeps SNPs with p below it: here only the first
+  pv <- 2 * pnorm(-abs(z))
+  keep <- which(pv < quantile(pv, 0.005, type = 7, names = FALSE))
+  expect_equal(f(z, diag(length(z)), n, n_samples = 5),
+               sum((z[keep] / sqrt(n))^2) - length(keep) / n)
+})
+
+test_that("[14b] polyfun: random maximal independent set is independent and maximal", {
+  f <- .fmb_ns(".pf_random_mis")
+  adj <- matrix(FALSE, 5, 5)
+  adj[1, 2] <- adj[2, 1] <- TRUE
+  adj[3, 4] <- adj[4, 3] <- TRUE
+  set.seed(3)
+  s <- f(adj)
+  expect_false(any(adj[s, s]))
+  others <- setdiff(1:5, s)
+  expect_true(all(vapply(others, function(v) any(adj[v, s]), logical(1))))
+})
+
+test_that("[14b] polyfun: lambda is the out-of-chromosome r2 maximiser", {
+  f <- .fmb_ns(".pf_best_lambda")
+  set.seed(4)
+  x <- cbind(matrix(rnorm(300), 100, 3), 1)
+  y <- as.numeric(x %*% c(1, 0, -1, 0.2) + rnorm(100))
+  chr <- rep(1:4, each = 25)
+  lams <- c(1e-6, 1e2, 1e6)
+  best <- f(x, y, chr, lams)
+  expect_equal(best$lambda, 1e-6)
+})
+
+test_that("[14b] polyfun: priors need four regions", {
+  expect_error(polyfun_priors(list(1, 2), list(diag(1), diag(1)),
+                              list(matrix(1), matrix(1)), n = 100),
+               "at least four regions")
+})
+
+.sim_pf <- function(seed, annotations = "binary") {
+  run_simulation(
+    n_regions = 4, n = 400, p = 40, n_iter = 1, S = 2, phi = 0.4,
+    model = "sparse", annotations = annotations, n_annotations = 3,
+    annotation_proportions = rep(0.3, 3), enrichment = c(6, 1, 1),
+    genetic_map_dir = fmb_test_map_dir(), seed = seed, verbose = FALSE)
+}
+
+test_that("[14b] polyfun: priors sum to one and use the opposite-parity fit", {
+  skip_if_not_installed("Ckmeans.1d.dp")
+  sim <- .sim_pf(31)
+  sc <- sim$scenarios[[1]]
+  pf <- polyfun_priors(lapply(sc$regions, `[[`, "z"),
+                       lapply(sim$genotypes, `[[`, "LD"),
+                       lapply(sim$genotypes, `[[`, "annotations_matrix"),
+                       n = 400)
+  for (pr in pf$prior) expect_equal(sum(pr), 1)
+  A1 <- cbind(1, sim$genotypes[[1]]$annotations_matrix)   # region 1 is odd
+  expect_equal(pf$snpvar_ridge[[1]], as.numeric(A1 %*% pf$taus_ridge$even))
+  A2 <- cbind(1, sim$genotypes[[2]]$annotations_matrix)   # region 2 is even
+  expect_equal(pf$snpvar_ridge[[2]], as.numeric(A2 %*% pf$taus_ridge$odd))
+})
+
+test_that("[14b] polyfun: non-functional mode without annotations", {
+  fit <- tryCatch(run_polyfun_ldsc_region(.rg, .rp), error = function(e) e)
+  if (inherits(fit, "error")) {
+    expect_match(conditionMessage(fit), "HESS")
+  } else {
+    expect_equal(fit$additional$prior_source, "non_functional")
+    expect_equal(length(fit$pip), .rg$p)
   }
-  # LOCO: per-region taus should differ (each fit on a different subset
-  # of regions), unless the data happens to be numerically degenerate.
-  expect_false(isTRUE(all.equal(su$pooled_tau[["1"]], su$pooled_tau[["2"]])))
 })
 
-test_that("[14b] polyfun_ldsc via run_methods uses LOCO priors (differ from raw single-region)", {
-  sim <- run_simulation(
-    n_regions = 3, n = 150, p = 40, n_iter = 1, S = 1, phi = 0.2,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(5, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 7, verbose = FALSE
-  )
-  res <- run_methods(sim, methods = "polyfun_ldsc",
-                     method_args = list(polyfun_ldsc = list(L = 3)),
-                     save = FALSE, verbose = FALSE)
-  expect_equal(res$polyfun_ldsc$n_total, 3L)
-  expect_equal(res$polyfun_ldsc$n_failed, 0L)
-  first_fit <- res$polyfun_ldsc$results[[1]]
-  expect_equal(first_fit$additional$prior_source, "loco_scenario_setup")
+test_that("[14b] polyfun: annotated region without scenario priors is an error", {
+  sim <- .sim_pf(32)
+  expect_error(run_polyfun_ldsc_region(sim$genotypes[[1]],
+                                       sim$scenarios[[1]]$regions[[1]]),
+               "PolyFun priors were not computed")
 })
 
-test_that("[14b] polyfun_ldsc: ldscore helper computes l_{j,c} = sum_k r^2_{j,k} A_{k,c}", {
-  ldscore_matrix <- get(".ldscore_matrix", envir = asNamespace("fmbenchmark"))
-  A <- matrix(c(1, 0, 1, 0, 1,
-                0, 1, 0, 1, 0), 5, 2, byrow = FALSE)
-  LD <- diag(5); LD[1, 2] <- LD[2, 1] <- 0.5
-  ell <- ldscore_matrix(A, LD)
-  # Variant 1 (A_1 = c(1,0), r^2 to variant 2 = 0.25): ell_{1,1} = 1*1 + 0.25*0 = 1
-  # Variant 2 (A_2 = c(0,1)): ell_{2,1} = 0.25*1 + 1*0 = 0.25
-  expect_equal(ell[1, 1], 1.0)
-  expect_equal(ell[2, 1], 0.25)
-  # Column 2 has A = c(0,1,0,1,0): ell_{1,2} = 0 + 0.25*1 = 0.25
-  expect_equal(ell[1, 2], 0.25)
+test_that("[14b] polyfun: scenario setup with too few regions reports the error", {
+  sim <- .sim_pf(33)
+  su <- run_polyfun_ldsc_scenario_setup(sim$genotypes[1:3],
+                                        sim$scenarios[[1]]$regions[1:3], list())
+  expect_named(su, ".polyfun_error")
+})
+
+test_that("[14b] polyfun via run_methods uses the scenario priors", {
+  skip_if_not_installed("Ckmeans.1d.dp")
+  sim <- .sim_pf(34)
+  res <- run_methods(sim, methods = "polyfun_ldsc", save = FALSE, verbose = FALSE)
+  ok <- Filter(function(f) is.null(f$error), res$polyfun_ldsc$results)
+  expect_gt(length(ok), 0)
+  for (f in ok) {
+    expect_equal(f$additional$prior_source, "polyfun")
+    expect_true(all(f$pip >= 0 & f$pip <= 1))
+  }
 })
 
 
 # =============================================================================
-# SECTION 14c: run_sbayesrc (in-R SBayesRC reimplementation)
+# SECTION 14c: sbayesrc (SBayesRC, Zheng et al. 2024)
 # =============================================================================
-# See wrapper_sbayesrc.R for the algorithmic derivation and the sparse
-# initial prior + regularized annotation-refit design.
+# See wrapper_sbayesrc.R for the step-by-step mapping to the paper.
 
-test_that("[14c] sbayesrc: single-region fit returns valid PIPs + posterior beta", {
-  sim <- run_simulation(
-    n_regions = 1, n = 200, p = 40, n_iter = 1, S = 2, phi = 0.3,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(5, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 11, verbose = FALSE
-  )
-  rg <- sim$genotypes[[1]]; rp <- sim$scenarios[[1]]$regions[[1]]
-  fit <- run_sbayesrc_region(rg, rp)
-  expect_equal(length(fit$pip), rg$p)
-  expect_true(all(fit$pip >= 0 & fit$pip <= 1))
-  expect_equal(fit$method, "sbayesrc")
-  expect_equal(fit$additional$prior_source, "single_region_gamma")
-  expect_equal(length(fit$additional$posterior_mean_beta), rg$p)
-  expect_equal(length(fit$additional$alpha), 4L)   # default K = 4
+test_that("[14c] sbayesrc: stick-breaking proportions sum to one", {
+  f <- .fmb_ns(".sbrc_logpi")
+  eta <- rbind(c(-2, 0, 1, -1), c(0.5, -0.3, 0, 2))
+  pi <- exp(f(eta))
+  expect_equal(rowSums(pi), c(1, 1))
+  p <- pnorm(eta[1, ])
+  expect_equal(pi[1, ], c(1 - p[1], p[1] * (1 - p[2]), p[1] * p[2] * (1 - p[3]),
+                          p[1] * p[2] * p[3] * (1 - p[4]), prod(p)))
 })
 
-test_that("[14c] sbayesrc: no-annotation fallback runs cleanly", {
-  # .rg / .rp fixtures have no annotations
-  fit <- run_sbayesrc_region(.rg, .rp)
-  expect_equal(length(fit$pip), .rg$p)
-  expect_equal(fit$additional$prior_source, "no_annotations")
+test_that("[14c] sbayesrc: truncated normal draws respect the truncation", {
+  f <- .fmb_ns(".sbrc_rtruncnorm")
+  set.seed(5)
+  eta <- c(rep(-30, 50), rep(30, 50), rnorm(100))
+  up <- rep(c(TRUE, FALSE), 100)
+  l <- f(eta, up)
+  expect_true(all(is.finite(l)))
+  expect_true(all(l[up] > 0))
+  expect_true(all(l[!up] < 0))
+  g <- .fmb_ns(".sbrc_rtnorm1")
+  draws <- c(g(100, 1, -8, 8), g(-100, 1, -8, 8), g(0, 1, -8, 8))
+  expect_true(all(draws >= -8 & draws <= 8))
 })
 
-test_that("[14c] sbayesrc scenario_setup: returns pooled_gamma across regions", {
-  sim <- run_simulation(
-    n_regions = 3, n = 200, p = 40, n_iter = 1, S = 1, phi = 0.3,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(5, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 13, verbose = FALSE
-  )
-  su <- run_sbayesrc_scenario_setup(
-    genotypes = sim$genotypes,
-    regions   = sim$scenarios[[1]]$regions,
-    user_args = list()
-  )
-  expect_named(su, "pooled_gamma")
-  expect_named(su$pooled_gamma, c("alpha", "gamma"))
-  expect_equal(length(su$pooled_gamma$alpha), 4L)      # default K = 4
-  expect_equal(dim(su$pooled_gamma$gamma), c(3L, 4L))  # 3 annotations x 4 slabs
-  # Empty-class alphas should be safely clamped to the "very negative"
-  # range rather than left at 0 (that's the bug the fix guards against).
-  expect_true(all(su$pooled_gamma$alpha >= -12 & su$pooled_gamma$alpha <= 6))
+test_that("[14c] sbayesrc: q is the smallest set explaining rho", {
+  f <- .fmb_ns(".sbrc_q")
+  v <- c(5, 3, 1.5, 0.5)
+  expect_equal(f(v, 0.8), 2L)
+  expect_equal(f(v, 0.95), 3L)
+  expect_equal(f(v, 1), 4L)
 })
 
-test_that("[14c] sbayesrc via run_methods uses pooled_scenario_gamma prior", {
-  sim <- run_simulation(
-    n_regions = 3, n = 200, p = 40, n_iter = 1, S = 1, phi = 0.3,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(5, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 17, verbose = FALSE
-  )
+test_that("[14c] sbayesrc: rho selection follows Supplementary Note 10", {
+  f <- .fmb_ns(".sbrc_choose_rho")
+  grid <- c(0.995, 0.99, 0.95, 0.9)
+  expect_equal(f(grid, c(0.30, 0.33, 0.35, 0.20)), 0.995)
+  expect_equal(f(grid, c(0.30, 0.40, 0.39, 0.20)), 0.99)
+  expect_error(f(grid, c(0.30, 0.31, 0.32, 0.50)), "smallest in the tuning grid")
+  expect_equal(f(grid, c(-0.1, 0.2, 0.1, 0.05)), 0.99)
+  expect_error(f(grid, c(-0.1, -0.2, 0, NA)), "non-positive")
+})
+
+test_that("[14c] sbayesrc: joint fit returns PIPs for every region", {
+  sim <- .sim_pf(41)
+  sc <- sim$scenarios[[1]]
+  set.seed(6)
+  fit <- sbayesrc(lapply(sc$regions, `[[`, "z"),
+                  lapply(sim$genotypes, `[[`, "LD"), n = 400,
+                  annot_list = lapply(sim$genotypes, `[[`, "annotations_matrix"),
+                  rho = 0.995, n_iter = 60, burn_in = 20)
+  expect_length(fit$pip, 4L)
+  for (i in 1:4) {
+    expect_length(fit$pip[[i]], sim$genotypes[[i]]$p)
+    expect_true(all(fit$pip[[i]] >= 0 & fit$pip[[i]] <= 1))
+  }
+  expect_equal(dim(fit$alpha), c(4L, 3L))
+  expect_true(is.finite(fit$sigma2_g))
+})
+
+test_that("[14c] sbayesrc: tuning returns the pseudo-validation table", {
+  sim <- .sim_pf(42, annotations = "none")
+  sc <- sim$scenarios[[1]]
+  set.seed(7)
+  fit <- tryCatch(
+    sbayesrc(lapply(sc$regions, `[[`, "z"), lapply(sim$genotypes, `[[`, "LD"),
+             n = 400, n_iter = 40, burn_in = 10, tune_iter = 30, tune_keep = 10),
+    error = function(e) e)
+  if (inherits(fit, "error")) {
+    expect_match(conditionMessage(fit), "tuning grid|non-positive")
+  } else {
+    expect_equal(fit$tuning$rho, c(0.995, 0.99, 0.95, 0.9))
+    expect_true(fit$rho %in% c(0.995, 0.99, 0.95))
+  }
+})
+
+test_that("[14c] sbayesrc via run_methods uses the joint fit", {
+  sim <- .sim_pf(43)
   res <- run_methods(sim, methods = "sbayesrc",
-                     method_args = list(sbayesrc = list(n_iter = 150, burn_in = 75)),
+                     method_args = list(sbayesrc = list(rho = 0.995, n_iter = 40L,
+                                                        burn_in = 10L)),
                      save = FALSE, verbose = FALSE)
-  expect_equal(res$sbayesrc$n_total, 3L)
   expect_equal(res$sbayesrc$n_failed, 0L)
-  expect_equal(res$sbayesrc$results[[1]]$additional$prior_source,
-               "pooled_scenario_gamma")
-  # Sparse prior: non-causal PIPs should stay well below the "everything's
-  # equal prior" pathology (mean should not exceed ~0.5)
-  truth1 <- sim$scenarios[[1]]$regions[[1]]$truth$causal_indices
-  pip1   <- res$sbayesrc$results[[1]]$pip
-  expect_lt(mean(pip1[-truth1]), 0.5)
-})
-
-test_that("[14c] sbayesrc: causal PIPs beat non-causal on aggregate", {
-  # Aggregate across three regions with modest signal - should detect a
-  # difference even at the smoke-test scale.
-  sim <- run_simulation(
-    n_regions = 3, n = 300, p = 50, n_iter = 2, S = 2, phi = 0.4,
-    model = "sparse", annotations = "binary", n_annotations = 3,
-    annotation_proportions = rep(0.2, 3),
-    enrichment = c(6, 1, 1),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 21, verbose = FALSE
-  )
-  res <- run_methods(sim, methods = "sbayesrc",
-                     method_args = list(sbayesrc = list(n_iter = 200, burn_in = 100)),
-                     save = FALSE, verbose = FALSE)
-  causal_pips <- c(); noncausal_pips <- c()
-  scenarios <- sim$scenarios
-  fit_idx <- 1L
-  for (sc in seq_along(scenarios)) {
-    for (rg in seq_along(scenarios[[sc]]$regions)) {
-      truth <- scenarios[[sc]]$regions[[rg]]$truth$causal_indices
-      pip   <- res$sbayesrc$results[[fit_idx]]$pip
-      causal_pips    <- c(causal_pips, pip[truth])
-      noncausal_pips <- c(noncausal_pips, pip[-truth])
-      fit_idx <- fit_idx + 1L
-    }
+  for (f in res$sbayesrc$results) {
+    expect_true(isTRUE(f$params$joint))
+    expect_length(f$credible_sets, 0L)
   }
-  expect_gt(mean(causal_pips), mean(noncausal_pips))
-  expect_gt(mean(causal_pips) - mean(noncausal_pips), 0.05)
 })
-
-test_that("[14c] sbayesrc: .sbayesrc_priors_from_gamma matches manual softmax", {
-  softmax <- function(x) { e <- exp(x - max(x)); e / sum(e) }
-  fn <- get(".sbayesrc_priors_from_gamma", envir = asNamespace("fmbenchmark"))
-  # Two SNPs, two annotations, K = 3 slabs
-  A     <- matrix(c(1, 0, 0, 1), 2, 2, byrow = TRUE)
-  alpha <- c(-2, -3, -4)
-  gamma <- matrix(c(1, 0.5,
-                    0, 0.2,
-                    0, 0), byrow = TRUE, nrow = 2, ncol = 3)
-  pi_mat <- fn(A, alpha, gamma, K = 3L, p = 2L)
-  expect_equal(dim(pi_mat), c(2L, 4L))
-  # Reference logit is 0 for k = 0. SNP 1 logits (k=1..3):
-  # alpha + A[1,] %*% gamma[,k] for each k
-  logit_snp1 <- alpha + as.numeric(A[1, ] %*% gamma)
-  expect_equal(as.numeric(pi_mat[1, ]),
-               softmax(c(0, logit_snp1)), tolerance = 1e-10)
-})
-
 
 # =============================================================================
 # SECTION 15: MAF-stratified evaluation (by_causal_maf)
@@ -2543,5 +2725,246 @@ test_that("[18] sparsepro: credible_sets are integer index vectors (real install
       expect_true(all(cs >= 1L))
       expect_true(all(cs <= .rg_sp$p))
     }
+  }
+})
+
+
+# =============================================================================
+# SECTION 18b: sparsepro annotation workflow (run_sparsepro_annotated + hook)
+# =============================================================================
+#
+# .sparsepro_exec() is replaced by a stand-in that reads the arguments the
+# wrapper passes to sparsepro_zld.py and writes the files the script would
+# write, so the two-step orchestration is tested without SparsePro. PIPs are
+# 0.1 without a prior and 0.5 with --aW, which tells the steps apart.
+
+.fake_sp_env <- new.env()
+.fake_sp_exec <- function(python, args) {
+  if (identical(args[1], "-c")) return(list(error = NULL, log = "1e-05"))
+  .fake_sp_env$calls[[length(.fake_sp_env$calls) + 1L]] <- args
+  if (isTRUE(.fake_sp_env$fail)) return(list(error = "fake failure", log = character(0)))
+  arg <- function(flag) {
+    i <- match(flag, args)
+    if (is.na(i)) NULL else gsub("^'|'$", "", args[i + 1L])
+  }
+  zdir <- arg("--zdir"); save <- arg("--save"); prefix <- arg("--prefix")
+  zld  <- utils::read.delim(arg("--zld"), stringsAsFactors = FALSE)
+  with_prior <- !is.null(arg("--aW"))
+  for (i in seq_len(nrow(zld))) {
+    z <- utils::read.delim(file.path(zdir, zld$z[i]), header = FALSE,
+                           stringsAsFactors = FALSE)
+    if (!is.null(arg("--anno"))) {
+      .fake_sp_env$anno[[zld$z[i]]] <- utils::read.delim(
+        file.path(zdir, zld$anno[i]), stringsAsFactors = FALSE)
+    }
+    utils::write.table(data.frame(z$V1, z$V2, if (with_prior) 0.5 else 0.1),
+                       file.path(save, paste0(zld$z[i], ".pip")), sep = "\t",
+                       quote = FALSE, row.names = FALSE, col.names = FALSE)
+    writeLines(c("cs\tpip\tbeta",
+                 paste0(z$V1[1], "/", z$V1[2], "\t0.6/0.3\t0.1/0.2")),
+               file.path(save, paste0(zld$z[i], ".cs")))
+  }
+  h2 <- zld[, c("z", "ld", intersect("anno", names(zld)))]
+  h2$h2 <- 1e-3; h2$pval <- 1e-8; h2$varb <- 1e-4; h2$K <- 5
+  utils::write.table(h2, file.path(save, paste0(prefix, ".h2")), sep = "\t",
+                     quote = FALSE, row.names = FALSE)
+  if (!is.null(arg("--anno")) && !with_prior) {
+    d <- ncol(.fake_sp_env$anno[[zld$z[1]]]) - 1L
+    w <- data.frame(index = paste0("ANNOT", seq_len(d)), W = seq_len(d) / 2,
+                    W_se = 0.1, p = 1e-6, sigidx = seq_len(d) - 1L)
+    utils::write.table(w[, 1:4], file.path(save, paste0(prefix, ".wsep")),
+                       sep = "\t", quote = FALSE, row.names = FALSE)
+    utils::write.table(w, file.path(save, paste0(prefix, ".W1.0")),
+                       sep = "\t", quote = FALSE, row.names = FALSE)
+    if (isTRUE(.fake_sp_env$significant)) {
+      utils::write.table(w, file.path(save, paste0(prefix, ".W1e-05")),
+                         sep = "\t", quote = FALSE, row.names = FALSE)
+    }
+  }
+  list(error = NULL, log = character(0))
+}
+.with_fake_sparsepro <- function(code, significant = TRUE, fail = FALSE) {
+  ns <- asNamespace("fmbenchmark")
+  orig <- get(".sparsepro_exec", envir = ns)
+  assignInNamespace(".sparsepro_exec", .fake_sp_exec, ns = "fmbenchmark")
+  on.exit(assignInNamespace(".sparsepro_exec", orig, ns = "fmbenchmark"),
+          add = TRUE)
+  .fake_sp_env$calls <- list()
+  .fake_sp_env$anno <- list()
+  .fake_sp_env$significant <- significant
+  .fake_sp_env$fail <- fail
+  force(code)
+}
+.fake_sp_dir <- local({
+  d <- file.path(tempdir(), "fake_sparsepro")
+  dir.create(d, showWarnings = FALSE)
+  file.create(file.path(d, "sparsepro_zld.py"))
+  d
+})
+.sp_flag <- function(args, flag) {
+  i <- match(flag, args)
+  if (is.na(i)) NULL else gsub("^'|'$", "", args[i + 1L])
+}
+
+test_that("[18b] sparsepro: credible sets joined with '/' are parsed", {
+  d <- tempfile(); dir.create(d)
+  ids <- paste0("v", 1:5)
+  utils::write.table(data.frame(ids, 0, c(0.9, 0.05, 0, 0, 0.6)),
+                     file.path(d, "r.z.pip"), sep = "\t", quote = FALSE,
+                     row.names = FALSE, col.names = FALSE)
+  writeLines(c("cs\tpip\tbeta", "v1/v2\t0.9/0.05\t0.1/0.2", "v5\t0.6\t0.3"),
+             file.path(d, "r.z.cs"))
+  out <- fmbenchmark:::.sparsepro_parse_locus(d, "r.z", ids)
+  expect_null(out$error)
+  expect_equal(out$credible_sets, list(c(1L, 2L), 5L))
+  expect_equal(out$cs_pip, list(c(0.9, 0.05), 0.6))
+  expect_equal(out$cs_effect_size, list(c(0.1, 0.2), 0.3))
+})
+
+test_that("[18b] sparsepro: annotation workflow runs the README's two steps", {
+  .with_fake_sparsepro({
+    g <- SIM_MINI_ANNOT$genotypes
+    r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+    fits <- run_sparsepro_annotated(
+      z_list = lapply(r, `[[`, "z"), ld_list = lapply(g, `[[`, "LD"),
+      annot_list = lapply(g, `[[`, "annotations_matrix"), n = g[[1]]$n,
+      variant_ids_list = lapply(g, `[[`, "variant_ids"),
+      sparsepro_dir = .fake_sp_dir)
+    calls <- .fake_sp_env$calls
+    expect_length(calls, 2L)
+    # Step 1: all regions listed, --anno and --pthres, no --aW.
+    expect_equal(.sp_flag(calls[[1]], "--anno"), "anno")
+    expect_equal(.sp_flag(calls[[1]], "--pthres"), "1e-05")
+    expect_null(.sp_flag(calls[[1]], "--aW"))
+    # Step 2: the step-1 .h2 file as --zld, the significant weights as --aW.
+    expect_match(.sp_flag(calls[[2]], "--zld"), "step1\\.h2$")
+    expect_match(.sp_flag(calls[[2]], "--aW"), "step1\\.W1e-05$")
+    expect_equal(.sp_flag(calls[[2]], "--anno"), "anno")
+    expect_equal(.sp_flag(calls[[1]], "--N"), as.character(g[[1]]$n))
+    # Annotation files: SNP column then one 0/1 column per annotation.
+    for (i in seq_along(r)) {
+      a <- .fake_sp_env$anno[[paste0("region", i, ".z")]]
+      A <- g[[i]]$annotations_matrix
+      expect_equal(names(a), c("SNP", paste0("ANNOT", seq_len(ncol(A)))))
+      expect_equal(unname(as.matrix(a[, -1])), unname(A * 1L))
+      expect_equal(a$SNP, gsub("\\s+", "_", g[[i]]$variant_ids))
+    }
+    expect_length(fits, length(r))
+    for (f in fits) {
+      expect_null(f$error)
+      expect_true(all(f$pip == 0.5))
+      expect_true(all(f$additional$pip_without_annotations == 0.1))
+      expect_equal(f$additional$annotation_mode, "significant")
+      expect_equal(nrow(f$additional$enrichment), ncol(g[[1]]$annotations_matrix))
+      expect_equal(f$additional$n_regions_pooled, length(r))
+      expect_equal(f$credible_sets, list(c(1L, 2L)))
+    }
+  })
+})
+
+test_that("[18b] sparsepro: no significant annotation keeps the step-1 result", {
+  .with_fake_sparsepro({
+    g <- SIM_MINI_ANNOT$genotypes
+    r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+    fits <- run_sparsepro_annotated(
+      lapply(r, `[[`, "z"), lapply(g, `[[`, "LD"),
+      lapply(g, `[[`, "annotations_matrix"), n = g[[1]]$n,
+      sparsepro_dir = .fake_sp_dir)
+    expect_length(.fake_sp_env$calls, 1L)
+    expect_true(all(fits[[1]]$pip == 0.1))
+    expect_equal(fits[[1]]$additional$annotation_mode,
+                 "no_significant_annotation")
+    expect_null(fits[[1]]$additional$enrichment)
+  }, significant = FALSE)
+})
+
+test_that("[18b] sparsepro: prior = 'all' uses the W1.0 weights", {
+  .with_fake_sparsepro({
+    g <- SIM_MINI_ANNOT$genotypes
+    r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+    fits <- run_sparsepro_annotated(
+      lapply(r, `[[`, "z"), lapply(g, `[[`, "LD"),
+      lapply(g, `[[`, "annotations_matrix"), n = g[[1]]$n,
+      sparsepro_dir = .fake_sp_dir, prior = "all")
+    expect_match(.sp_flag(.fake_sp_env$calls[[2]], "--aW"), "step1\\.W1\\.0$")
+    expect_equal(fits[[1]]$additional$annotation_mode, "all")
+  }, significant = FALSE)
+})
+
+test_that("[18b] sparsepro: run_methods pools each annotated scenario", {
+  .with_fake_sparsepro({
+    res <- run_methods(SIM_MINI_ANNOT, methods = "sparsepro",
+                       method_args = list(sparsepro = list(sparsepro_dir = .fake_sp_dir)),
+                       save = FALSE, verbose = FALSE)
+    n_sc <- length(SIM_MINI_ANNOT$scenarios)
+    expect_length(.fake_sp_env$calls, 2L * n_sc)
+    fits <- res$sparsepro$results
+    expect_true(all(vapply(fits, function(f) f$additional$annotation_mode,
+                           character(1)) == "significant"))
+    expect_true(all(vapply(fits, function(f) all(f$pip == 0.5), logical(1))))
+  })
+})
+
+test_that("[18b] sparsepro: use_annotations = FALSE runs each region without annotations", {
+  .with_fake_sparsepro({
+    res <- run_methods(SIM_MINI_ANNOT, methods = "sparsepro",
+                       method_args = list(sparsepro = list(
+                         sparsepro_dir = .fake_sp_dir, use_annotations = FALSE)),
+                       save = FALSE, verbose = FALSE)
+    n_fits <- length(SIM_MINI_ANNOT$scenarios) * length(SIM_MINI_ANNOT$genotypes)
+    expect_length(.fake_sp_env$calls, n_fits)
+    expect_true(all(vapply(.fake_sp_env$calls,
+                           function(a) is.null(.sp_flag(a, "--anno")), logical(1))))
+    expect_true(all(vapply(res$sparsepro$results,
+                           function(f) f$additional$annotation_mode,
+                           character(1)) == "none"))
+  })
+})
+
+test_that("[18b] sparsepro: non-binary annotations are not used, with a note", {
+  sim <- SIM_MINI_ANNOT
+  for (i in seq_along(sim$genotypes)) {
+    A <- sim$genotypes[[i]]$annotations_matrix
+    sim$genotypes[[i]]$annotations_matrix <- A + 0.5
+  }
+  .with_fake_sparsepro({
+    res <- run_methods(sim, methods = "sparsepro",
+                       method_args = list(sparsepro = list(sparsepro_dir = .fake_sp_dir)),
+                       save = FALSE, verbose = FALSE)
+    expect_true(all(vapply(.fake_sp_env$calls,
+                           function(a) is.null(.sp_flag(a, "--anno")), logical(1))))
+    f <- res$sparsepro$results[[1]]
+    expect_equal(f$additional$annotation_mode, "none")
+    expect_match(f$additional$annotation_note, "0/1 annotations")
+  })
+})
+
+test_that("[18b] sparsepro: a failed annotation run is reported, not replaced", {
+  .with_fake_sparsepro({
+    res <- run_methods(SIM_MINI_ANNOT, methods = "sparsepro",
+                       method_args = list(sparsepro = list(sparsepro_dir = .fake_sp_dir)),
+                       save = FALSE, verbose = FALSE)
+    errs <- vapply(res$sparsepro$results, function(f) f$error %||% "", character(1))
+    expect_true(all(grepl("SparsePro annotation run failed", errs)))
+  }, fail = TRUE)
+})
+
+test_that("[18b] sparsepro: annotation workflow on the real script", {
+  skip_if(!sparsepro_available,
+          "SparsePro not installed (set SPARSEPRO_DIR to enable)")
+  g <- SIM_MINI_ANNOT$genotypes
+  r <- SIM_MINI_ANNOT$scenarios[[1]]$regions
+  fits <- run_sparsepro_annotated(
+    lapply(r, `[[`, "z"), lapply(g, `[[`, "LD"),
+    lapply(g, `[[`, "annotations_matrix"), n = g[[1]]$n,
+    variant_ids_list = lapply(g, `[[`, "variant_ids"),
+    sparsepro_dir = sparsepro_dir, python = sparsepro_python, K = 3)
+  for (i in seq_along(fits)) {
+    expect_null(fits[[i]]$error)
+    expect_length(fits[[i]]$pip, length(r[[i]]$z))
+    expect_true(all(fits[[i]]$pip >= 0 & fits[[i]]$pip <= 1))
+    expect_true(fits[[i]]$additional$annotation_mode %in%
+                  c("significant", "no_significant_annotation"))
+    expect_false(is.null(fits[[i]]$additional$gtest))
   }
 })

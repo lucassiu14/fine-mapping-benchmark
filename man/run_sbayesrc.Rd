@@ -2,68 +2,40 @@
 % Please edit documentation in R/wrapper_sbayesrc.R
 \name{run_sbayesrc}
 \alias{run_sbayesrc}
-\title{Run SBayesRC-style Bayesian regression on a single region}
+\title{Run SBayesRC on a single region}
 \usage{
 run_sbayesrc(
   z,
   LD,
   n,
   annotations = NULL,
-  sigma2_scale = c(0.05, 0.005, 5e-04, 5e-05),
-  n_iter = 300L,
-  burn_in = 150L,
-  gamma_update_every = 10L,
-  pooled_gamma = NULL,
-  seed = NULL,
+  beta_hat = NULL,
+  se = NULL,
   variant_ids = NULL,
   ...
 )
 }
 \arguments{
-\item{z}{Numeric vector. Marginal z-scores (length p).}
+\item{z}{Numeric vector. Marginal z-scores.}
 
-\item{LD}{Matrix. LD correlation matrix (p x p).}
+\item{LD}{Matrix. LD correlation matrix.}
 
 \item{n}{Integer. Sample size.}
 
-\item{annotations}{Matrix or NULL. Functional annotations (p x m).}
+\item{annotations}{Matrix or NULL. Annotation matrix.}
 
-\item{sigma2_scale}{Numeric vector of length K. Per-component prior
-variance grid. Default \code{c(0.05, 0.005, 5e-4, 5e-5)}.}
+\item{beta_hat, se}{Numeric or NULL. Marginal effects and standard errors.}
 
-\item{n_iter}{Integer. Total Gibbs iterations. Default 300.}
+\item{variant_ids}{Character or NULL.}
 
-\item{burn_in}{Integer. Iterations to discard before averaging. Default 150.}
-
-\item{gamma_update_every}{Integer. Refit the annotation regression
-(alpha, gamma) every this many Gibbs iterations. Default 10.}
-
-\item{pooled_gamma}{List with \code{alpha}, \code{gamma} matrices from
-\code{run_sbayesrc_scenario_setup()}, or NULL. When supplied, no
-region-local annotation refit is performed - the shared coefficients
-are used as-is.}
-
-\item{seed}{Integer or NULL. Sampler seed.}
-
-\item{variant_ids}{Character or NULL. Passed through unused.}
-
-\item{...}{Ignored (wrapper compatibility).}
+\item{...}{Passed to \code{\link{sbayesrc}}.}
 }
 \value{
-List with pip, credible_sets, method = "sbayesrc", params,
-runtime_seconds, additional (posterior_mean_beta, prior_source, etc.).
+List with pip, credible_sets (empty), method = "sbayesrc",
+params, runtime_seconds and additional.
 }
 \description{
-Fits a K-component mixture-of-normals prior (with the point mass at zero
-as the spike) using a Gibbs sampler on the summary-stat likelihood
-r_j | beta_j ~ Normal(beta_j, 1/n). When \code{pooled_gamma} is supplied
-(as it is under \code{run_methods()} via
-\code{run_sbayesrc_scenario_setup()}) the per-SNP mixture weights use the
-cross-region annotation regression fit; otherwise they are refit on this
-region alone.
-}
-\details{
-When \code{annotations} is NULL, the prior collapses to region-common
-mixture proportions (learned from the Gibbs assignments), and the method
-still runs.
+Treats the region as the only LD block. Under \code{run_methods()} the
+fit is joint across the regions of a scenario instead (see
+\code{run_sbayesrc_scenario_setup()}).
 }

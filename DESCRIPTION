@@ -35,6 +35,7 @@ Imports:
     utils
 Suggests:
     CARMA,
+    Ckmeans.1d.dp,
     knitr,
     nnet,
     remotes,

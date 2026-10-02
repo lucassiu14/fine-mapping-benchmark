@@ -28,9 +28,16 @@
 # If one does, either the comparator is cheating or the simulator is leaking
 # information through some other channel.
 #
+# The fine-mapping step is exactly that of polyfun_ldsc (PolyFun + SuSiE as
+# in Weissbrod et al. 2020: L = 10, causal effect variance from the modified
+# HESS estimator, residual variance estimated; see R/wrapper_polyfun_ldsc.R),
+# so the two methods differ only in the prior and the gap between them is the
+# cost of estimating it. polyfun_oracle remains a ceiling: it is given the
+# simulator's true prior and is not a deployable method.
+#
 # When no annotations were simulated (annotations = "none"), there is no
-# per-SNP signal to reconstruct. The wrapper falls back to plain SuSiE with
-# uniform priors and reports prior_source = "uniform_fallback" in params.
+# per-SNP signal to reconstruct, and the non-functionally-informed PolyFun +
+# SuSiE (uniform prior) is run; prior_source = "uniform_fallback".
 #
 # This file provides:
 #   - setup_polyfun_oracle()        : checks susieR is installed
@@ -86,8 +93,8 @@ setup_polyfun_oracle <- function() {
 #' fine-mapping on the benchmark.
 #'
 #' If \code{annotations} is \code{NULL} or \code{enrichment} is \code{NULL},
-#' the method falls back to a uniform prior — i.e. plain SuSiE-RSS — and
-#' records this in the \code{params$prior_source} field. This makes the
+#' the method falls back to a uniform prior (PolyFun's non-functionally
+#' informed mode) and records this in the \code{params$prior_source} field. This makes the
 #' wrapper safe to call on \code{annotations = "none"} simulations.
 #'
 #' @param z Numeric vector. Marginal z-scores (length p).
@@ -98,15 +105,17 @@ setup_polyfun_oracle <- function() {
 #' @param enrichment Numeric vector or NULL. Per-annotation fold-enrichment
 #'   used by the simulator (length m). When NULL, the method runs with a
 #'   uniform prior.
+#' @param causal_probs Numeric vector or NULL. The simulator's stored
+#'   selection probabilities; used in preference to \code{enrichment}.
 #' @param L Integer. Maximum number of single-effect components. Default: 10.
-#' @param coverage Numeric. Coverage level for credible sets. Default: 0.95.
-#' @param min_abs_corr Numeric. Purity threshold for filtering credible sets.
-#'   Default: 0.5.
+#' @param hess Logical. Set the causal effect variance by PolyFun's modified
+#'   HESS estimator. Default: TRUE.
+#' @param hess_iter Integer. HESS draws to average. Default: 100.
 #' @param max_iter Integer. Maximum IBSS iterations. Default: 100.
-#' @param estimate_residual_variance Logical. Default: TRUE.
-#' @param estimate_prior_variance Logical. Default: TRUE.
-#' @param verbose_susie Logical. Print SuSiE's own progress messages.
-#'   Default: FALSE.
+#' @param ... Ignored (for wrapper compatibility).
+#'
+#' The fine-mapping step is \code{\link{run_polyfun_ldsc}}'s, so that
+#' polyfun_oracle and polyfun_ldsc differ only in the prior.
 #'
 #' @return A list with the standardised fine-mapping output. The
 #'   \code{additional} sub-list contains:
@@ -137,12 +146,10 @@ run_polyfun_oracle <- function(z,
                                 enrichment  = NULL,
                                 causal_probs = NULL,   # ITER-005 (temporary)
                                 L           = 10,
-                                coverage    = 0.95,
-                                min_abs_corr = 0.5,
-                                max_iter    = 100,
-                                estimate_residual_variance = TRUE,
-                                estimate_prior_variance    = TRUE,
-                                verbose_susie = FALSE) {
+                                hess        = TRUE,
+                                hess_iter   = 100L,
+                                max_iter    = 100L,
+                                ...) {
 
   # --- Validate ---------------------------------------------------------------
 
@@ -152,19 +159,13 @@ run_polyfun_oracle <- function(z,
     "LD must be a p x p matrix" =
       is.matrix(LD) && nrow(LD) == p && ncol(LD) == p,
     "n must be a positive integer" =
-      is.numeric(n) && length(n) == 1 && n > 0,
-    "coverage must be a single number in (0, 1)" =
-      is.numeric(coverage) && length(coverage) == 1 &&
-      coverage > 0 && coverage < 1
+      is.numeric(n) && length(n) == 1 && n > 0
   )
 
   if (!requireNamespace("susieR", quietly = TRUE)) {
     return(.polyfun_oracle_error_result(
-      p, L,
-      .polyfun_oracle_params(L, coverage, min_abs_corr, max_iter,
-                             estimate_residual_variance,
-                             estimate_prior_variance,
-                             prior_source = "missing_susier"),
+      p, .polyfun_oracle_params(L, hess, hess_iter, max_iter,
+                                prior_source = "missing_susier"),
       0, "susieR is not installed. Run setup_polyfun_oracle() first."
     ))
   }
@@ -180,7 +181,7 @@ run_polyfun_oracle <- function(z,
   # threshold forms it produces the WRONG prior, and this method silently stops
   # being a ceiling while still being reported as one. Remove this branch when
   # Iteration 005 is done and the relationships are withdrawn.
-  if (!is.null(causal_probs) && length(causal_probs) == p &&
+  if (!is.null(annotations) && !is.null(causal_probs) && length(causal_probs) == p &&
       all(is.finite(causal_probs)) && sum(causal_probs) > 0) {
     prior_weights   <- causal_probs / sum(causal_probs)
     prior_source    <- "oracle_stored_probs"
@@ -208,78 +209,31 @@ run_polyfun_oracle <- function(z,
   }
   }   # closes the ITERATION 005 stored-probs branch
 
-  params <- .polyfun_oracle_params(L, coverage, min_abs_corr, max_iter,
-                                    estimate_residual_variance,
-                                    estimate_prior_variance,
-                                    prior_source = prior_source)
+  params <- .polyfun_oracle_params(L, hess, hess_iter, max_iter,
+                                   prior_source = prior_source)
 
-  # --- Run SuSiE-RSS with the per-SNP priors ---------------------------------
+  # --- PolyFun's fine-mapping step with the true prior -------------------------
 
   start_time <- proc.time()
-
-  fit <- tryCatch({
-    susieR::susie_rss(
-      z = z,
-      R = LD,
-      n = n,
-      L = L,
-      prior_weights = prior_weights,
-      estimate_residual_variance = estimate_residual_variance,
-      estimate_prior_variance    = estimate_prior_variance,
-      coverage     = coverage,
-      min_abs_corr = min_abs_corr,
-      max_iter     = max_iter,
-      verbose      = verbose_susie
-    )
-  }, error = function(e) {
-    list(error = conditionMessage(e))
-  })
-
+  fit <- tryCatch(
+    run_polyfun_ldsc(
+      z = z, LD = LD, n = n,
+      prior = if (prior_source == "uniform_fallback") NULL else prior_weights,
+      L = L, hess = hess, hess_iter = hess_iter, max_iter = max_iter),
+    error = function(e) list(error = conditionMessage(e)))
   elapsed <- as.numeric((proc.time() - start_time)["elapsed"])
 
-  # --- Handle errors ---------------------------------------------------------
-
   if (!is.null(fit$error)) {
-    return(.polyfun_oracle_error_result(p, L, params, elapsed, fit$error))
+    return(.polyfun_oracle_error_result(p, params, elapsed, fit$error))
   }
 
-  # --- Extract outputs -------------------------------------------------------
-
-  pip <- susieR::susie_get_pip(fit)
-
-  cs_raw <- fit$sets
-  if (is.null(cs_raw) || is.null(cs_raw$cs) || length(cs_raw$cs) == 0) {
-    credible_sets <- list()
-    cs_purity     <- list()
-  } else {
-    credible_sets <- cs_raw$cs
-    cs_purity     <- cs_raw$purity
-  }
-
-  additional <- list(
-    prior_source    = prior_source,
-    prior_weights   = prior_weights,
-    enrichment_used = enrichment_used,
-    alpha           = fit$alpha,
-    posterior_mean  = colSums(fit$alpha * fit$mu),
-    lbf             = if (!is.null(fit$lbf)) fit$lbf else rep(NA_real_, L),
-    cs_purity       = cs_purity,
-    converged       = fit$converged,
-    elbo            = fit$elbo[length(fit$elbo)],
-    n_iter_run      = length(fit$elbo)
-  )
-
-  # --- Return ----------------------------------------------------------------
-
-  list(
-    pip             = pip,
-    credible_sets   = credible_sets,
-    method          = "polyfun_oracle",
-    input_type      = "summary",
-    params          = params,
-    runtime_seconds = elapsed,
-    additional      = additional
-  )
+  fit$method          <- "polyfun_oracle"
+  fit$params          <- params
+  fit$runtime_seconds <- elapsed
+  fit$additional$prior_source    <- prior_source
+  fit$additional$prior_weights   <- prior_weights
+  fit$additional$enrichment_used <- enrichment_used
+  fit
 }
 
 
@@ -303,7 +257,7 @@ run_polyfun_oracle <- function(z,
 #'   \code{truth$enrichment}. \code{annotations_matrix} on this list is also
 #'   accepted as a fallback location for the matrix.
 #' @param ... Additional arguments passed to \code{\link{run_polyfun_oracle}}
-#'   (e.g. \code{L}, \code{coverage}, \code{min_abs_corr}).
+#'   (e.g. \code{L}, \code{hess}).
 #'
 #' @return The output of \code{\link{run_polyfun_oracle}}.
 #' @export
@@ -342,22 +296,18 @@ run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
 # Internal helpers
 # =============================================================================
 
-.polyfun_oracle_params <- function(L, coverage, min_abs_corr, max_iter,
-                                    estimate_residual_variance,
-                                    estimate_prior_variance,
+.polyfun_oracle_params <- function(L, hess, hess_iter, max_iter,
                                     prior_source) {
   list(
-    L                          = L,
-    coverage                   = coverage,
-    min_abs_corr               = min_abs_corr,
-    max_iter                   = max_iter,
-    estimate_residual_variance = estimate_residual_variance,
-    estimate_prior_variance    = estimate_prior_variance,
-    prior_source               = prior_source
+    L            = L,
+    hess         = hess,
+    hess_iter    = hess_iter,
+    max_iter     = max_iter,
+    prior_source = prior_source
   )
 }
 
-.polyfun_oracle_error_result <- function(p, L, params, elapsed, error_msg) {
+.polyfun_oracle_error_result <- function(p, params, elapsed, error_msg) {
   list(
     pip             = rep(NA_real_, p),
     credible_sets   = list(),
@@ -368,14 +318,7 @@ run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
     additional      = list(
       prior_source    = params$prior_source %||% NA_character_,
       prior_weights   = rep(NA_real_, p),
-      enrichment_used = NULL,
-      alpha           = matrix(NA_real_, nrow = L, ncol = p),
-      posterior_mean  = rep(NA_real_, p),
-      lbf             = rep(NA_real_, L),
-      cs_purity       = list(),
-      converged       = FALSE,
-      elbo            = NA_real_,
-      n_iter_run      = NA_integer_
+      enrichment_used = NULL
     ),
     error           = error_msg
   )
