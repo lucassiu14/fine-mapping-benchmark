@@ -43,20 +43,42 @@ eval_paths <- Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*", "evaluation
 if (length(eval_paths) == 0L) {
   eval_paths <- Sys.glob(file.path(OUTPUT_ROOT, "job_*", "evaluation.rds"))
 }
+
+# A supplemental run (FMB_METHODS=...) always writes evaluation_supp.rds, because
+# the suffix exists to protect the originals it is usually written beside. Point
+# such a run at a FRESH output root - the way a re-run that must not touch an
+# earlier iteration is done - and there are no originals to protect or to
+# overlay: the supp files are the only results there are. Treat them as primary
+# in that case, instead of reporting an empty root.
+SUPP_IS_PRIMARY <- FALSE
+if (length(eval_paths) == 0L) {
+  eval_paths <- Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*",
+                                   "evaluation_supp.rds"))
+  if (length(eval_paths) > 0L) {
+    SUPP_IS_PRIMARY <- TRUE
+    cat(sprintf(paste0("No evaluation.rds here, but %d evaluation_supp.rds.\n",
+                       "This root holds a supplemental run on its own, so those ",
+                       "are read as the results.\n"),
+                length(eval_paths)))
+  }
+}
 if (length(eval_paths) == 0L) {
   stop("No evaluation.rds found under ", OUTPUT_ROOT,
-       " (looked in job_*/scenario_*/ and job_*/). Has the array run?")
+       " (looked in job_*/scenario_*/ and job_*/, and for evaluation_supp.rds).",
+       " Has the array run?")
 }
 
 # Supplemental re-runs (FMB_METHODS=...) write evaluation_supp.rds next to the
 # original. Those methods were re-run after a wrapper fix, so they SUPERSEDE
 # the stale entries in evaluation.rds for the same scenario.
 supp_for <- function(eval_path) {
+  if (SUPP_IS_PRIMARY) return(NULL)   # already read as the primary file
   sp <- file.path(dirname(eval_path), "evaluation_supp.rds")
   if (file.exists(sp)) tryCatch(readRDS(sp), error = function(e) NULL) else NULL
 }
-n_supp <- length(Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*",
-                                    "evaluation_supp.rds")))
+n_supp <- if (SUPP_IS_PRIMARY) 0L else
+  length(Sys.glob(file.path(OUTPUT_ROOT, "job_*", "scenario_*",
+                            "evaluation_supp.rds")))
 if (n_supp > 0L) {
   cat(sprintf("Found %d supplemental evaluation(s); these override the originals.\n",
               n_supp))
