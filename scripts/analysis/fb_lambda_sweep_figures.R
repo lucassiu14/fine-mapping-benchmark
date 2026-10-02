@@ -3,22 +3,25 @@
 # scripts/analysis/fb_lambda_sweep_figures.R
 #
 # Figures and tables for the supplementary section on the lambda_l1 sweep of the
-# cross-region model: AP, FDR and PIP calibration for five of the eight arms in the
-# LSR's format, annotation pass-through for all eight, and every number the text
-# quotes.
+# cross-region model: AP, FDR and PIP calibration for five of the seven lambda_l1
+# arms in the LSR's format, annotation pass-through for all seven, and every number
+# the text quotes.
 #
-#   Rscript scripts/analysis/fb_lambda_sweep_figures.R [sweep_dir] [iter004_dir]
+#   Rscript scripts/analysis/fb_lambda_sweep_figures.R [sweep_dir] [iter004_dir] [out_dir]
 #
-# Defaults: results/fb_lambda_sweep and results/iter004. Figures go to
-# <sweep_dir>/figures and tables to <sweep_dir>/analysis; inputs are only read.
-# RECOMPUTE=1 rebuilds the per-draw counts, which otherwise load from
-# analysis/lambda_figures_data.rds.
+# Defaults: results/fb_lambda_sweep, results/iter004 and sweep_dir. Figures go to
+# <out_dir>/figures and tables to <out_dir>/analysis; sweep_analysis.rds is read
+# from <sweep_dir>/analysis, and inputs are only read. RECOMPUTE=1 rebuilds the
+# per-draw counts, which otherwise load from <out_dir>/analysis/lambda_figures_data.rds.
 #
-# The five arms shown:
+# The seven arms are the single-logit head at seven values of lambda_l1. The sweep
+# also refitted the removed two-logit head at 0.1223 (method "fb_xregion" in the
+# sweep's tables); it is excluded everywhere (user's decision, 2026-09-18).
+#
+# The five arms shown (the user's rule: lowest, three best, highest):
 #   - the lowest lambda_l1 (0.03)
 #   - the three with the highest average precision averaged over the four strata:
-#     the identifiable head at 0.1223, the original two-logit head at 0.1223, and
-#     the identifiable head at 0.25
+#     0.1223, 0.25 and 0.06
 #   - the highest (2.0)
 #
 # Format as iter004_lsr_figures.R: generative model down the rows, annotation type
@@ -46,24 +49,28 @@ suppressMessages({ library(ggplot2); library(grid) })
 args  <- commandArgs(trailingOnly = TRUE)
 SWEEP <- if (length(args) >= 1L) args[1] else "results/fb_lambda_sweep"
 I004  <- if (length(args) >= 2L) args[2] else "results/iter004"
-FIG <- file.path(SWEEP, "figures"); OUT <- file.path(SWEEP, "analysis")
+DEST  <- if (length(args) >= 3L) args[3] else SWEEP
+FIG <- file.path(DEST, "figures"); OUT <- file.path(DEST, "analysis")
+SW_IN <- file.path(SWEEP, "analysis", "sweep_analysis.rds")
 for (d in c(FIG, OUT)) dir.create(d, recursive = TRUE, showWarnings = FALSE)
 options(width = 220, stringsAsFactors = FALSE)
 source("scripts/analysis/lsr_palette.R")            # GREY, REF
 
+# The sweep's "fb_xregion" (renamed fb_xregion_rerun below) is the removed
+# two-logit head; it is not in ARMS, so every filter on ARMS$method drops it.
 ARMS <- data.frame(
-  method = c("fb_xregion_id_l03", "fb_xregion_id_l06", "fb_xregion_id", "fb_xregion_rerun",
+  method = c("fb_xregion_id_l03", "fb_xregion_id_l06", "fb_xregion_id",
              "fb_xregion_id_l25", "fb_xregion_id_l50", "fb_xregion_id_l100", "fb_xregion_id_l200"),
-  lambda = c(0.03, 0.06, 0.1223, 0.1223, 0.25, 0.5, 1.0, 2.0),
-  head   = c(rep("identifiable", 3), "original", rep("identifiable", 4)))
-SHOW <- c("fb_xregion_id_l03", "fb_xregion_id", "fb_xregion_rerun", "fb_xregion_id_l25", "fb_xregion_id_l200")
-LAB  <- c(fb_xregion_id_l03 = "λ = 0.03", fb_xregion_id = "λ = 0.1223",
-          fb_xregion_rerun = "λ = 0.1223, original head", fb_xregion_id_l25 = "λ = 0.25",
-          fb_xregion_id_l200 = "λ = 2")
-COL  <- c(fb_xregion_id_l03 = "#56B4E9", fb_xregion_id = "#009E73", fb_xregion_rerun = "#D55E00",
+  lambda = c(0.03, 0.06, 0.1223, 0.25, 0.5, 1.0, 2.0))
+SHOW <- c("fb_xregion_id_l03", "fb_xregion_id_l06", "fb_xregion_id", "fb_xregion_id_l25", "fb_xregion_id_l200")
+LAB  <- c(fb_xregion_id_l03 = "λ = 0.03", fb_xregion_id_l06 = "λ = 0.06", fb_xregion_id = "λ = 0.1223 (tuned)",
+          fb_xregion_id_l25 = "λ = 0.25", fb_xregion_id_l200 = "λ = 2")
+# Okabe-Ito, as lsr_palette.R. The tuned value is fb_xregion's own colour and shape.
+COL  <- c(fb_xregion_id_l03 = "#56B4E9", fb_xregion_id_l06 = "#009E73", fb_xregion_id = PAL7[["fb_xregion"]],
           fb_xregion_id_l25 = "#0072B2", fb_xregion_id_l200 = "#CC79A7")
-SHP  <- c(fb_xregion_id_l03 = 17, fb_xregion_id = 15, fb_xregion_rerun = 16,
+SHP  <- c(fb_xregion_id_l03 = 17, fb_xregion_id_l06 = 15, fb_xregion_id = SHP7[["fb_xregion"]],
           fb_xregion_id_l25 = 18, fb_xregion_id_l200 = 4)
+stopifnot(all(SHOW %in% ARMS$method), !anyDuplicated(COL), !anyDuplicated(SHP))
 REFS <- c("polyfun_ldsc", "beatrice")
 MODEL_LAB <- c(sparse = "Sparse", sparse_inf = "Sparse + infinitesimal")
 ARM_LAB   <- c(binary = "Binary annotations", continuous = "Continuous annotations")
@@ -201,7 +208,7 @@ if (file.exists(DATA) && Sys.getenv("RECOMPUTE") != "1") {
   cal$reportable <- cal$n_total >= MIN_N & cal$units_used >= MIN_UNITS
   fdr$reportable <- fdr$units_used >= MIN_UNITS
 
-  # annotation pass-through, all eight arms
+  # annotation pass-through, all seven arms
   design <- unique(L3s[, c("job_dir", "model", "annotation_type")])
   impL <- lapply(sort(list.files(file.path(SWEEP, "aux"), "^aux_.*[.]rds$", full.names = TRUE)), function(f) {
     o <- readRDS(f)
@@ -258,16 +265,16 @@ IMPS <- do.call(rbind, lapply(split(IMP, list(IMP$method, IMP$model, IMP$annotat
              sensitivity = mean(d$informative / 5), none_through = mean(!k))
 }))
 IMPS <- IMPS[order(IMPS$model, IMPS$annotation_type, match(IMPS$method, ARMS$method)), ]
-sw <- readRDS(file.path(OUT, "sweep_analysis.rds"))
+sw <- readRDS(SW_IN)
 sink(file.path(OUT, "lambda_supplement_numbers.txt"), split = TRUE)
-cat("== Mean AP over the four strata, all arms (choice of the five shown) ==\n")
+cat("== Mean AP over the four strata, all seven arms (choice of the five shown) ==\n")
 a8 <- AP[AP$method %in% ARMS$method, ]
 print(sort(tapply(a8$m, a8$method, mean), decreasing = TRUE), digits = 4)
 cat("\n== AP per stratum, mean ± 2 SE over cells ==\n")
 print(within(AP[order(AP$model, AP$annotation_type, match(AP$method, c(ARMS$method, REFS))), ],
              { m <- round(m, 3); se2 <- round(2 * se, 3); se <- NULL }), row.names = FALSE)
 cat("\n== AP paired by cell against Iteration 004's fb_xregion, beatrice, polyfun_ldsc (sweep_analysis.rds) ==\n")
-pp <- sw$ap_paired; pp$diff <- round(pp$diff, 3); pp$diff_se <- round(pp$diff_se, 3)
+pp <- sw$ap_paired[sw$ap_paired$method %in% ARMS$method, ]; pp$diff <- round(pp$diff, 3); pp$diff_se <- round(pp$diff_se, 3)
 print(pp[order(pp$versus, pp$model, pp$annotation_type, match(pp$method, ARMS$method)), ], row.names = FALSE)
 cat("\n== FDR (per iteration) at t = .5 .8 .9 .95 .99 for the five arms: mean [z against 1 - t] ==\n")
 fdr$z <- (fdr$m - (1 - fdr$t)) / fdr$se
@@ -293,12 +300,13 @@ w <- do.call(rbind, lapply(split(hi, list(hi$model, hi$annotation_type, hi$metho
              top_bands_y = paste(sprintf("%.3f", top$y[order(top$x)]), collapse = "/"))
 }))
 print(w[order(w$model, w$annotation_type, match(w$method, SHOW)), ], row.names = FALSE)
-cat("\n== Annotation pass-through, all eight arms (per scenario) ==\n")
+cat("\n== Annotation pass-through, all seven arms (per scenario) ==\n")
 print(within(IMPS, { let_through <- round(let_through, 2); informative <- round(informative, 2); inert <- round(inert, 2)
   precision <- round(precision, 3); precision_se <- round(precision_se, 3); fpr <- round(fpr, 3); fpr_se <- round(fpr_se, 3)
   sensitivity <- round(sensitivity, 3); none_through <- round(none_through, 3) }), row.names = FALSE)
-cat("\n== Runtime: identifiable head at lambda 0.1223, and Iteration 004's fb_xregion ==\n")
+cat("\n== Runtime: medians of the seven arms, then the refit at 0.1223 against Iteration 004's fb_xregion ==\n")
 rt <- sw$runtime
+print(rt[rt$method %in% ARMS$method, c("model", "annotation_type", "method", "median_s", "q25_s", "q75_s")], row.names = FALSE)
 print(rt[rt$method %in% c("fb_xregion_id", "fb_xregion"), c("model", "annotation_type", "method", "scenarios", "median_s", "q25_s",
       "q75_s", "mean_s", "cpu_hours", "ratio_median", "ratio_q25", "ratio_q75", "ratio_of_totals")], row.names = FALSE, digits = 3)
 sink()

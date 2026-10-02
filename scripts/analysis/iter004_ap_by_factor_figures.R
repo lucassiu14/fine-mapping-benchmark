@@ -54,7 +54,7 @@ stopifnot(all(round(got, 3) == quoted))
 FACTORS <- list(
   S      = list(col = "S",           lab = "Causal variants per region, S",
                 lev = c(1, 2, 3, 5, 10)),
-  phi    = list(col = "phi",         lab = "Variance explained, φ",
+  phi    = list(col = "phi",         lab = "Variance explained, h²",
                 lev = c(0.05, 0.1, 0.2, 0.4, 0.6)),
   rho    = list(col = "rho",         lab = "Sparse variance share, ρ (1 = sparse model)",
                 lev = c(0.2, 0.4, 0.6, 0.8, 1)),
