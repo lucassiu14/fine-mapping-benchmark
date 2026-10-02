@@ -56,8 +56,16 @@ if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004" 
 fi
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
-QUEUE_A="${QUEUE_A:-v1_small24}"
-QUEUE_B="${QUEUE_B:-v1_small24}"
+# Name no queue by default: Imperial routes a job from its resource request, and
+# a named queue only works while access to that one holds. v1_small72a started
+# refusing this account on 2026-10-02, which is the same trap
+# submit_benchmark_pbs.sh hit. Set QUEUE_A/QUEUE_B to force a queue back.
+QUEUE_A="${QUEUE_A-}"
+QUEUE_B="${QUEUE_B-}"
+Q_A_DIRECTIVE="# no queue named: PBS routes from the resource request"
+Q_B_DIRECTIVE="$Q_A_DIRECTIVE"
+[[ -n "$QUEUE_A" ]] && Q_A_DIRECTIVE="#PBS -q $QUEUE_A"
+[[ -n "$QUEUE_B" ]] && Q_B_DIRECTIVE="#PBS -q $QUEUE_B"
 # --- resources, sized from measured volumes rather than guessed -------------
 # Stage A: 250 scenarios x 190 fits = 47,500 per-fit metric computations, each an
 # O(p log p) sort at p <= 2000, plus reading ~250 results.rds and one sim.rds.
@@ -136,7 +144,7 @@ A_SCRIPT="$(mktemp -t fmb4a_XXXXXX.sh)"
 cat > "$A_SCRIPT" <<EOF
 #!/bin/bash
 #PBS -N fmb4collect
-#PBS -q ${QUEUE_A}
+${Q_A_DIRECTIVE}
 #PBS -l select=${SELECT_A}
 #PBS -l walltime=${WALL_A}
 #PBS -J 1-${N_ROWS}
@@ -159,7 +167,7 @@ B_SCRIPT="$(mktemp -t fmb4b_XXXXXX.sh)"
 cat > "$B_SCRIPT" <<EOF
 #!/bin/bash
 #PBS -N fmb4analyse
-#PBS -q ${QUEUE_B}
+${Q_B_DIRECTIVE}
 #PBS -l select=${SELECT_B}
 #PBS -l walltime=${WALL_B}
 #PBS -o ${LOG_DIR}/
