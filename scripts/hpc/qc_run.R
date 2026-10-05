@@ -85,8 +85,9 @@ if (length(orphan)) {
 }
 
 # --- 2. progress per row ----------------------------------------------------
+EVAL_PAT <- if (SUPP) "^evaluation_supp\\.rds$" else "^evaluation\\.rds$"
 per_row <- vapply(job_dirs, function(d)
-  length(list.files(d, pattern = "^evaluation\\.rds$", recursive = TRUE)),
+  length(list.files(d, pattern = EVAL_PAT, recursive = TRUE)),
   integer(1))
 names(per_row) <- basename(job_dirs)
 cat(sprintf("\nscenarios per row: min %d  median %d  max %d\n",
@@ -149,6 +150,7 @@ if (!is.na(focus)) {
 acc     <- new.env(parent = emptyenv())
 skipped <- new.env(parent = emptyenv())
 n_read  <- 0L
+requested <- character(0)   # what the run itself says it fitted
 for (f in pick) {
   r <- tryCatch(readRDS(f), error = function(e) NULL)
   if (is.null(r)) {
@@ -156,6 +158,8 @@ for (f in pick) {
     next
   }
   n_read <- n_read + 1L
+  if (!is.null(r$methods_run))
+    requested <- union(requested, as.character(r$methods_run))
   for (m in names(r)) {
     v <- r[[m]]
     # results.rds can carry top-level entries that are not per-method lists
@@ -216,10 +220,20 @@ cat("methods fail by construction (funmap: 100% NA on none, 0% elsewhere).\n")
 
 # --- verdict ---------------------------------------------------------------
 cat("\n--- verdict ---------------------------------------------------\n")
+# The full registry is only the right expectation for a full run. A
+# supplemental re-run fits the methods named in FMB_METHODS and nothing else, so
+# measuring it against all nineteen reports the fourteen it was never asked for
+# as missing, under a heading telling the reader not to trust the run. Each
+# results file records what it actually ran, so prefer that where it is present.
 expected <- c("susie","susie_inf","finemap","finemap_inf","abf","marginal_z",
               "carma","finimom","sparsepro","funmap","paintor","polyfun_oracle",
               "polyfun_est","polyfun_ldsc","sbayesrc","beatrice",
               "functional_beatrice","fb_pooled","fb_xregion")
+if (length(requested)) {
+  cat(sprintf("the run asked for %d method(s): %s\n",
+              length(requested), paste(sort(requested), collapse = ", ")))
+  expected <- requested
+}
 missing <- setdiff(expected, tab$method)
 if (length(missing)) {
   cat(sprintf("MISSING ENTIRELY (%d): %s\n", length(missing),
