@@ -50,10 +50,23 @@ job_dirs <- list.dirs(root, recursive = FALSE)
 job_dirs <- job_dirs[grepl("/job_[0-9]+", job_dirs)]
 if (!length(job_dirs)) stop("no job_* directories under ", root, call. = FALSE)
 
+# A supplemental run (FMB_METHODS=...) writes results_supp.rds and
+# evaluation_supp.rds. Pointed at a root holding only those - which is how a
+# re-run that must not touch an earlier iteration is done - looking for the
+# unsuffixed names alone reports an empty run and hides every check below.
 eval_files <- list.files(root, pattern = "^evaluation\\.rds$",
                          recursive = TRUE, full.names = TRUE)
 res_files  <- list.files(root, pattern = "^results\\.rds$",
                          recursive = TRUE, full.names = TRUE)
+SUPP <- FALSE
+if (!length(res_files) && !length(eval_files)) {
+  eval_files <- list.files(root, pattern = "^evaluation_supp\\.rds$",
+                           recursive = TRUE, full.names = TRUE)
+  res_files  <- list.files(root, pattern = "^results_supp\\.rds$",
+                           recursive = TRUE, full.names = TRUE)
+  SUPP <- length(res_files) > 0L || length(eval_files) > 0L
+  if (SUPP) cat("reading the supplemental files: this root holds only those\n\n")
+}
 
 cat("=============================================================\n")
 cat(sprintf("QC: %s\n", root))
