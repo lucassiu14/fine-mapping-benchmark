@@ -134,3 +134,98 @@ iteration with it would now use the annotations.
   - The G-test selected only that annotation (p = 3.7e-7, W = 1.76).
   - Mean AP was 0.648 with annotations, against 0.516 for the step-1 fit without
     them.
+
+---
+
+## Results: Iteration 008 (2026-10-05)
+
+The rewritten comparators were re-run over Iteration 004's exact grid, into
+`$EPHEMERAL/fmbench/results/iter008_fidelity`, with `susie` carried along as a
+reproduction control. Tables in `results/iter008_fidelity`.
+
+**The simulations are Iteration 004's.** A canary over rows 1-2 compared 5,000 `susie`
+fits: `n_variants` and per-fit AP identical on every one. The Iteration 006 edit to
+`simulate_phenotypes.R` is inert for this grid, so the new comparator numbers can be
+placed directly beside Iteration 004's for every method that was NOT re-run.
+
+### Average precision by stratum
+
+Mean over cells, 95% interval. Strata are never pooled.
+
+| stratum | method | Iteration 008 | Iteration 004 |
+|---|---|---|---|
+| sparse, none | polyfun_ldsc / _oracle | 0.708 ± 0.023 | 0.682 ± 0.023 |
+| | sbayesrc | 0.542 ± 0.023 | 0.484 ± 0.026 |
+| sparse, binary | polyfun_ldsc | 0.737 ± 0.012 | 0.773 ± 0.012 |
+| | polyfun_oracle | 0.857 ± 0.009 | 0.843 ± 0.010 |
+| | sbayesrc | 0.679 ± 0.010 | 0.509 ± 0.013 |
+| sparse, continuous | polyfun_ldsc | 0.724 ± 0.015 | 0.791 ± 0.013 |
+| | polyfun_oracle | 0.937 ± 0.006 | 0.911 ± 0.007 |
+| | sbayesrc | 0.793 ± 0.009 | 0.619 ± 0.016 |
+| sparse_inf, none | polyfun_ldsc / _oracle | 0.536 ± 0.018 | 0.521 ± 0.017 |
+| | sbayesrc | 0.451 ± 0.015 | 0.384 ± 0.016 |
+| sparse_inf, binary | polyfun_ldsc | 0.535 ± 0.009 | 0.544 ± 0.009 |
+| | polyfun_oracle | 0.640 ± 0.008 | 0.631 ± 0.008 |
+| | sbayesrc | 0.502 ± 0.009 | 0.381 ± 0.007 |
+| sparse_inf, continuous | polyfun_ldsc | 0.538 ± 0.010 | 0.560 ± 0.009 |
+| | polyfun_oracle | 0.774 ± 0.007 | 0.753 ± 0.007 |
+| | sbayesrc | 0.581 ± 0.009 | 0.464 ± 0.008 |
+
+`sbayesrc` gains everywhere, by 0.06 in the unannotated arm and by up to 0.17 under
+annotations. `polyfun_ldsc` is unchanged where there are no annotations to estimate from
+and loses 0.01 to 0.07 where there are. `polyfun_oracle` gains slightly: it shares the new
+SuSiE settings but is handed the true prior, so only the fine-mapping half changed for it.
+
+### What this does to the headline
+
+With comparators running their published algorithms, and `fb_xregion` as Iteration 004
+measured it on the same simulations, paired on fits usable for all three:
+
+| stratum | fb_xregion | polyfun_ldsc | sbayesrc | fb_xregion vs best |
+|---|---|---|---|---|
+| sparse, binary | 0.7549 | 0.7373 | 0.6867 | +0.018 (SE 0.0026, t 6.7) |
+| sparse, continuous | 0.7948 | 0.7228 | 0.8003 | -0.006 (t -0.9) |
+| sparse_inf, binary | 0.6113 | 0.5339 | 0.5093 | +0.077 (t 59.6) |
+| sparse_inf, continuous | 0.6567 | 0.5379 | 0.5873 | +0.069 (t 17.7) |
+
+Binary annotations under the sparse model are the one annotated stratum the LSR concedes
+("under binary annotations polyfun_ldsc leads, 0.773 against 0.748"). It no longer does.
+The sparse continuous stratum stays a tie but against `sbayesrc` rather than
+`polyfun_ldsc`; by enrichment fold, `fb_xregion` wins at 2.7 (+0.056) and `sbayesrc` edges
+it at 5.4, 8.1 and 10.8 by 0.015 to 0.024, none of it significant.
+
+`fb_xregion`'s distance to the oracle prior is now shorter than `polyfun_ldsc`'s in every
+annotated stratum; under binary annotations it was the longer of the two before (0.095
+against 0.070, now 0.102 against 0.120).
+
+### Read these with three qualifications
+
+1. **Paper-faithful is not software-verified.** Neither comparator has been checked against
+   the released program. `sbayesrc` cannot be: it is distributed for genome-wide analysis
+   with pre-computed low-rank LD from a fixed panel, which does not apply to simulated
+   regions. `polyfun_ldsc` could be, and that is the one test that would settle the drop
+   below beyond argument.
+2. **`polyfun_ldsc` got worse, which favours our own method**, so it deserves scepticism.
+   Two things argue it is real: `polyfun_oracle`, which shares the identical new
+   fine-mapping path, got slightly BETTER, so the loss is entirely in prior estimation; and
+   the paper's prior estimation pays two costs the old ad-hoc NNLS did not - the odd/even
+   parity split halves the regions available to each fit, and the 20-bin Ckmedian step
+   discretises what was a continuous per-SNP prior.
+3. **New failures.** The modified HESS returns zero heritability on some loci and PolyFun
+   errors there, so `polyfun_ldsc` and `polyfun_oracle` lose about 4.5% of fits where
+   Iteration 004 lost none. They concentrate at SMALL regions, not large: ~5.7% at p=500,
+   7.4% at p=1000, 0.6% at p=2000, because the estimator uses the SNPs below the 0.005
+   quantile of the locus p-values and so gets 2-3 of them in a small region against 10 in a
+   large one. Any comparison with Iteration 004 must be paired on surviving fits.
+
+### Also stale now
+
+`validity_checks.txt` reports `[FAIL] polyfun_ldsc == susie on the none arm`. That equality
+held for Iteration 004's plain SuSiE and is false for PolyFun's L = 10 with the HESS prior
+variance. The invariant that holds now is `polyfun_ldsc == polyfun_oracle` on that arm:
+586 of 625 cells exactly, maximum difference 0.0025, the residue because the modified HESS
+averages over 100 random maximal independent sets.
+
+The LSR's p26 implementation check - "Both PolyFun variants and susie coincide exactly at
+0.682, as they must" - is superseded for the same reason. The two PolyFun variants now
+coincide at 0.708 and `susie` sits at 0.682.
