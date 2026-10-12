@@ -44,7 +44,13 @@ stopifnot(!anyNA(L3$rho))
 
 # --- the same table as section 6.3, before anything is pooled ---------------
 # Results quote these per-stratum means (sparse model, binary annotations).
-quoted <- c(polyfun_ldsc = 0.773, susie = 0.723, fb_xregion = 0.748)
+#
+# polyfun_ldsc was 0.773 here, the value the submitted LSR quotes. Iteration 008
+# replaced it with the implementation that follows PolyFun's Online Methods, and
+# it reads 0.737 - so fb_xregion's 0.748 now leads the stratum the LSR concedes.
+# susie and fb_xregion are unchanged, which is the point of keeping all three in
+# this check: the two that were not re-run must not move.
+quoted <- c(polyfun_ldsc = 0.737, susie = 0.723, fb_xregion = 0.748)
 got <- vapply(names(quoted), function(m) mean(L3$ap[L3$method == m & L3$model == "sparse" &
                                                      L3$annotation_type == "binary"]), 0)
 cat("Section 6.3 check (sparse, binary):\n")
@@ -103,7 +109,7 @@ for (fk in names(FACTORS)) {
     scale_colour_manual(values = c(PAL7, setNames(GREY, OTH)), limits = c(M7, OTH), name = NULL) +
     scale_shape_manual(values = c(SHP7, setNames(16, OTH)), limits = c(M7, OTH), name = NULL) +
     labs(x = f$lab, y = "Mean average precision over cells (95% CI)") + th
-  ggsave(file.path(FIG, sprintf("fig_ap_by_%s.pdf", fk)), p, width = 6.3, height = 3.4, device = cairo_pdf)
+  ggsave(file.path(FIG, sprintf("fig_ap_by_%s.pdf", fk)), p, width = 6.3, height = 3.4, device = PDF_DEVICE)
 
   tab <- reshape(hi[, c("level", "method", "m")], idvar = "method", timevar = "level", direction = "wide")
   names(tab) <- sub("^m\\.", "", names(tab))

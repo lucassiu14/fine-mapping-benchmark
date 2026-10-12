@@ -98,7 +98,7 @@ th <- theme_bw(base_size = 8) +
         legend.text  = element_text(size = 6.9),
         legend.key.size = unit(9, "pt"),
         legend.position = "right")
-save_pdf <- function(p, file, w = 7.6, h = 5.3) ggsave(file.path(FIG, file), p, width = w, height = h, device = cairo_pdf)
+save_pdf <- function(p, file, w = 7.6, h = 5.3) ggsave(file.path(FIG, file), p, width = w, height = h, device = PDF_DEVICE)
 arm_scales <- function() list(
   scale_colour_manual(values = COL[SHOW], limits = SHOW, labels = unname(LAB[SHOW]), name = NULL),
   scale_shape_manual(values = SHP[SHOW], limits = SHOW, labels = unname(LAB[SHOW]), name = NULL))
