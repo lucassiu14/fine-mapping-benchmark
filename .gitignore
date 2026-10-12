@@ -94,3 +94,4 @@ docs/testing_report.md
 # Optuna tuning artefacts (sims, study journals, worker logs).
 # Root-anchored so it does NOT match scripts/tuning/ (the code).
 /tuning/
+zenodo/
