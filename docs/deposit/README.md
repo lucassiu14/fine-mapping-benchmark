@@ -96,8 +96,8 @@ credible-sets/
 posterior-inclusion-probabilities/
   <row>.rds                          the PIPs each method assigned (see below)
 
-runtime-and-annotation-importance/
-  <row>.rds                          seconds per fit; LassoNet annotation weights
+runtime/
+  <row>.rds                          seconds per fit, and per scenario
 ```
 
 ## Three units of analysis

@@ -23,7 +23,7 @@ SRC="${1:-results/iter004}"
 DEST="${2:-zenodo/main-simulation}"
 [[ -d "$SRC" ]] || { echo "ERROR: no $SRC" >&2; exit 1; }
 rm -rf "$DEST"
-mkdir -p "$DEST"/{evaluation-metrics,credible-sets/per-fit,posterior-inclusion-probabilities,runtime-and-annotation-importance}
+mkdir -p "$DEST"/{evaluation-metrics,credible-sets/per-fit,posterior-inclusion-probabilities,runtime}
 
 # Clone if the filesystem supports it (APFS), else hard link, else copy.
 place() {
@@ -51,10 +51,26 @@ for f in "$SRC"/piptail/piptail_*.rds; do
   place "$f" "$DEST/posterior-inclusion-probabilities/$(basename "$f" | sed 's/^piptail_//')"
 done
 
-# --- runtime and annotation importance --------------------------------------
-for f in "$SRC"/aux/aux_*.rds; do
-  place "$f" "$DEST/runtime-and-annotation-importance/$(basename "$f" | sed 's/^aux_//')"
-done
+# --- runtime ----------------------------------------------------------------
+# The aux store holds two record lists: `runtime`, which is a reported result,
+# and `importance`, the LassoNet annotation weights, which are a model output
+# rather than an evaluation metric and are not deposited. Written fresh rather
+# than cloned, because the clone shares storage with results/iter004 and must
+# not be edited in place.
+Rscript -e '
+  src <- sort(Sys.glob(file.path("'"$SRC"'", "aux", "aux_*.rds")))
+  dst <- "'"$DEST"'/runtime"
+  n <- 0L
+  for (f in src) {
+    a <- readRDS(f)
+    a$importance <- NULL
+    out <- file.path(dst, sub("^aux_", "", basename(f)))
+    tmp <- paste0(out, ".tmp"); saveRDS(a, tmp); file.rename(tmp, out)
+    n <- n + length(a$runtime)
+  }
+  cat("runtime:", length(src), "files,", format(n, big.mark = ","),
+      "records, annotation importance dropped\n")
+' 2>&1 | grep -v "out-of-sync\|renv::status"
 
 # --- the documentation that makes the folder navigable ----------------------
 # Kept in docs/deposit so it is version controlled and survives the rm -rf above.
@@ -82,4 +98,4 @@ echo "staged:"
 du -sh "$DEST"/* | sed 's/^/  /'
 echo "total: $(du -sh "$DEST" | cut -f1)"
 echo
-echo "file counts: pips $(ls "$DEST"/posterior-inclusion-probabilities | wc -l | tr -d ' '), credible sets $(ls "$DEST"/credible-sets/per-fit | wc -l | tr -d ' '), runtime $(ls "$DEST"/runtime-and-annotation-importance | wc -l | tr -d ' ')"
+echo "file counts: pips $(ls "$DEST"/posterior-inclusion-probabilities | wc -l | tr -d ' '), credible sets $(ls "$DEST"/credible-sets/per-fit | wc -l | tr -d ' '), runtime $(ls "$DEST"/runtime | wc -l | tr -d ' ')"

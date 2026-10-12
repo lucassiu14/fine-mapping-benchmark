@@ -159,14 +159,13 @@ below-floor variants were causal is not retained.
 
 ---
 
-## `runtime-and-annotation-importance/<row>.rds`
+## `runtime/<row>.rds`
 
-A list with `job_dir`, `scenarios_read`, and two record lists:
+A list with `job_dir`, `scenarios_read`, and a `runtime` record list:
+`job_dir`, `scenario_id`, `region_id`, `method`, `runtime_seconds`, `scope`,
+`n_total`, `n_failed`.
 
-- `runtime` — `job_dir`, `scenario_id`, `region_id`, `method`,
-  `runtime_seconds`, `scope`, `n_total`, `n_failed`. `scope` distinguishes a
-  per-region fit from work done once per scenario: methods that train one prior
-  across all ten regions before fitting any of them do most of their work there,
-  and charging it per region would misattribute it.
-- `importance` — the LassoNet annotation weights the BEATRICE-family methods
-  return, per scenario. Empty for every other method, which do not produce them.
+`scope` distinguishes a per-region fit from work done once per scenario. Methods
+that train one prior across all ten regions before fitting any of them do most of
+their work there, and charging it per region would misattribute it; summing
+`runtime_seconds` within a scenario gives that method's true cost.
