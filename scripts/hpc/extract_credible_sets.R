@@ -46,11 +46,34 @@ scen_dirs <- scen_dirs[grepl("/scenario_[0-9]+", scen_dirs)]
 
 rows <- vector("list", length(scen_dirs) * 400L)
 k <- 0L; n_fits <- 0L; n_with_sets <- 0L
+n_supp_used <- 0L; n_supp_only <- 0L
 for (sd in scen_dirs) {
   f <- file.path(sd, "results.rds")
-  if (!file.exists(f)) next
+  # A re-run that must leave an earlier iteration untouched writes
+  # results_supp.rds into a root of its own, with no unsuffixed file beside it.
+  # Reading only results.rds there walks every scenario and writes an empty
+  # extract - the blind spot collect_results.R and qc_run.R both had. Fall back
+  # per scenario, so a mixed root still overlays below, matching extract_aux.R.
+  supp_only <- FALSE
+  if (!file.exists(f)) {
+    f <- file.path(sd, "results_supp.rds")
+    if (!file.exists(f)) next
+    supp_only <- TRUE
+    n_supp_only <- n_supp_only + 1L
+  }
   r <- tryCatch(readRDS(f), error = function(e) NULL)
   if (is.null(r)) next
+  # Overlay a supplemental re-run per method where both files are present, so a
+  # re-run method's own credible sets replace the superseded ones and methods
+  # absent from the re-run keep theirs.
+  fs <- file.path(sd, "results_supp.rds")
+  if (!supp_only && file.exists(fs)) {
+    rs <- tryCatch(readRDS(fs), error = function(e) NULL)
+    if (!is.null(rs)) {
+      for (sm in names(rs)) r[[sm]] <- rs[[sm]]
+      n_supp_used <- n_supp_used + 1L
+    }
+  }
   sc_idx <- suppressWarnings(as.integer(sub("^scenario_", "", basename(sd))))
 
   for (m in names(r)) {
@@ -83,3 +106,7 @@ out <- file.path(out_dir, sprintf("cs_%s.rds", label))
 saveRDS(list(job_dir = label, fits = k, rows = rows), out)
 message(sprintf("  wrote %s  (%d fits, %d with at least one set, %.1f MB)",
                 basename(out), n_fits, n_with_sets, file.size(out) / 1024^2))
+if (n_supp_only) message(sprintf("  read results_supp.rds alone in %d of %d scenarios",
+                                 n_supp_only, length(scen_dirs)))
+if (n_supp_used) message(sprintf("  overlaid results_supp.rds in %d of %d scenarios",
+                                 n_supp_used, length(scen_dirs)))
