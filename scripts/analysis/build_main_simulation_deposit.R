@@ -189,3 +189,21 @@ for (d in c("README.md", "DATA-DICTIONARY.md")) {
   file.copy(s, file.path(DEST, d), overwrite = TRUE)
 }
 cat("\nstaged to ", DEST, "\n", sep = "")
+
+# --- package exactly what gets uploaded -------------------------------------
+# Zenodo stores a flat list of files, not folders, so the structure survives only
+# inside the archive. The four small files sit beside it so the record page is
+# legible without a 1.4 GB download; each is a copy of a file already inside.
+UP <- file.path(dirname(DEST), "upload")
+unlink(UP, recursive = TRUE); dir.create(UP, recursive = TRUE)
+tar <- file.path(UP, paste0(basename(DEST), ".tar.gz"))
+system2("tar", c("-czf", shQuote(tar), "-C", shQuote(dirname(DEST)), shQuote(basename(DEST))))
+for (f in c("README.md", "DATA-DICTIONARY.md", "simulation-grid.csv", "fit-metrics.csv.gz"))
+  file.copy(file.path(DEST, f), file.path(UP, f), overwrite = TRUE)
+
+cat("\nupload set (", UP, "):\n", sep = "")
+inf <- file.info(list.files(UP, full.names = TRUE))
+for (i in order(-inf$size))
+  cat(sprintf("  %-28s %8.1f MB\n", basename(rownames(inf))[i], inf$size[i] / 1024^2))
+cat("\nsha256 of the archive:\n  ",
+    system2("shasum", c("-a", "256", shQuote(tar)), stdout = TRUE), "\n")
