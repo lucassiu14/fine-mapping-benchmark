@@ -35,7 +35,12 @@ if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004/p
   exit 1
 fi
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
-QUEUE="${QUEUE:-v1_small72a}"
+# Name no queue by default: Imperial routes from the resource request, and a
+# named queue only works while access to it holds. v1_small72a began refusing
+# this account on 2026-10-02. Set QUEUE=<name> to force one back.
+QUEUE="${QUEUE-}"
+QUEUE_DIRECTIVE="# no queue named: PBS routes from the resource request"
+[[ -n "$QUEUE" ]] && QUEUE_DIRECTIVE="#PBS -q $QUEUE"
 SELECT="${SELECT:-1:ncpus=1:mem=32gb}"
 WALLTIME="${WALLTIME:-06:00:00}"
 
@@ -64,7 +69,7 @@ JOB="$(mktemp -t fmbtail_XXXXXX.sh)"
 cat > "$JOB" <<EOF
 #!/bin/bash
 #PBS -N fmbtail
-#PBS -q ${QUEUE}
+${QUEUE_DIRECTIVE}
 #PBS -l select=${SELECT}
 #PBS -l walltime=${WALLTIME}
 #PBS -J 1-${N_ROWS}
@@ -78,7 +83,7 @@ Rscript scripts/hpc/extract_pip_tail.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${
 echo "[tail \${PBS_ARRAY_INDEX}] done \$(date)"
 EOF
 echo
-echo "Submitting array 1-${N_ROWS} to ${QUEUE} ..."
+echo "Submitting array 1-${N_ROWS} to ${QUEUE:-the queue PBS selects} ..."
 qsub "$JOB"
 cat <<EOF
 
