@@ -125,7 +125,7 @@ if (file.exists(fo_p)) {
 
 # --- say plainly what is still superseded -----------------------------------
 stale <- c("calibration_bands9.rds", "fdr_thresholds.rds", "calib_fdr_periter.rds",
-           "calib_fdr_periter_units.rds", "native_credible_sets.rds",
+           "native_credible_sets.rds",
            "aux/ (45 files)", "credsets/ (45 files)", "piptail/ (45 files)",
            "figures_by_factor/ap_by_factor_data.rds", "iter004_sense_v/sense_v.rds")
 present <- stale[file.exists(file.path(OLD, sub(" .*", "", stale)))]
