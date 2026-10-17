@@ -1040,3 +1040,161 @@ test_that("[L4] save=FALSE does not create the output_dir", {
                    save = FALSE, output_dir = tmp, verbose = FALSE)
   expect_false(dir.exists(tmp))
 })
+
+
+# =============================================================================
+# [M] Per-region metrics: nothing pooled across regions
+#
+# The rule being tested: per-region SCALARS are averaged, COUNTS are summed and
+# the rate formed afterwards. Pooling a ranking across regions lets one
+# region's false positives outrank another region's true positive, which is a
+# different quantity - not a noisier estimate of the same one.
+# =============================================================================
+
+test_that("[M] per_region has exactly one row per (method, scenario, region)", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  expect_s3_class(pr, "data.frame")
+  key <- pr[c("method", "scenario_id", "region_id")]
+  expect_equal(nrow(pr), nrow(unique(key)))
+  expect_setequal(unique(pr$method), res_A$methods_run)
+  # 2 regions x (2 S x 2 phi x 2 iter) scenarios x 4 methods
+  expect_equal(nrow(pr), 2L * length(sim_A$scenarios) * length(res_A$methods_run))
+})
+
+test_that("[M] per_region carries the design factors and the counts", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  for (col in c("method", "scenario_id", "region_id", "S", "phi",
+                "region_size", "n_variants", "n_causal", "ap",
+                "failed", "bad_pip", "runtime_seconds",
+                "n_cs", "n_cs_with_causal", "n_causal_captured",
+                "nsel_at_095", "tp_at_095", "n_band_top", "c_band_top"))
+    expect_true(col %in% names(pr), info = col)
+  ok <- !pr$failed & !pr$bad_pip
+  expect_true(all(pr$ap[ok] >= 0 & pr$ap[ok] <= 1, na.rm = TRUE))
+  expect_true(all(pr$tp_at_095[ok] <= pr$nsel_at_095[ok], na.rm = TRUE))
+  expect_true(all(pr$n_causal_captured[ok] <= pr$n_causal[ok], na.rm = TRUE))
+})
+
+test_that("[M] a failed fit becomes an all-NA metric row, not a dropped row", {
+  res_bad <- res_A
+  res_bad$susie$results[[1]]$error <- "forced failure"
+  pr <- per_region_metrics(sim_A, res_bad, verbose = FALSE)
+  expect_equal(nrow(pr),
+               nrow(per_region_metrics(sim_A, res_A, verbose = FALSE)))
+  row <- pr[pr$method == "susie" &
+            pr$scenario_id == res_A$susie$results[[1]]$scenario_id &
+            pr$region_id   == res_A$susie$results[[1]]$region_id, ]
+  expect_true(row$failed)
+  expect_true(is.na(row$ap))
+})
+
+test_that("[M] non-finite PIPs are marked failed, never repaired", {
+  res_bad <- res_A
+  res_bad$susie$results[[1]]$pip[1] <- NaN
+  pr <- per_region_metrics(sim_A, res_bad, verbose = FALSE)
+  row <- pr[pr$method == "susie" &
+            pr$scenario_id == res_A$susie$results[[1]]$scenario_id &
+            pr$region_id   == res_A$susie$results[[1]]$region_id, ]
+  expect_true(row$bad_pip)
+  expect_true(is.na(row$ap))
+})
+
+test_that("[M] evaluate_methods()$ap is the mean of the per-region APs", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  for (m in res_A$methods_run) {
+    v <- pr$ap[pr$method == m]
+    v <- v[is.finite(v)]
+    if (!length(v)) next
+    expect_equal(eval_A[[m]]$global$ap, mean(v), tolerance = 1e-12,
+                 info = sprintf("method=%s", m))
+    expect_equal(eval_A[[m]]$global$ap_n_fits, length(v),
+                 info = sprintf("method=%s", m))
+  }
+})
+
+test_that("[M] aggregate_region_metrics sums counts and averages scalars", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr)
+  expect_equal(nrow(ag), length(res_A$methods_run))
+  for (m in ag$method) {
+    sub <- pr[pr$method == m, ]
+    expect_equal(ag$nsel_at_095[ag$method == m],
+                 sum(sub$nsel_at_095, na.rm = TRUE), info = m)
+    v <- sub$ap[is.finite(sub$ap)]
+    if (length(v))
+      expect_equal(ag$ap[ag$method == m], mean(v), tolerance = 1e-12, info = m)
+    expect_equal(ag$n_fits[ag$method == m], nrow(sub), info = m)
+  }
+})
+
+test_that("[M] aggregate_region_metrics reproduces the pooled CS rates", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr)
+  for (m in ag$method) {
+    cov_ref <- eval_A[[m]]$global$cs_coverage
+    pow_ref <- eval_A[[m]]$global$cs_power
+    if (!is.na(cov_ref))
+      expect_equal(ag$cs_coverage[ag$method == m], cov_ref,
+                   tolerance = 1e-12, info = m)
+    if (!is.na(pow_ref))
+      expect_equal(ag$cs_power[ag$method == m], pow_ref,
+                   tolerance = 1e-12, info = m)
+  }
+})
+
+test_that("[M] aggregating by a factor splits the fits without losing any", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  for (axis in c("S", "phi", "region_size")) {
+    ag <- aggregate_region_metrics(pr, by = axis)
+    expect_equal(sum(ag$n_fits), nrow(pr), info = axis)
+    expect_true(all(ag$nsel_at_095 >= 0), info = axis)
+  }
+  # And on a combination evaluate_methods() does not offer.
+  ag2 <- aggregate_region_metrics(pr, by = c("S", "phi"))
+  expect_equal(sum(ag2$n_fits), nrow(pr))
+})
+
+test_that("[M] grouping keeps NA levels instead of dropping those rows", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  # p_causal is NA throughout a sparse simulation; grouping on it must not
+  # delete every row, which is what aggregate()/split() would do.
+  expect_true(all(is.na(pr$p_causal)))
+  ag <- aggregate_region_metrics(pr, by = "p_causal")
+  expect_equal(sum(ag$n_fits), nrow(pr))
+  expect_true(all(is.na(ag$p_causal)))
+})
+
+test_that("[M] compute_ap_exact scores ties as a block and guards non-finites", {
+  # A perfect ranking.
+  expect_equal(compute_ap_exact(c(0.9, 0.1, 0.05), c(TRUE, FALSE, FALSE)), 1)
+  # All tied: the causal shares one block of 4, so precision is 1/4.
+  expect_equal(compute_ap_exact(rep(0.25, 4), c(TRUE, FALSE, FALSE, FALSE)),
+               0.25)
+  # Two causals, ranked 1st and 3rd of 4: (1/1 + 2/3) / 2.
+  expect_equal(compute_ap_exact(c(0.4, 0.3, 0.2, 0.1),
+                                c(TRUE, FALSE, TRUE, FALSE)),
+               (1 + 2 / 3) / 2)
+  # No causal variants, and non-finite input.
+  expect_true(is.na(compute_ap_exact(runif(10), rep(FALSE, 10))))
+  expect_true(is.na(compute_ap_exact(c(1, NaN, 0.5), c(TRUE, FALSE, FALSE))))
+  expect_true(is.na(compute_ap_exact(c(1, Inf, 0.5), c(TRUE, FALSE, FALSE))))
+})
+
+test_that("[M] the pooled-ranking estimator is kept but differs from ap", {
+  # ap_pooled_grid is retained for continuity with older results. It is NOT the
+  # same quantity: it reads AP off the threshold grid of the ranking pooled
+  # across the stratum's regions. The difference is method-dependent in sign,
+  # which is why it cannot be used to rank methods.
+  for (m in res_A$methods_run) {
+    g <- eval_A[[m]]$global
+    expect_true(is.numeric(g$ap_pooled_grid))
+    expect_true(is.numeric(g$auprc))
+  }
+})
+
+test_that("[M] evaluate_methods(per_region = FALSE) omits the table", {
+  ev <- evaluate_methods(sim_A, res_A, per_region = FALSE, verbose = FALSE)
+  expect_null(ev$per_region)
+  ev2 <- evaluate_methods(sim_A, res_A, verbose = FALSE)
+  expect_s3_class(ev2$per_region, "data.frame")
+})

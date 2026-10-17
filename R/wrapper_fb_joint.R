@@ -192,7 +192,7 @@
     "--gamma_coverage",       as.character(gv("gamma_coverage", 0.95)),
     "--sparse_concrete",      as.character(as.integer(gv("sparse_concrete", 50))),
     "--prior_regularisation", as.character(gv("prior_regularisation", 1.0)),
-    "--lambda_l1",            as.character(gv("lambda_l1", 0.01)),
+    "--lambda_l1",            as.character(gv("lambda_l1", 0.1223)),
     "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0))
   )
 

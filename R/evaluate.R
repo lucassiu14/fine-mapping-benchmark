@@ -56,6 +56,10 @@
 #'   curve. Default: seq(0, 1, by = 0.005).
 #' @param n_pip_cal_bins Integer. Number of equal-width bins for PIP
 #'   calibration. Default: 10.
+#' @param per_region Logical. Also attach the per-region table from
+#'   \code{\link{per_region_metrics}} as \code{$per_region}: one row per
+#'   (method, scenario, region), nothing pooled, so it can be aggregated along
+#'   axes this function does not offer. Default: TRUE.
 #' @param save Logical. If TRUE, save the full evaluation object as
 #'   \code{evaluation.rds} inside \code{output_dir}, and write a flat
 #'   per-method summary table as \code{evaluation_summary.csv}.
@@ -65,15 +69,31 @@
 #'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress. Default: TRUE.
 #'
-#' @return A named list, one element per method, each containing
-#'   \code{global}, \code{by_S}, \code{by_phi}, and \code{by_p_causal}
-#'   sub-lists.  See file header for the fields in each stratum.
+#' @return A named list with one element per method, each containing
+#'   \code{global} and the \code{by_*} strata (see the file header for the
+#'   fields in each), plus \code{$per_region}: a single data frame covering
+#'   every method, one row per region-fit.
 #'
+#'   \strong{Which number to use.} \code{ap} is the mean of the per-region
+#'   average precisions and is the one to report. \code{auprc} and
+#'   \code{ap_pooled_grid} are computed on the ranking POOLED across the
+#'   stratum's regions, which lets one region's false positives outrank
+#'   another's true positive; they are kept for continuity with older results.
+#'   \code{fdr_power_curve} and \code{pip_calibration} are correctly pooled,
+#'   because a rate on one region's handful of selections is unestimable.
+#'
+#'   To aggregate on your own axes, work from \code{$per_region} with
+#'   \code{\link{aggregate_region_metrics}}, which sums the counts and
+#'   averages the per-region scalars.
+#'
+#' @seealso \code{\link{per_region_metrics}},
+#'   \code{\link{aggregate_region_metrics}}
 #' @export
 evaluate_methods <- function(simulation,
                              results,
                              pip_thresholds = seq(0, 1, by = 0.005),
                              n_pip_cal_bins = 10L,
+                             per_region     = TRUE,
                              save           = FALSE,
                              output_dir     = "results",
                              verbose        = TRUE) {
@@ -106,6 +126,12 @@ evaluate_methods <- function(simulation,
       by_true_annotation_type = .stratify_metrics_by_annotation_type(fits, pip_thresholds, n_pip_cal_bins)
     )
   }
+
+  # The per-region table: one row per (method, scenario, region), nothing pooled
+  # across regions, so a caller can aggregate along axes this function does not
+  # offer. See per_region_metrics() for the aggregation rule.
+  output$per_region <- if (isTRUE(per_region))
+    per_region_metrics(simulation, results, verbose = FALSE) else NULL
 
   output$methods_evaluated   <- methods
   output$simulation_params   <- simulation$params
@@ -352,6 +378,8 @@ evaluate_methods <- function(simulation,
       fdr_power_curve = NULL,
       auprc           = NA_real_,
       ap              = NA_real_,
+      ap_n_fits       = 0L,
+      ap_pooled_grid  = NA_real_,
       pip_calibration = NULL,
       cs_coverage     = NA_real_,
       cs_power        = NA_real_,
@@ -373,12 +401,31 @@ evaluate_methods <- function(simulation,
     v
   }))
 
-  # Power / FDR curve
+  # Power / FDR curve. Correctly POOLED: FDR and power are properties of a
+  # population of calls, and a rate computed on one region's 0-2 selections is
+  # unestimable. Per-region counts are available from per_region_metrics().
   fdr_power <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
 
-  # AUPRC (trapezoid, legacy) + AP (correct estimator)
+  # AP is a PER-REGION quantity and is averaged over regions, never read off
+  # the pooled curve. The AP of several regions' merged ranked list is not the
+  # mean of their APs: merging lets one region's false positives outrank
+  # another region's true positive, which describes an analysis nobody
+  # performs. Computing it on the pooled curve also reads it off the threshold
+  # grid, which biases AP downward by more at low heritability than at high -
+  # a bias in exactly the dependence one usually wants to measure.
+  ap_per_fit <- vapply(valid, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    compute_ap_exact(f$pip, y)
+  }, numeric(1))
+  ap        <- if (any(is.finite(ap_per_fit)))
+                 mean(ap_per_fit[is.finite(ap_per_fit)]) else NA_real_
+  ap_n_fits <- sum(is.finite(ap_per_fit))
+
+  # auprc stays on the pooled curve, as a trapezoid, for continuity with
+  # results produced before `ap` was separated out. Prefer `ap`.
   auprc <- .compute_auprc(fdr_power$precision, fdr_power$recall)
-  ap    <- .compute_ap(fdr_power$precision, fdr_power$recall)
+  ap_pooled_grid <- .compute_ap(fdr_power$precision, fdr_power$recall)
 
   # PIP calibration
   pip_cal <- .pip_calibration(pip_vals, is_causal, n_pip_cal_bins)
@@ -394,6 +441,8 @@ evaluate_methods <- function(simulation,
     fdr_power_curve = fdr_power,
     auprc           = auprc,
     ap              = ap,
+    ap_n_fits       = ap_n_fits,
+    ap_pooled_grid  = ap_pooled_grid,
     pip_calibration = pip_cal,
     cs_coverage     = cs$coverage,
     cs_power        = cs$power,

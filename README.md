@@ -270,6 +270,7 @@ fine-mapping-benchmark/
 │   ├── run_simulation.R        # Orchestrates per-locus simulations over a parameter grid
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
+│   ├── evaluate_per_region.R   # Per-region metric table + correct aggregation
 │   ├── plot_results.R          # Generates multi-page PDF plots
 │   └── wrapper_*.R             # One file per method: wrapper_susie.R, wrapper_susie_inf.R,
 │                               #   wrapper_finemap.R, wrapper_finemap_inf.R,
@@ -621,14 +622,57 @@ plot_results(
 
 ## Evaluation output
 
-`evaluate_methods()` returns metrics for each method, globally and stratified
-by S, phi, and p_causal (sparse_inf model). Key metrics:
+`evaluate_methods()` returns metrics per method, both pre-aggregated and
+per region.
 
-- **AUPRC** — area under the precision-recall curve (PIPs vs causal truth)
-- **CS coverage** — proportion of credible sets containing at least one causal variant
-- **CS power** — proportion of causal variants captured by any credible set
-- **Median CS size** — median number of variants per credible set
+### Per region — aggregate it yourself
+
+`$per_region` is one row per **(method, scenario, region)**, with the design
+factors beside the metrics. Nothing in it is pooled across regions, so you
+choose the axes:
+
+```r
+ev <- evaluate_methods(sim, res)
+pr <- ev$per_region          # or per_region_metrics(sim, res)
+
+aggregate_region_metrics(pr)                                 # one row per method
+aggregate_region_metrics(pr, by = c("region_size", "phi"))   # any combination
+aggregate_region_metrics(pr, by = "true_annotation_type")
+```
+
+**The aggregation rule.** If you aggregate the table yourself, follow it —
+`aggregate_region_metrics()` exists because getting it wrong changes the
+answer, not just its precision:
+
+> **Rates are pooled from counts. Per-region scalars are averaged.**
+
+- **Average precision is per region.** The AP of two regions' merged ranked
+  list is not the mean of their APs: merging lets one region's false positives
+  outrank the other's true positive. So `ap` is averaged, never pooled.
+- **FDR, power, coverage and calibration are rates.** A rate on the 0–2
+  selections a single region carries is unestimable, so the table stores their
+  ingredients as counts (`nsel_at_*`, `tp_at_*`, `n_cs`, `n_cs_with_causal`,
+  `n_causal_captured`, `n_band_*`, `c_band_*`). Sum those over the regions you
+  are aggregating, then form the rate.
+
+A failed fit contributes an all-`NA` row rather than vanishing — a method that
+cannot run on part of the grid is not missing at random.
+
+### Pre-aggregated
+
+`global` plus `by_S`, `by_phi`, `by_p_causal`, `by_region_size`,
+`by_causal_maf` and `by_true_annotation_type`:
+
+- **`ap`** — mean of the per-region average precisions. **This is the one to
+  report.**
+- **CS coverage** — share of credible sets containing at least one causal variant
+- **CS power** — share of causal variants captured by any credible set
+- **Median CS size** — median variants per credible set
 - **PIP calibration** — binned mean PIP vs observed fraction causal
+- **`auprc`, `ap_pooled_grid`** — computed on the ranking *pooled* across the
+  stratum's regions, and kept only for continuity with results produced before
+  `ap` was separated out. The error they carry is method-dependent in sign, so
+  they cannot be used to rank methods.
 
 Standard errors are computed across replicates (`n_iter`). With `save = TRUE`,
 results are written as `evaluation.rds` and `evaluation_summary.csv`.

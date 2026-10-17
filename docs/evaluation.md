@@ -113,6 +113,49 @@ All metrics are implemented in `.metrics_for_fits()`. Fits where `f$error` is
 non-NULL are counted in `n_failed` but excluded from all computations. If no
 valid (non-failed) fits remain, all metrics are returned as `NA` or `NULL`.
 
+### What is pooled across regions, and what is not
+
+This distinction decides which numbers are meaningful, so it is worth stating
+before the formulas:
+
+> **Rates are pooled from counts. Per-region scalars are averaged.**
+
+- **Average precision is a per-region quantity**, so `ap` is computed on each
+  region separately and then averaged. The AP of two regions' merged ranked
+  list is *not* the mean of their APs: merging lets one region's false
+  positives outrank the other region's true positive, which describes an
+  analysis nobody performs. The difference is not small and not uniform — on a
+  three-method test fixture, the pooled estimator moved `susie` up by 0.065,
+  `abf` down by 0.048 and `marginal_z` down by 0.195, so it reorders methods.
+  `marginal_z` and `abf` rank variants identically *within* a region yet the
+  pooled estimator separated them by a factor of 3.5, because it was partly
+  measuring their PIP scale rather than their ranking.
+
+- **FDR, power, coverage and calibration are properties of a population of
+  calls**, so their ingredients are pooled as counts and the rate is formed
+  afterwards. A rate computed on one region is unestimable: a region typically
+  carries 0–2 selections, and a method that selects nothing has an FDR of 0 by
+  convention.
+
+`auprc` and `ap_pooled_grid` are both computed on the pooled ranking and are
+retained only for continuity with results produced before `ap` was separated
+out. Report `ap`.
+
+### The per-region table
+
+`per_region_metrics()` returns one row per (method, scenario, region): the
+design factors, the per-region scalars, and the counts that rates are formed
+from. `aggregate_region_metrics()` applies the rule above for any grouping.
+Both are also reachable as `evaluate_methods(...)$per_region`.
+
+A failed fit contributes an all-`NA` metric row rather than being dropped, so
+that a method which cannot run on part of the grid stays visible — such absence
+is structural, not missing at random. A fit whose PIP vector contains any
+non-finite value is marked `bad_pip` and treated as failed, never repaired:
+such a posterior has undefined total mass and an undefined ranking, and
+imputing the non-finite entries to zero would invent posterior mass and flatter
+precisely the method that overflowed.
+
 ### Power / FDR curve
 
 **What is computed.** For a collection of valid fits, all PIP values and their
@@ -199,6 +242,13 @@ AUPRC is preferred over AUROC for fine-mapping because the class imbalance
 is extreme: in a typical region with 100–500 variants and S = 1–5 causal
 variants, the positive class constitutes < 5% of variants, and AUROC is
 insensitive to performance in this regime.
+
+**But AUPRC here is computed on the pooled ranking**, and it reads the curve
+off the threshold grid, which depresses AP by more at low heritability than at
+high — a bias in exactly the dependence one usually wants to measure. Use `ap`,
+the mean of the per-region average precisions, computed by `compute_ap_exact()`
+at the distinct observed PIP values rather than on a grid. `auprc` and
+`ap_pooled_grid` are kept for continuity with older results.
 
 ---
 

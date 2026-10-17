@@ -9,6 +9,7 @@ evaluate_methods(
   results,
   pip_thresholds = seq(0, 1, by = 0.005),
   n_pip_cal_bins = 10L,
+  per_region = TRUE,
   save = FALSE,
   output_dir = "results",
   verbose = TRUE
@@ -25,6 +26,11 @@ curve. Default: seq(0, 1, by = 0.005).}
 \item{n_pip_cal_bins}{Integer. Number of equal-width bins for PIP
 calibration. Default: 10.}
 
+\item{per_region}{Logical. Also attach the per-region table from
+\code{\link{per_region_metrics}} as \code{$per_region}: one row per
+(method, scenario, region), nothing pooled, so it can be aggregated along
+axes this function does not offer. Default: TRUE.}
+
 \item{save}{Logical. If TRUE, save the full evaluation object as
 \code{evaluation.rds} inside \code{output_dir}, and write a flat
 per-method summary table as \code{evaluation_summary.csv}.
@@ -37,10 +43,27 @@ Default: \code{"results"}.}
 \item{verbose}{Logical. Print progress. Default: TRUE.}
 }
 \value{
-A named list, one element per method, each containing
-\code{global}, \code{by_S}, \code{by_phi}, and \code{by_p_causal}
-sub-lists.  See file header for the fields in each stratum.
+A named list with one element per method, each containing
+\code{global} and the \code{by_*} strata (see the file header for the
+fields in each), plus \code{$per_region}: a single data frame covering
+every method, one row per region-fit.
+
+\strong{Which number to use.} \code{ap} is the mean of the per-region
+average precisions and is the one to report. \code{auprc} and
+\code{ap_pooled_grid} are computed on the ranking POOLED across the
+stratum's regions, which lets one region's false positives outrank
+another's true positive; they are kept for continuity with older results.
+\code{fdr_power_curve} and \code{pip_calibration} are correctly pooled,
+because a rate on one region's handful of selections is unestimable.
+
+To aggregate on your own axes, work from \code{$per_region} with
+\code{\link{aggregate_region_metrics}}, which sums the counts and
+averages the per-region scalars.
 }
 \description{
 Evaluate fine-mapping methods against ground truth
+}
+\seealso{
+\code{\link{per_region_metrics}},
+\code{\link{aggregate_region_metrics}}
 }
