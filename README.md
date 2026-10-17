@@ -270,7 +270,6 @@ fine-mapping-benchmark/
 │   ├── run_simulation.R        # Orchestrates per-locus simulations over a parameter grid
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
-│   ├── evaluate_extras.R       # Rank/set metrics, Murphy decomposition, honesty
 │   ├── plot_results.R          # Generates multi-page PDF plots
 │   └── wrapper_*.R             # One file per method: wrapper_susie.R, wrapper_susie_inf.R,
 │                               #   wrapper_finemap.R, wrapper_finemap_inf.R,
