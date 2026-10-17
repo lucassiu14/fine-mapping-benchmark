@@ -188,14 +188,17 @@
     script,
     "--manifest",             manifest_path,
     "--prior_head",           prior_head,
-    "--max_iter",             as.character(as.integer(gv("max_iter", 1500))),
-    "--n_caus",               as.character(as.integer(gv("n_caus", 5))),
-    "--sigma_sq",             as.character(gv("sigma_sq", 0.05)),
+    # Defaults are the tuned configuration; see run_functional_beatrice().
+    # max_iter is 2000, not the Python CLI's 1500, because the tuning study ran
+    # every trial at 2000 and these values are optimal FOR that budget.
+    "--max_iter",             as.character(as.integer(gv("max_iter", 2000))),
+    "--n_caus",               as.character(as.integer(gv("n_caus", 10))),
+    "--sigma_sq",             as.character(gv("sigma_sq", 0.0899)),
     "--gamma_coverage",       as.character(gv("gamma_coverage", 0.95)),
-    "--sparse_concrete",      as.character(as.integer(gv("sparse_concrete", 50))),
-    "--prior_regularisation", as.character(gv("prior_regularisation", 1.0)),
+    "--sparse_concrete",      as.character(as.integer(gv("sparse_concrete", 51))),
+    "--prior_regularisation", as.character(gv("prior_regularisation", 0.1255)),
     "--lambda_l1",            as.character(gv("lambda_l1", 0.1223)),
-    "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0))
+    "--hierarchy_M",          as.character(gv("hierarchy_M", 10.15))
   )
 
   run_output <- tryCatch(
