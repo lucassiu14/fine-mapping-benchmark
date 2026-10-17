@@ -1,19 +1,20 @@
 # =============================================================================
 # wrapper_fb_joint.R
 #
-# CROSS-REGION JOINT (Functional) BEATRICE  -  Iteration 003 model changes.
+# CROSS-REGION JOINT (Functional) BEATRICE.
 #
 # Two methods that train ONE shared annotation prior head JOINTLY across all
 # regions of a scenario (not the sequential warm-start chain, not per-locus):
 #
-#   fb_pooled   -> prior_head = 'linear'    (user idea #1, flagship):
+#   fb_pooled   -> prior_head = 'linear':
 #                  a shared logistic annotation->prior map, funmap/PolyFun-style.
-#   fb_xregion  -> prior_head = 'lassonet'  (user idea #2):
+#   fb_xregion  -> prior_head = 'lassonet':
 #                  the LassoNet prior, shared and jointly trained across regions.
 #
 # Objective  L(phi,{psi_r}) = sum_r ELBO_r( psi_r ; p0_r = f_phi(v_r) ), with the
-# shared head phi updated ONCE per step from the equal-weighted mean of the
-# per-region gradients (EQUAL WEIGHT PER REGION; see docs/autoresearch/iteration-003.md).
+# shared head phi updated ONCE per step from the mean of the per-region
+# gradients. Regions are weighted EQUALLY, not by size: each locus is one
+# exchangeable draw of the shared enrichment.
 #
 # Mechanism. run_methods() calls a method's `run_<method>_scenario_setup(genotypes,
 # regions, user_args)` ONCE per scenario (all regions visible) and merges the

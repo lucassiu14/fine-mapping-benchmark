@@ -51,16 +51,12 @@
   oracle_susie          = "run_oracle_susie_region",
   polyfun_susie         = "run_polyfun_susie_region",
   # SBayesRC-style Bayesian regression with annotation-informed mixture prior
-  # pooled across regions (§0.1 of the auto-research plan).
+  # pooled across regions.
   sbayesrc              = "run_sbayesrc_region",
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region",
 
-  # --- Iteration 003: FB cross-region JOINT prior models ---------------------
-  # (The manual FB/BEATRICE hyperparameter-variant methods that lived here -
-  # fb_l1hi, fb_prreg5, beatrice_ncaus2, etc. - were dropped: a hand-picked knob
-  # grid is the wrong tool for tuning; principled search, e.g. Optuna, belongs in
-  # a separate study. Only the genuinely new joint-prior models are kept.)
+  # --- Functional BEATRICE cross-region JOINT prior models -------------------
   # A shared annotation prior head trained JOINTLY across all regions of a
   # scenario (not per-locus, not sequential). Each has a scenario_setup hook
   # (run_<method>_scenario_setup) that runs the joint Python trainer once per
@@ -84,10 +80,10 @@
   fb_xregion_id_l100 = "run_fb_xregion_id_l100_region",
   fb_xregion_id_l200 = "run_fb_xregion_id_l200_region",
 
-  # --- Iteration 004 additions: summary-statistic methods ---------------------
-  # Chosen to target the constraint the Iteration 003 deep dive identified as
-  # binding (LD mis-specification) and to resolve an open question about the
-  # infinitesimal model.
+  # --- Further summary-statistic methods --------------------------------------
+  # Chosen to target the constraint this benchmark identified as binding (LD
+  # mis-specification) and to resolve an open question about the infinitesimal
+  # model.
   #   caviar      exhaustive configuration enumeration under an MVN z model
   #   finimom     non-local product inverse-moment prior + beta-binomial
   #               model-size prior; has an explicit in-sample-LD switch

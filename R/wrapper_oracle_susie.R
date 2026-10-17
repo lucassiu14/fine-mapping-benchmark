@@ -135,7 +135,7 @@ run_oracle_susie <- function(z,
                                 n,
                                 annotations = NULL,
                                 enrichment  = NULL,
-                                causal_probs = NULL,   # ITER-005 (temporary)
+                                causal_probs = NULL,
                                 L           = 10,
                                 max_iter    = 100L,
                                 ...) {
@@ -163,13 +163,11 @@ run_oracle_susie <- function(z,
   # If we have annotations + enrichment, recover the simulator's per-SNP
   # causal probabilities. Otherwise fall back to uniform.
 
-  # ITERATION 005 (TEMPORARY - see R/simulate_phenotypes.R banner). Prefer the
-  # simulator's STORED selection probabilities when present. Reconstructing
-  # pi_j = exp(A' log gamma) below is only correct for the additive
-  # relationship; under the co-occurrence, non-monotone, mixed-direction or
-  # threshold forms it produces the WRONG prior, and this method silently stops
-  # being a ceiling while still being reported as one. Remove this branch when
-  # Iteration 005 is done and the relationships are withdrawn.
+  # Prefer the simulator's STORED selection probabilities when present.
+  # Reconstructing pi_j = exp(A' log gamma) below is only correct for the
+  # additive relationship; under any of the other forms (see the relationships
+  # section of R/simulate_phenotypes.R) it produces the WRONG prior, and this
+  # method silently stops being a ceiling while still being reported as one.
   if (!is.null(annotations) && !is.null(causal_probs) && length(causal_probs) == p &&
       all(is.finite(causal_probs)) && sum(causal_probs) > 0) {
     prior_weights   <- causal_probs / sum(causal_probs)
@@ -196,7 +194,7 @@ run_oracle_susie <- function(z,
     prior_source  <- "uniform_fallback"
     enrichment_used <- NULL
   }
-  }   # closes the ITERATION 005 stored-probs branch
+  }   # closes the stored-probs branch
 
   params <- .oracle_susie_params(L, max_iter,
                                    prior_source = prior_source)
@@ -266,9 +264,9 @@ run_oracle_susie_region <- function(region_geno, region_pheno, ...) {
   enrich <- if (!is.null(region_pheno$truth))
     region_pheno$truth$enrichment else NULL
 
-  # ITERATION 005 (TEMPORARY): the simulator stores the exact selection
-  # probabilities it used. Under any non-additive relationship these are the
-  # ONLY correct oracle prior; reconstructing exp(A' log gamma) would be wrong.
+  # The simulator stores the exact selection probabilities it used. Under any
+  # non-additive relationship these are the ONLY correct oracle prior;
+  # reconstructing exp(A' log gamma) would be wrong.
   cprobs <- if (!is.null(region_pheno$truth))
     region_pheno$truth$causal_probs else NULL
 

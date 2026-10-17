@@ -43,7 +43,7 @@ Continuous annotations saturate (all mass on a tenth of the variants, so
 causal location is near-deterministic), and nonmono/threshold are three times
 weaker than additive. Left uncorrected, a difference between arms would be
 partly a difference in enrichment STRENGTH rather than in the SHAPE of the
-relationship - which is the only thing Iteration 005 is trying to measure.
+relationship, which is the only thing the relationship arms are measuring.
 
 Bisection on a scalar multiplier makes strength a controlled constant and
 leaves shape as the only free variable. The consequence is that

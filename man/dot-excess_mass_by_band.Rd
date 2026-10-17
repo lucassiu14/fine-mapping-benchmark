@@ -21,6 +21,6 @@ confidently wrong. No existing scalar distinguishes these, and the distinction
 decides whether a miscalibration matters.
 }
 \details{
-Measured on Iteration 003 (ref500): susie put 56\% of its excess below PIP 0.1,
+Measured at n_ref = 500: susie put 56\% of its excess below PIP 0.1,
 fb_xregion put 59\% in the 0.5-0.9 band - at near-identical mass ratios.
 }

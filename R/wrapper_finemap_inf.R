@@ -5,7 +5,7 @@
 # FINEMAP with an infinitesimal (polygenic) effect component alongside a small
 # number of large sparse effects.
 #
-# WHY THIS METHOD IS HERE. Iteration 003 found that susie_inf trails plain susie
+# WHY THIS METHOD IS HERE. This benchmark found susie_inf trailing plain susie
 # in EVERY stratum, including the sparse+infinitesimal model it was built for -
 # but susie_inf inherits SuSiE's LD fragility (LD explains 16% of its AUPRC
 # variance, 56% of its reliability variance). FINEMAP-inf puts the SAME

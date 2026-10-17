@@ -144,7 +144,7 @@ This rule was written after `wrapper_fb_joint.R` was found to violate it.
 importances and saves them under the run's target directory, but
 `.fb_joint_parse_output()` read only `pip.csv`, `credible_set.txt` and
 `conditional_credible_variants_probability.txt`, and that directory lives under
-`tempfile()`. Iteration 004 therefore has annotation importances for
+`tempfile()`. The main simulation therefore has annotation importances for
 `functional_beatrice` and none at all for `fb_xregion`, and the
 annotation-selection analysis could only be done for the single-locus model.
 

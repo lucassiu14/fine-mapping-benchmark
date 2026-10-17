@@ -1,14 +1,21 @@
 # =============================================================================
 # R/evaluate_extras.R
 #
-# The per-fit metric functions specified in variable-importance-analysis.md §5.1,
-# §5.2b and §4.4. Kept in a SEPARATE FILE so they can be reviewed and unit-tested
-# before being wired into R/evaluate.R, which is load-bearing for every existing
-# result.
+# Per-fit metrics beyond the ones `evaluate_methods()` reports: exact rank-based
+# average precision, rank/set summaries, the Murphy decomposition of the Brier
+# score, excess probability mass by PIP band, and a method's self-consistency
+# about its own error rate.
 #
-# WIRING (see the spec's §5.1b). In `.metrics_for_fits`, AP must be computed PER
-# FIT and averaged, not on the concatenated PIP vector of the two same-size
-# regions:
+# These are kept out of R/evaluate.R, which is load-bearing for every stored
+# result, so that adding a metric cannot change what `evaluate_methods()`
+# returns. They are not called from anywhere in the package: the analysis
+# pipeline that used them was a separate set of scripts, which ran them over the
+# stored PIPs of a completed benchmark rather than during `run_methods()`.
+#
+# TWO RULES THAT MATTER WHEN USING THEM
+#
+# AP must be computed PER FIT and averaged, never on the concatenated PIP vector
+# of several regions:
 #
 #   ap_per_fit <- vapply(valid, function(f) {
 #     y <- logical(f$n_variants); y[f$causal_indices] <- TRUE
@@ -17,11 +24,8 @@
 #   ap        <- mean(ap_per_fit, na.rm = TRUE)
 #   ap_n_fits <- sum(!is.na(ap_per_fit))
 #
-# Leave the FDR and calibration COUNTS pooled across the two fits - that is
-# correct (spec §3.2). Only the ranking metrics change.
-#
-# STATUS: written, never executed. Nothing here has been run against real data.
-# Add the §5.8 tests and run them before trusting any output.
+# FDR and calibration COUNTS, by contrast, are correctly pooled across fits.
+# Only the ranking metrics are per-fit.
 # =============================================================================
 
 
@@ -163,7 +167,7 @@
 #' confidently wrong. No existing scalar distinguishes these, and the distinction
 #' decides whether a miscalibration matters.
 #'
-#' Measured on Iteration 003 (ref500): susie put 56% of its excess below PIP 0.1,
+#' Measured at n_ref = 500: susie put 56% of its excess below PIP 0.1,
 #' fb_xregion put 59% in the 0.5-0.9 band - at near-identical mass ratios.
 #'
 #' @param bin_lower Numeric vector of each bin's lower edge.

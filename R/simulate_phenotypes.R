@@ -141,8 +141,8 @@ simulate_phenotypes <- function(genotypes,
                                 model = "sparse",
                                 p_causal = 0.5,
                                 inf_model = "beatrice",
-                                relationship = "additive",   # ITER-005 (temporary)
-                                n_informative = NULL,        # ITER-005 (temporary)
+                                relationship = "additive",
+                                n_informative = NULL,
                                 effect_distribution = "normal",
                                 effect_variance = 0.36,
                                 annotations = "none",
@@ -308,8 +308,8 @@ simulate_phenotypes <- function(genotypes,
       enrichment = enrichment,
       n_annotations = if (annotation_type %in% c("binary", "continuous")) n_annotations else 0,
       annotation_type = annotation_type,
-      relationship = relationship,      # ITER-005 (temporary)
-      n_informative = n_informative     # ITER-005 (temporary)
+      relationship = relationship,
+      n_informative = n_informative
     )
 
     causal_indices <- causal_result$causal_indices
@@ -370,9 +370,9 @@ simulate_phenotypes <- function(genotypes,
     genotypes[[i]]$truth <- list(
       causal_indices = causal_indices,
       causal_effects = beta_true[causal_indices],
-      # ITERATION 005 (TEMPORARY): the exact per-variant selection probabilities
-      # actually used. oracle_susie reads these so it remains a true ceiling
-      # under relationships whose form it cannot reconstruct from gamma alone.
+      # The exact per-variant selection probabilities actually used.
+      # oracle_susie reads these so it remains a true ceiling under
+      # relationships whose form it cannot reconstruct from gamma alone.
       causal_probs = causal_result$causal_probs,
       beta_true = beta_true,
       pve = pheno_result$pve_realised,
@@ -550,8 +550,7 @@ simulate_annotations_for_region <- function(p,
 #
 # NB: thresholding attenuates the induced Bernoulli correlation relative to
 # the latent rho - this is expected, documented in the tests, and swept as
-# an axis by the autoresearch simulation grid rather than solved for
-# analytically.
+# an axis by the simulation grid rather than solved for analytically.
 .binary_annotations <- function(p, n_annotations, props,
                                 annotation_correlation, enrichment) {
   A <- matrix(0L, nrow = p, ncol = n_annotations)
@@ -591,23 +590,28 @@ simulate_annotations_for_region <- function(p,
 # =============================================================================
 
 # ===========================================================================
-# >>> ITERATION 005 ONLY - TEMPORARY. REMOVE WHEN THAT ITERATION IS DONE. <<<
+# ANNOTATION -> CAUSALITY RELATIONSHIPS
 #
-# Everything between this banner and the matching END banner exists solely to
-# support Iteration 005's question: how do annotation-aware methods behave when
-# the annotation -> causality relationship is NOT the log-linear form they all
-# assume? It is not part of the benchmark's standing design.
+# Every annotation-aware fine-mapping method assumes the prior is log-linear in
+# the annotations, pi_j proportional to exp(sum_k A_jk log gamma_k). The
+# relationships below let the SIMULATOR depart from that form, so a method can
+# be tested against a map it does not assume.
 #
-# It is deliberately ADDITIVE and backward-compatible: the default
-# relationship is "additive", which reproduces the pre-existing
-# exp(A' log gamma) behaviour exactly, so nothing that does not ask for a
-# relationship changes. To remove: delete this block, delete the
-# `relationship` / `n_informative` arguments from select_causal_variants(),
-# and drop the `causal_probs` field from the stored truth.
+# `relationship = "additive"` is the default and reproduces the log-linear
+# exp(A' log gamma) behaviour exactly, so a caller that does not ask for a
+# relationship gets the standard enrichment scheme.
 #
-# Tracked in docs/autoresearch/iteration-005.md.
-# ---------------------------------------------------------------------------
-# Annotation -> causality relationships
+# Two families, differing in what the annotations are:
+#
+#   binary annotations      additive, cooccur, nonmono, mixed, threshold, null
+#   continuous annotations  wavg2, valthresh, valthresh_wavg2, square, cubic,
+#                           cosine10
+#
+# Each uses ONLY the first `n_informative` annotation columns; the rest are
+# handed to every method but never enter selection, so a method must learn to
+# ignore them. Because the forms differ wildly in enrichment strength at the
+# same nominal fold, every relationship is calibrated to a common concentration
+# - see .calibrate_log_weights() below for why that is necessary.
 # ---------------------------------------------------------------------------
 #' Log selection weights under a named annotation->causality relationship.
 #'
@@ -616,7 +620,7 @@ simulate_annotations_for_region <- function(p,
 #' enter selection at all, so a method must learn to ignore them.
 #'
 #' @param A Annotation matrix, p x m.
-#' @param relationship One of additive, cooccur, nonmono, mixed, threshold, null.
+#' @param relationship One of the names listed in the section banner above.
 #' @param lambda Scalar strength, log of the row's enrichment fold.
 #' @param n_informative How many leading columns carry signal.
 #' @return Numeric vector of length p: the UNNORMALISED log weight.
@@ -626,12 +630,12 @@ simulate_annotations_for_region <- function(p,
   k <- min(n_informative, ncol(A))
   if (k < 1L) return(rep(0, p))
   I <- A[, seq_len(k), drop = FALSE]
-  if (relationship %in% .ITER006_RELATIONSHIPS)                  # ITER-006 (temp)
-    return(lambda * .iter006_score(I, relationship))             # ITER-006 (temp)
+  if (relationship %in% .CONTINUOUS_RELATIONSHIPS)
+    return(lambda * .continuous_score(I, relationship))
 
   switch(relationship,
     # Every competitor's model can represent this exactly. Control arm, and the
-    # bridge back to Iteration 004's enrichment scheme.
+    # bridge back to the standard log-linear enrichment scheme.
     additive = lambda * rowSums(I),
 
     # A variant needs two marks TOGETHER. Written as a cycle so all k columns
@@ -684,7 +688,7 @@ simulate_annotations_for_region <- function(p,
 #' causal location is near-deterministic), and nonmono/threshold are three times
 #' weaker than additive. Left uncorrected, a difference between arms would be
 #' partly a difference in enrichment STRENGTH rather than in the SHAPE of the
-#' relationship - which is the only thing Iteration 005 is trying to measure.
+#' relationship, which is the only thing the relationship arms are measuring.
 #'
 #' Bisection on a scalar multiplier makes strength a controlled constant and
 #' leaves shape as the only free variable. The consequence is that
@@ -734,18 +738,13 @@ simulate_annotations_for_region <- function(p,
   approx(as.numeric(names(ladder)), unname(ladder), xout = fold, rule = 2)$y
 }
 
-# >>> END ITERATION 005 TEMPORARY BLOCK <<<
-# ===========================================================================
-
-
-# >>> ITERATION 006 ONLY - TEMPORARY. REMOVE WHEN THAT ITERATION IS DONE. <<<
+# ---------------------------------------------------------------------------
+# The continuous-annotation relationships
 #
-# Iteration 006 asks Iteration 005's question - how do annotation-aware methods
-# behave when the annotation -> causality relationship is not the log-linear form
-# they assume - with relationships the user specified, on continuous annotations.
-# Each scores a variant from the first `n_informative` annotation columns, summed
-# over those columns; .causal_log_weights() multiplies the score by lambda and
-# select_causal_variants() treats the result exactly as it treats Iteration 005's.
+# Each scores a variant from the first `n_informative` annotation columns,
+# summed over those columns; .causal_log_weights() multiplies the score by
+# lambda and select_causal_variants() treats the result exactly as it treats
+# the binary family's.
 #
 #   wavg2            weighted average of the variant and 2 neighbours each side,
 #                    weights 1/3, 2/3, 1, 2/3, 1/3 (linear fall-off)
@@ -758,7 +757,8 @@ simulate_annotations_for_region <- function(p,
 #                    away counts again, as if brought close by the helix, but less
 #                    than the variant itself
 #
-# The control arm is Iteration 005's `additive` and the null arm its `null`.
+# The control arm is `additive` and the null arm `null`, as for the binary
+# family.
 #
 # Distance is in variant steps. A region keeps its variants in genomic order
 # (simulate_genotypes.R sorts the sampled indices) but not their base-pair
@@ -769,14 +769,13 @@ simulate_annotations_for_region <- function(p,
 # own annotations to its own prior - so under wavg2, valthresh_wavg2 and cosine10
 # only part of the signal is learnable by any method.
 #
-# Tracked in docs/autoresearch/iteration-006.md; undo with iteration-006-REVERT.md.
-.ITER006_RELATIONSHIPS <- c("wavg2", "valthresh", "valthresh_wavg2", "square", "cubic", "cosine10")
-.ITER006_W_WAVG2 <- (3 - abs(-2:2)) / 3
-.ITER006_W_COS10 <- exp(-abs(-10:10) / 5) * (1 + cos(2 * pi * (-10:10) / 10)) / 2
+.CONTINUOUS_RELATIONSHIPS <- c("wavg2", "valthresh", "valthresh_wavg2", "square", "cubic", "cosine10")
+.W_WAVG2 <- (3 - abs(-2:2)) / 3
+.W_COS10 <- exp(-abs(-10:10) / 5) * (1 + cos(2 * pi * (-10:10) / 10)) / 2
 
 # Weighted average of x over a symmetric window of weights w centred on each
 # position, renormalised over the positions that exist.
-.iter006_neighbour_avg <- function(x, w) {
+.neighbour_avg <- function(x, w) {
   h <- (length(w) - 1L) %/% 2L
   p <- length(x)
   pad <- rep(0, h)
@@ -786,21 +785,20 @@ simulate_annotations_for_region <- function(p,
   as.numeric(num[keep] / den[keep])
 }
 
-# Unscaled score of each variant (row of I) under an Iteration 006 relationship.
-.iter006_score <- function(I, relationship) {
+# Unscaled score of each variant (row of I) under a continuous relationship.
+.continuous_score <- function(I, relationship) {
   thr <- function(a) a * (a > 1)
   per_column <- switch(relationship,
-    wavg2           = function(a) .iter006_neighbour_avg(a, .ITER006_W_WAVG2),
+    wavg2           = function(a) .neighbour_avg(a, .W_WAVG2),
     valthresh       = thr,
-    valthresh_wavg2 = function(a) .iter006_neighbour_avg(thr(a), .ITER006_W_WAVG2),
+    valthresh_wavg2 = function(a) .neighbour_avg(thr(a), .W_WAVG2),
     square          = function(a) a^2,
     cubic           = function(a) a^3,
-    cosine10        = function(a) .iter006_neighbour_avg(a, .ITER006_W_COS10),
-    stop("unknown Iteration 006 relationship: ", relationship, call. = FALSE))
+    cosine10        = function(a) .neighbour_avg(a, .W_COS10),
+    stop("unknown continuous relationship: ", relationship, call. = FALSE))
   rowSums(apply(I, 2, per_column))
 }
 
-# >>> END ITERATION 006 TEMPORARY BLOCK <<<
 # ===========================================================================
 
 
@@ -810,8 +808,8 @@ select_causal_variants <- function(p,
                                    enrichment,
                                    n_annotations,
                                    annotation_type,
-                                   relationship = "additive",   # ITER-005 (temp)
-                                   n_informative = NULL) {      # ITER-005 (temp)
+                                   relationship = "additive",
+                                   n_informative = NULL) {
 
   # --- No annotations: uniform random selection -------------------------------
 
@@ -836,9 +834,8 @@ select_causal_variants <- function(p,
   #
   # DEFAULT PATH ("additive") is the original behaviour, unchanged:
   #   w_j = exp(sum_k A_jk log gamma_k)
-  # Any other value routes through the ITERATION 005 temporary block above,
-  # which uses only the first `n_informative` columns and a different
-  # functional form. See the banner there.
+  # Any other value routes through the relationships section above, which uses
+  # only the first `n_informative` columns and a different functional form.
   if (identical(relationship, "additive") && is.null(n_informative)) {
     log_enrichment <- log(enrichment_vals)
     log_weights <- as.numeric(annotation_matrix %*% log_enrichment)

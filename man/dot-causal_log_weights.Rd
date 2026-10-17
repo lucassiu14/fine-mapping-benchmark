@@ -9,7 +9,7 @@
 \arguments{
 \item{A}{Annotation matrix, p x m.}
 
-\item{relationship}{One of additive, cooccur, nonmono, mixed, threshold, null.}
+\item{relationship}{One of the names listed in the section banner above.}
 
 \item{lambda}{Scalar strength, log of the row's enrichment fold.}
 
