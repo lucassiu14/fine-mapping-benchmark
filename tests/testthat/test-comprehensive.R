@@ -1252,12 +1252,12 @@ test_that("[5] by_p_causal present and populated for sparse_inf model", {
   expect_true(all(c("0.3", "0.7") %in% names(ev_inf$abf$by_p_causal)))
 })
 
-test_that("[5] global auprc is numeric in [0, 1]", {
-  auprc <- EVAL_MINI$susie$global$auprc
-  expect_true(is.numeric(auprc))
-  expect_false(is.na(auprc))
-  expect_gte(auprc, 0)
-  expect_lte(auprc, 1)
+test_that("[5] global ap is numeric in [0, 1]", {
+  ap <- EVAL_MINI$susie$global$ap
+  expect_true(is.numeric(ap))
+  expect_false(is.na(ap))
+  expect_gte(ap, 0)
+  expect_lte(ap, 1)
 })
 
 test_that("[5] global cs_coverage is in [0, 1] or NA", {
@@ -1286,7 +1286,7 @@ test_that("[5] pip_calibration has all required columns", {
 })
 
 test_that("[5] SE fields present when n_iter >= 2", {
-  expect_false(is.null(EVAL_MINI$susie$global$auprc_se))
+  expect_false(is.null(EVAL_MINI$susie$global$ap_se))
 })
 
 test_that("[5] custom (coarser) pip_thresholds respected", {
@@ -2413,12 +2413,12 @@ test_that("[15] by_causal_maf bins appear in canonical order rare->low->common",
   expect_identical(names(bm), present)
 })
 
-test_that("[15] by_causal_maf bins each carry a numeric auprc field", {
+test_that("[15] by_causal_maf bins each carry a numeric ap field", {
   bm <- EVAL_MAF$susie$by_causal_maf
   for (b in names(bm)) {
-    expect_true("auprc" %in% names(bm[[b]]),
+    expect_true("ap" %in% names(bm[[b]]),
                 info = sprintf("bin=%s", b))
-    expect_true(is.numeric(bm[[b]]$auprc),
+    expect_true(is.numeric(bm[[b]]$ap),
                 info = sprintf("bin=%s", b))
   }
 })
@@ -2460,13 +2460,13 @@ test_that("[16] binary-annotation fixture: by_true_annotation_type has 'binary'"
   expect_identical(names(bt), "binary")
 })
 
-test_that("[16] by_true_annotation_type bins carry a numeric auprc field", {
+test_that("[16] by_true_annotation_type bins carry a numeric ap field", {
   for (eo in list(EVAL_MAF$susie, EVAL_ANNOT$susie)) {
     bt <- eo$by_true_annotation_type
     for (t in names(bt)) {
-      expect_true("auprc" %in% names(bt[[t]]),
+      expect_true("ap" %in% names(bt[[t]]),
                   info = sprintf("type=%s", t))
-      expect_true(is.numeric(bt[[t]]$auprc),
+      expect_true(is.numeric(bt[[t]]$ap),
                   info = sprintf("type=%s", t))
     }
   }

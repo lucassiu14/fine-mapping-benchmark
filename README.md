@@ -6,7 +6,7 @@
 
 Benchmarking framework for evaluating statistical fine-mapping methods using
 simulated genetic data. Supports 13 methods, flexible simulation parameters,
-automatic evaluation (AUPRC, credible set metrics, PIP calibration), and
+automatic evaluation (AP, credible set metrics, PIP calibration), and
 multi-page PDF plots with stratified results.
 
 ## Requirements
@@ -63,7 +63,7 @@ pkgload::load_all()        # load fmbenchmark from the source checkout
 
 - Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
   **oracle_susie**, **polyfun_susie**, **sbayesrc**
-- All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
+- All of `evaluate_methods()` (AP, CS metrics, PIP calibration)
 - All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
   `run_simulation()`, `simulate_gwfm_data()`)
@@ -98,7 +98,7 @@ pp <- setup_paintor()   # finds PAINTOR on PATH
 
 ### Tier 3 — Adds Python methods (~1 hour more)
 
-Funmap, BEATRICE, and Functional BEATRICE all require Python. A single conda
+Funmap, BEATRICE and Functional BEATRICE all require Python. A single conda
 environment covers all three; an `environment.yml` is included in the repo:
 
 ```bash
@@ -118,8 +118,8 @@ package):
 git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 ```
 
-**Functional BEATRICE** is a separate repository and needs its own clone. It
-uses the same conda env as BEATRICE:
+**Functional BEATRICE** (`fb_xregion`) is a separate repository and needs its
+own clone. It uses the same conda env as BEATRICE:
 
 ```bash
 git clone https://github.com/lucassiu14/functional-beatrice ~/functional-beatrice
@@ -138,11 +138,11 @@ PYTHON <- "/path/to/envs/finemapping-python/bin/python"   # from above
 
 results <- run_methods(
   simulation  = sim,
-  methods     = c("funmap", "beatrice", "functional_beatrice"),
+  methods     = c("funmap", "beatrice", "fb_xregion"),
   method_args = list(
     funmap              = list(python = PYTHON, L = 10),
     beatrice            = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping"),
-    functional_beatrice = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
+    fb_xregion          = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
   )
 )
 ```
@@ -247,8 +247,7 @@ project root.
 | **FINEMAP-inf** | 3 | Python script | Clone FinucaneLab/fine-mapping-inf |
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
-| **Functional BEATRICE** | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice |
-| **FB joint** (`fb_pooled`, `fb_xregion`) | 3 | Python script | Same as Functional BEATRICE; one prior head shared across a scenario's regions |
+| **Functional BEATRICE** (`fb_xregion`) | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice. One annotation prior head shared across a scenario's regions. `prior_head` picks `lassonet` (default) or `linear`; `lambda_l1` sets the L1 penalty |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.
@@ -269,7 +268,8 @@ fine-mapping-benchmark/
 │   ├── simulate_gwfm_data.R    # Genome-wide simulation (shared y across regions)
 │   ├── run_simulation.R        # Orchestrates per-locus simulations over a parameter grid
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
-│   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
+│   ├── evaluate.R              # Computes AP, CS metrics, PIP calibration
+│   ├── evaluate_per_region.R   # Per-region metric table + correct aggregation
 │   ├── plot_results.R          # Generates multi-page PDF plots
 │   └── wrapper_*.R             # One file per method: wrapper_susie.R, wrapper_susie_inf.R,
 │                               #   wrapper_finemap.R, wrapper_finemap_inf.R,
@@ -569,7 +569,7 @@ Each stratum contains:
 | Field | Description |
 |-------|-------------|
 | `fdr_power_curve` | Data frame with columns `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`, `power_se`, `precision_se` |
-| `auprc` | Area under the precision-recall curve (±`auprc_se`) |
+| `ap` | Area under the precision-recall curve (±`ap_se`) |
 | `pip_calibration` | Data frame: binned mean PIP vs observed fraction causal (±`frac_causal_se`) |
 | `cs_coverage` | Proportion of reported credible sets containing ≥1 true causal variant (±`cs_coverage_se`) |
 | `cs_power` | Proportion of true causal variants captured by any credible set (±`cs_power_se`) |
@@ -621,19 +621,97 @@ plot_results(
 
 ## Evaluation output
 
-`evaluate_methods()` returns metrics for each method, globally and stratified
-by S, phi, and p_causal (sparse_inf model). Key metrics:
+`evaluate_methods()` returns metrics per method, both pre-aggregated and
+per region.
 
-- **AUPRC** — area under the precision-recall curve (PIPs vs causal truth)
-- **CS coverage** — proportion of credible sets containing at least one causal variant
-- **CS power** — proportion of causal variants captured by any credible set
-- **Median CS size** — median number of variants per credible set
-- **PIP calibration** — binned mean PIP vs observed fraction causal
+### Per region — aggregate it yourself
 
-Standard errors are computed across replicates (`n_iter`). With `save = TRUE`,
-results are written as `evaluation.rds` and `evaluation_summary.csv`.
+`$per_region` is one row per **one method fitted to one region of one
+iteration**, with the design factors beside the metrics. Nothing in it is
+pooled across regions, so you choose the axes. The keys
+`(method, scenario_id, region_id)` and `(method, S, phi, iter, region_id)`
+identify the same row — each scenario is one `(S, phi, iter)` draw.
 
-See [`docs/evaluation.md`](docs/evaluation.md) for full details.
+```r
+ev <- evaluate_methods(sim, res)
+pr <- ev$per_region          # or per_region_metrics(sim, res)
+
+aggregate_region_metrics(pr)                                 # one row per method
+aggregate_region_metrics(pr, by = c("region_size", "phi"))   # any combination
+aggregate_region_metrics(pr, by = "true_annotation_type")
+aggregate_region_metrics(pr, by = "region_size", se = TRUE)  # with SEs
+```
+
+**Use `se = TRUE` rather than computing an SE across the rows yourself.** The
+rows are not independent: each region's genotypes, LD matrix and annotation
+matrix are drawn once and reused by every iteration, so only the
+causal-variant selection, effect sizes and phenotype noise are redrawn. The
+independent unit is the iteration, so `se = TRUE` collapses each group to one
+value per iteration first.
+
+Measured on 112,500 fits across 5,625 cells of a completed benchmark: the
+intraclass correlation of AP between the two regions of one iteration had
+median 0 and mean 0.10, exceeding 0.05 in 35% of cells. The resulting SE ratio
+had median 0.96 and IQR 0.83–1.08 — so an across-rows SE is not reliably too
+small or too large, just not valid, and which way it errs is not predictable.
+
+**The aggregation rule.** If you aggregate the table yourself, follow it —
+`aggregate_region_metrics()` exists because getting it wrong changes the
+answer, not just its precision:
+
+> **Rates are pooled from counts. Per-region scalars are averaged.**
+
+- **Average precision is per region.** The AP of two regions' merged ranked
+  list is not the mean of their APs: merging lets one region's false positives
+  outrank the other's true positive. So `ap` is averaged, never pooled.
+- **FDR, power and calibration are per region too.** Fine-mapping is applied
+  to a locus, so the reported rate is the mean over regions of each region's
+  own rate — "how trustworthy are the calls in a region". The call-weighted
+  rate, in which a region making many calls dominates, is a different
+  quantity and sits beside it as `*_pooled`. The counts are kept
+  (`nsel_at_*`, `tp_at_*`, `n_band_*`, `c_band_*`, `n_cs`,
+  `n_cs_with_causal`, `n_causal_captured`), so either can be re-formed.
+- **A region that selects nothing is excluded from the FDR mean, not scored
+  0.** The "FDR is 0 when nothing is selected" convention is harmless when
+  pooling but rewards abstention under averaging, so `*_n` reports how many
+  regions each mean rests on. Always read the rate with it.
+
+A failed fit contributes an all-`NA` row rather than vanishing — a method that
+cannot run on part of the grid is not missing at random.
+
+### Pre-aggregated
+
+`global` plus `by_S`, `by_phi`, `by_p_causal`, `by_region_size`,
+`by_causal_maf` and `by_true_annotation_type`:
+
+**Every rate here is region-weighted** — computed within each region, then
+averaged over regions — and ships with the count of regions it rests on. The
+call-weighted value, where a region making many calls dominates, sits beside
+each under a `_pooled` suffix.
+
+- **`ap`** — mean of the per-region average precisions, with `ap_n_fits` and
+  `ap_se`. The single headline number.
+- **`fdr_power_curve`** — `fdr`, `precision`, `power`, `recall` as region
+  means, `n_regions` per threshold, the `*_pooled` variants, and the
+  `tp`/`fp`/`fn` totals.
+- **`pip_calibration`** — `mean_pip` vs `frac_causal` as region means,
+  `n_regions` per bin, the `*_pooled` variants, and the `n`/`n_causal` counts.
+- **`cs_coverage`** — mean over regions of the share of *that region's* sets
+  holding a causal variant, with `cs_coverage_n`.
+- **`cs_power`** — mean over regions of the share of *that region's* causal
+  variants captured by any set, with `cs_power_n`.
+- **`cs_size_mean`, `cs_size_median`** — means over regions of that region's
+  own mean and median set size.
+
+There is no `auprc`. It and `ap_pooled_grid` estimated the same quantity as
+`ap` — the area under the precision–recall curve — but on the pooled ranking,
+and `auprc` additionally used the trapezoidal rule, whose linear interpolation
+is not valid in PR space (Davis & Goadrich 2006). They disagreed with `ap`
+about which method was best, so they were two wrong answers to a question `ap`
+already answers.
+
+Standard errors are computed across replicates (`n_iter`). SE fields are `NA` when `n_iter < 2`.
+
 
 ## Adding a new method
 

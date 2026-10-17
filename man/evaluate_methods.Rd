@@ -9,6 +9,7 @@ evaluate_methods(
   results,
   pip_thresholds = seq(0, 1, by = 0.005),
   n_pip_cal_bins = 10L,
+  per_region = TRUE,
   save = FALSE,
   output_dir = "results",
   verbose = TRUE
@@ -25,6 +26,11 @@ curve. Default: seq(0, 1, by = 0.005).}
 \item{n_pip_cal_bins}{Integer. Number of equal-width bins for PIP
 calibration. Default: 10.}
 
+\item{per_region}{Logical. Also attach the per-region table from
+\code{\link{per_region_metrics}} as \code{$per_region}: one row per
+(method, scenario, region), nothing pooled, so it can be aggregated along
+axes this function does not offer. Default: TRUE.}
+
 \item{save}{Logical. If TRUE, save the full evaluation object as
 \code{evaluation.rds} inside \code{output_dir}, and write a flat
 per-method summary table as \code{evaluation_summary.csv}.
@@ -37,10 +43,27 @@ Default: \code{"results"}.}
 \item{verbose}{Logical. Print progress. Default: TRUE.}
 }
 \value{
-A named list, one element per method, each containing
-\code{global}, \code{by_S}, \code{by_phi}, and \code{by_p_causal}
-sub-lists.  See file header for the fields in each stratum.
+A named list with one element per method, each containing
+\code{global} and the \code{by_*} strata (see the file header for the
+fields in each), plus \code{$per_region}: a single data frame covering
+every method, one row per region-fit.
+
+\strong{Every rate is region-weighted}: computed within each region, then
+averaged over regions, because fine-mapping is applied to a region. Each
+comes with the number of regions it rests on - \code{ap_n_fits},
+\code{cs_coverage_n}, \code{cs_power_n}, and \code{n_regions} on the
+curve and calibration tables - which must be read alongside it: at a high
+PIP threshold most regions select nothing. The call-weighted value, in
+which a region making many calls dominates, sits beside each under a
+\code{_pooled} suffix.
+
+To aggregate on your own axes, work from \code{$per_region} with
+\code{\link{aggregate_region_metrics}}.
 }
 \description{
 Evaluate fine-mapping methods against ground truth
+}
+\seealso{
+\code{\link{per_region_metrics}},
+\code{\link{aggregate_region_metrics}}
 }

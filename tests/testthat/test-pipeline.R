@@ -91,16 +91,16 @@ test_that("end-to-end pipeline runs and produces the expected structure", {
 
   for (m in pure_r_methods) {
     g <- eval_out[[m]]$global
-    expect_false(is.na(g$auprc),
-                 info = sprintf("%s global AUPRC is NA", m))
-    expect_gte(g$auprc, 0)
-    expect_lte(g$auprc, 1)
+    expect_false(is.na(g$ap),
+                 info = sprintf("%s global AP is NA", m))
+    expect_gte(g$ap, 0)
+    expect_lte(g$ap, 1)
   }
 
   # Sanity: marginal_z (the model-free floor) should not beat susie or abf
   # on a setting where they have signal to work with.
-  expect_lte(eval_out$marginal_z$global$auprc, eval_out$susie$global$auprc)
-  expect_lte(eval_out$marginal_z$global$auprc, eval_out$abf$global$auprc)
+  expect_lte(eval_out$marginal_z$global$ap, eval_out$susie$global$ap)
+  expect_lte(eval_out$marginal_z$global$ap, eval_out$abf$global$ap)
 
   # --- 4. Plot ---------------------------------------------------------------
 

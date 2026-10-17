@@ -18,7 +18,7 @@ run_functional_beatrice(
   gamma_coverage = 0.95,
   sparse_concrete = 50,
   prior_regularisation = 1,
-  lambda_l1 = 0.01,
+  lambda_l1 = 0.1223,
   hierarchy_M = 10
 )
 }
@@ -58,8 +58,11 @@ iteration. Default: 50.}
 \item{prior_regularisation}{Numeric. L2 regularisation weight on the
 prior network outputs. Default: 1.0.}
 
-\item{lambda_l1}{Numeric. L1 penalty on LassoNet skip connections.
-Controls annotation sparsity. Default: 0.01.}
+\item{lambda_l1}{Numeric. L1 penalty on LassoNet skip connections, which
+decides how many annotations the prior may use. Default: 0.1223, the value
+a sweep of this penalty found best. At the sweep's lower arms the shared
+head selects annotations no better than chance; above ~0.5 average
+precision falls away in every stratum.}
 
 \item{hierarchy_M}{Numeric. LassoNet hierarchy constraint multiplier
 (\code{||W_j^(1)||} ≤ M·|θ_j|). Default: 10.0.}
