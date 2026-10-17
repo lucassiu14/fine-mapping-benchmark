@@ -1,74 +1,113 @@
 # =============================================================================
 # wrapper_sbayesrc.R
 #
-# SBayesRC-style Bayesian regression with annotation-informed mixture prior,
-# implemented in R for the fine-mapping benchmark's per-locus regime.
+# SBayesRC (Zheng et al., Nat Genet 56:767, 2024), implemented from the paper
+# alone: the Methods ("Summary-data-based low-rank model", "SBayesRC") and
+# Supplementary Notes 1, 3, 5, 6, 7, 8 and 10. No code from the SBayesRC
+# software (GPL-3) is used; this package stays MIT (user decision,
+# 2026-09-16). Where the paper is specific the implementation follows it
+# exactly; every point the paper leaves open is listed below with the choice
+# made here.
 #
-# See docs/autoresearch/method-sbayesrc.md for the algorithmic derivation and
-# the caveats section (§0.1 of the plan) - this implementation runs FAR
-# outside SBayesRC's native genome-wide-7M-SNP regime and its scores must be
-# treated as in-context-relative to the other Tier-1 methods in this
-# benchmark, NOT as a reflection of SBayesRC's real-world performance on
-# actual GWAS-scale data.
+# Mapping to this benchmark
+# -------------------------
+# SBayesRC fits all SNPs of one GWAS jointly, with a block-diagonal LD matrix
+# over quasi-independent LD blocks. Here each region of a scenario is one
+# block. Note that the simulator gives every region its own phenotype, so a
+# scenario is not a single GWAS; results describe SBayesRC applied to that
+# design.
 #
-# Why an in-R reimplementation instead of the upstream R package
-# -------------------------------------------------------------
-# The upstream (zhilizheng/SBayesRC) requires a pre-eigen-decomposed
-# genome-wide LD folder + an annotation file both tied to a specific ~7M-SNP
-# reference panel. Repurposing that machinery for our per-region 40-1000-SNP
-# simulated LD blocks is significantly harder than reimplementing the
-# algorithm - and would produce something that behaves less faithfully.
-# So we reimplement the algorithm here, close to how it is described in
-# Zheng et al. (Nat Genet 2024), tailored to the summary-statistic + block-LD
-# setting the rest of this package produces.
+# The model (paper)
+# -----------------
+#   * Marginal effects on the standardised scale, b_j = s_j b*_j with
+#     s_j = sqrt(1 / (N_j sigma_j^2 + b*_j^2)), assuming unit phenotypic
+#     variance (Supp. Note 6).
+#   * For each block, R = U Lambda U'. Keep the q leading eigenpairs whose
+#     eigenvalues explain at least a proportion rho of the sum of the nonzero
+#     eigenvalues, and fit the low-rank model w = Q beta + epsilon with
+#     w = Lambda_q^-1/2 U_q' b, Q = Lambda_q^1/2 U_q' and
+#     Var(epsilon) = I sigma_e^2 / N (Supp. Note 1).
+#   * beta_j ~ sum_k pi_jk N(0, gamma_k sigma_g^2), five components with
+#     gamma = [0, 0.001, 0.01, 0.1, 1]% (Methods).
+#   * Stick-breaking membership, p_jk = Pr(delta_j >= k | delta_j >= k - 1)
+#     for k = 2..5, with pi_j1 = 1 - p_j2, pi_j2 = (1 - p_j3) p_j2, ...,
+#     pi_j5 = p_j5 p_j4 p_j3 p_j2 (Supp. Note 5).
+#   * Probit link p_jk = Phi(mu_k + A_j' alpha_k); flat prior on mu_k;
+#     alpha_kc ~ N(0, sigma_ak^2); sigma_ak^2 ~ scaled-inv-chi2(4, 1)
+#     (Methods). Binary annotations are 0/1; quantitative annotations are
+#     standardised to mean 0 and variance 1.
+#   * sigma_g^2 = sum over blocks of w_hat' w_hat with w_hat = Q beta, computed
+#     in every iteration (Supp. Note 7, Algorithm line 23).
+#   * sigma_e^2 has a scaled-inv-chi2(nu_e, tau_e^2) prior and is sampled for
+#     each block (Supp. Note 8, Algorithm line 25).
 #
-# Model
-# -----
-# For each region i, effect sizes beta_{i,j} follow a spike + K-normal-slabs
-# mixture:
+# The sampler (Supp. Note 8 and its Algorithm)
+# --------------------------------------------
+#   For each iteration: for each SNP in turn, sample delta_j from its full
+#   conditional (beta_j integrated out) and then beta_j given delta_j, and
+#   update the residual; then, for k = 2..5 and the SNPs with
+#   delta_j >= k - 1, sample the latent l_jk from a normal truncated by
+#   z_jk = 1(delta_j >= k) (Albert and Chib), then mu_k and each alpha_kc by
+#   single-site Gibbs, then sigma_ak^2; then sigma_g^2; then sigma_e^2 per
+#   block. The Supplementary Note's printed full conditionals for beta_j and
+#   sigma_e^2 drop the factor N that its stated joint distribution carries
+#   (and set Q_j'Q_j to one); here both are derived from that joint
+#   distribution:
+#     precision_jk = N Q_j'Q_j / sigma_e^2 + 1 / (gamma_k sigma_g^2),
+#     mean_jk      = (N / sigma_e^2) r_j / precision_jk,
+#     r_j          = Q_j' (w - sum_{j' != j} Q_j' beta_j'),
+#     sigma_e^2    ~ scaled-inv-chi2(q + nu_e, (N e'e + nu_e tau_e^2)/(q + nu_e)).
+#   The note prints the latent-variable coding both ways round; here
+#   z_jk = 1 when the SNP reaches component k, with l_jk > 0, which is the
+#   coding its truncated-normal full conditional uses.
+#   MCMC: 3,000 iterations, the first 1,000 discarded (Methods). The PIP is
+#   the posterior probability of a non-zero component.
 #
-#     beta_{i,j} | comp_{i,j} = k ~ Normal(0, sigma2_k),  k = 1, ..., K
-#     beta_{i,j} | comp_{i,j} = 0 = 0                     (spike)
+# Tuning rho (Supp. Note 10)
+# --------------------------
+#   Pseudo summary statistics b_t = b + sqrt(1/n_t - 1/n) U Lambda^1/2 xi,
+#   xi ~ N(0, I), using the eigenpairs kept at rho = 0.995, and
+#   b_v = (b n - b_t n_t) / n_v. For rho in (0.995, 0.99, 0.95, 0.9), a
+#   150-iteration run without annotations on b_t gives the posterior mean of
+#   beta over its last 50 iterations, and the pseudo-validation correlation
+#   R = beta' b_v / sqrt(m Var(beta)). rho moves from 0.995 when R > 0 and
+#   |R / R_0.995| > 1.25; if the best R is at rho = 0.9 the user is asked to
+#   extend the grid.
 #
-# where sigma2_1 > sigma2_2 > ... > sigma2_K is a fixed grid of variance
-# scales (default: c(0.05, 0.005, 5e-4, 5e-5), corresponding roughly to
-# large/medium/small/tiny per-SNP heritability).
+# Points the paper leaves open, and the choice made here
+# -------------------------------------------------------
+#   * Starting values ("Initialize model parameters"): beta = 0, delta = 1,
+#     sigma_g^2 = 0.5, sigma_e^2 = 1, alpha = 0, sigma_ak^2 = 1, and mu_k set
+#     so that the starting mixture proportions are
+#     (0.990, 0.005, 0.003, 0.001, 0.001), the software's documented defaults.
+#   * The sigma_e^2 prior (nu_e, tau_e^2) is not given; nu_e = 4 and
+#     tau_e^2 = 1 are used, centring it on the unit phenotypic variance the
+#     paper assumes.
+#   * "Nonzero" eigenvalues are those above the usual numerical-rank
+#     tolerance, max(lambda) * m * machine epsilon.
+#   * The training share of the pseudo split is not given; 90% is used.
+#   * When several rho values pass the 1.25 rule, the one with the largest R
+#     is taken. When R at 0.995 is not positive, the rho with the largest
+#     positive R is taken. "Prompt the user" is implemented as an error when
+#     the chosen rho is the smallest in the grid.
+#   * If every beta is zero in an iteration, sigma_g^2 keeps its previous
+#     value (the mixture variances would otherwise all be zero).
+#   * The flat prior on mu_k is taken as uniform on [-8, 8] on the probit
+#     scale (probabilities down to about 1e-15). On the whole line it gives
+#     an improper posterior whenever the SNPs conditioning component k are
+#     completely separated (all or none reach k), which is common for the
+#     few SNPs in the upper components of a small scenario, and the chain
+#     then diverges. mu_k is drawn from the resulting truncated normal.
+#   * A component k whose conditioning set (delta_j >= k - 1) is empty leaves
+#     mu_k and alpha_k at their current values that iteration.
+#   * SBayesRC reports no credible sets, so none are returned.
 #
-# The per-SNP mixture proportions are annotation-modulated via a multinomial
-# logit with the spike (k=0) as the reference class:
-#
-#     log(pi_{i,j,k} / pi_{i,j,0}) = alpha_k + A_{i,j}^T gamma_k,
-#     pi_{i,j,k} = softmax_k(alpha_k + A_{i,j}^T gamma_k)
-#
-# alpha and gamma are SHARED across regions - this is the "pool annotations
-# across regions to estimate the shared annotation-to-prior mapping" step
-# from the plan (Sec 0.1 of the auto-research doc).
-#
-# Summary-stat likelihood
-# -----------------------
-# Given standardized genotypes with n samples and residual variance ~= 1,
-# the marginal-effect estimator is
-#
-#     beta_hat_j = z_j / sqrt(n),  Var(beta_hat_j | beta) = R / n
-#
-# so the SNP-j residual (conditional on beta_{-j}) is
-#
-#     r_j = beta_hat_j - sum_{k != j} R_{j,k} * beta_k
-#     r_j | beta_j ~ Normal(beta_j, 1/n)
-#
-# and the mixture-conditional posteriors on beta_j are the standard
-# normal-normal updates: v_k = 1/(1/sigma2_k + n), m_k = v_k * n * r_j.
-#
-# Gibbs sweep
-# -----------
-#   1. For each region i, several sweeps over its SNPs, updating (comp_j,
-#      beta_j) jointly from the mixture posterior.
-#   2. Every gamma_update_every iterations, pool the current comp_{i,j}
-#      assignments across all regions and refit (alpha, gamma) via a
-#      multinomial logistic regression on A - this is the shared prior
-#      update, and is where cross-region information flows.
-#   3. Repeat, discarding burn-in samples, then estimate PIP_{i,j} as the
-#      posterior probability comp_{i,j} > 0.
+# This file provides:
+#   - setup_sbayesrc()                 : dependency check
+#   - sbayesrc()                       : the joint fit across regions (blocks)
+#   - run_sbayesrc()                   : SBayesRC on a single region
+#   - run_sbayesrc_region()            : adapter called by run_methods()
+#   - run_sbayesrc_scenario_setup()    : runs sbayesrc() once per scenario
 # =============================================================================
 
 
@@ -76,204 +115,176 @@
 # setup_sbayesrc()
 # =============================================================================
 
-#' Check that dependencies for sbayesrc are available
+#' Check that the dependencies of sbayesrc are available
+#'
+#' The implementation uses base R only.
 #'
 #' @return Invisible TRUE.
 #' @export
 setup_sbayesrc <- function() {
-  if (!requireNamespace("nnet", quietly = TRUE)) {
-    stop("The `nnet` package is required for sbayesrc (used for the ",
-         "shared multinomial annotation regression). It ships with R by ",
-         "default; install with install.packages('nnet') if missing.",
-         call. = FALSE)
-  }
   invisible(TRUE)
 }
 
 
 # =============================================================================
-# run_sbayesrc(): single-region interface
+# sbayesrc(): the joint fit
 # =============================================================================
 
-#' Run SBayesRC-style Bayesian regression on a single region
+#' SBayesRC across a set of LD blocks
 #'
-#' Fits a K-component mixture-of-normals prior (with the point mass at zero
-#' as the spike) using a Gibbs sampler on the summary-stat likelihood
-#' r_j | beta_j ~ Normal(beta_j, 1/n). When \code{pooled_gamma} is supplied
-#' (as it is under \code{run_methods()} via
-#' \code{run_sbayesrc_scenario_setup()}) the per-SNP mixture weights use the
-#' cross-region annotation regression fit; otherwise they are refit on this
-#' region alone.
+#' Fits SBayesRC (see the file header) with each region as one LD block.
 #'
-#' When \code{annotations} is NULL, the prior collapses to region-common
-#' mixture proportions (learned from the Gibbs assignments), and the method
-#' still runs.
+#' @param z_list List of z-score vectors, one per region.
+#' @param ld_list List of LD correlation matrices, one per region.
+#' @param n Integer. GWAS sample size.
+#' @param annot_list List of annotation matrices (variants x annotations) with
+#'   the same columns in every region, or NULL to fit without annotations.
+#' @param beta_hat_list,se_list Optional lists of marginal effects and their
+#'   standard errors. When NULL, \code{b = z / sqrt(n + z^2)}, which is the
+#'   same scaling.
+#' @param rho Numeric or NULL. Eigenvalue cut-off. NULL (default) tunes it by
+#'   pseudo-validation over \code{tune_grid}.
+#' @param tune_grid Numeric. Cut-offs to tune over. Default
+#'   \code{c(0.995, 0.99, 0.95, 0.9)}.
+#' @param tune_iter,tune_keep Integer. Iterations of each tuning run, and the
+#'   final iterations averaged. Defaults 150 and 50.
+#' @param train_prop Numeric. Training share of the pseudo split. Default 0.9.
+#' @param n_iter,burn_in Integer. MCMC length and burn-in. Defaults 3000 and
+#'   1000.
+#' @param gamma Numeric length 5. Component variance scales (fractions of
+#'   sigma_g^2). Default \code{c(0, 1e-5, 1e-4, 1e-3, 1e-2)}.
+#' @param start_h2,start_pi Starting sigma_g^2 and mixture proportions.
+#' @param nu_alpha,tau2_alpha Prior of the annotation-effect variances.
+#' @param nu_e,tau2_e Prior of the residual variances.
+#' @param seed Integer or NULL. Random seed.
 #'
-#' @param z Numeric vector. Marginal z-scores (length p).
-#' @param LD Matrix. LD correlation matrix (p x p).
-#' @param n Integer. Sample size.
-#' @param annotations Matrix or NULL. Functional annotations (p x m).
-#' @param sigma2_scale Numeric vector of length K. Per-component prior
-#'   variance grid. Default \code{c(0.05, 0.005, 5e-4, 5e-5)}.
-#' @param n_iter Integer. Total Gibbs iterations. Default 300.
-#' @param burn_in Integer. Iterations to discard before averaging. Default 150.
-#' @param gamma_update_every Integer. Refit the annotation regression
-#'   (alpha, gamma) every this many Gibbs iterations. Default 10.
-#' @param pooled_gamma List with \code{alpha}, \code{gamma} matrices from
-#'   \code{run_sbayesrc_scenario_setup()}, or NULL. When supplied, no
-#'   region-local annotation refit is performed - the shared coefficients
-#'   are used as-is.
-#' @param seed Integer or NULL. Sampler seed.
-#' @param variant_ids Character or NULL. Passed through unused.
-#' @param ... Ignored (wrapper compatibility).
-#'
-#' @return List with pip, credible_sets, method = "sbayesrc", params,
-#'   runtime_seconds, additional (posterior_mean_beta, prior_source, etc.).
+#' @return A list with \code{pip} and \code{beta} (per-region lists),
+#'   \code{rho}, \code{tuning} (data frame or NULL), \code{q} (kept
+#'   eigenpairs per region), \code{sigma2_g} (posterior mean), \code{mu} and
+#'   \code{alpha} (posterior means).
 #' @export
-run_sbayesrc <- function(z, LD, n,
-                         annotations = NULL,
-                         sigma2_scale = c(0.05, 0.005, 5e-4, 5e-5),
-                         n_iter = 300L,
-                         burn_in = 150L,
-                         gamma_update_every = 10L,
-                         pooled_gamma = NULL,
-                         seed = NULL,
-                         variant_ids = NULL,
-                         ...) {
-  setup_sbayesrc()
-  t0 <- Sys.time()
+sbayesrc <- function(z_list, ld_list, n, annot_list = NULL,
+                     beta_hat_list = NULL, se_list = NULL,
+                     rho = NULL, tune_grid = c(0.995, 0.99, 0.95, 0.9),
+                     tune_iter = 150L, tune_keep = 50L, train_prop = 0.9,
+                     n_iter = 3000L, burn_in = 1000L,
+                     gamma = c(0, 1e-5, 1e-4, 1e-3, 1e-2),
+                     start_h2 = 0.5,
+                     start_pi = c(0.990, 0.005, 0.003, 0.001, 0.001),
+                     nu_alpha = 4, tau2_alpha = 1, nu_e = 4, tau2_e = 1,
+                     seed = NULL) {
   if (!is.null(seed)) set.seed(seed)
+  R <- length(z_list)
+  stopifnot(R >= 1L, length(ld_list) == R, length(gamma) == 5L,
+            length(start_pi) == 5L, burn_in < n_iter)
+  sizes <- vapply(z_list, length, integer(1))
 
-  p <- length(z)
-  stopifnot("LD must be p x p" = is.matrix(LD) && all(dim(LD) == c(p, p)))
-  K <- length(sigma2_scale)
-  stopifnot(K >= 1L)
-
-  prior_source <- if (is.null(annotations)) {
-    "no_annotations"
-  } else if (!is.null(pooled_gamma)) {
-    "pooled_scenario_gamma"
-  } else {
-    "single_region_gamma"
-  }
-
-  # --- Marginal beta_hat + per-SNP residual state ---------------------------
-  beta_hat <- z / sqrt(n)
-  beta     <- rep(0, p)                # current effect estimates
-  comp     <- rep(0L, p)               # current mixture assignments (0..K)
-  # Running R %*% beta so per-SNP residuals are cheap: init 0 (beta = 0)
-  R_beta   <- rep(0, p)
-
-  # --- Annotation setup ------------------------------------------------------
-  has_annot <- !is.null(annotations)
-  if (has_annot) {
-    A <- as.matrix(annotations)
-    m_ann <- ncol(A)
-    if (nrow(A) != p) {
-      stop("annotations must have p rows to match z", call. = FALSE)
-    }
-    if (!is.null(pooled_gamma)) {
-      alpha <- as.numeric(pooled_gamma$alpha)
-      gamma <- as.matrix(pooled_gamma$gamma)
-      stopifnot(length(alpha) == K, nrow(gamma) == m_ann, ncol(gamma) == K)
+  # --- scaled marginal effects (Supp. Note 6) --------------------------------
+  b_list <- lapply(seq_len(R), function(i) {
+    if (!is.null(beta_hat_list) && !is.null(se_list)) {
+      bh <- as.numeric(beta_hat_list[[i]]); s <- as.numeric(se_list[[i]])
+      bh / sqrt(n * s^2 + bh^2)
     } else {
-      # Sparse initial prior: ~97% mass on the spike, ~3% distributed
-      # roughly evenly across the K slabs. alpha_k = log((0.03/K) / 0.97).
-      # This matches the sparse-model regime of the benchmark (S causal
-      # variants out of p, S << p) and gives the sampler a reasonable
-      # starting point before the multinomial refit learns the true
-      # sparsity from the data.
-      alpha <- rep(log((0.03 / K) / 0.97), K)
-      gamma <- matrix(0, nrow = m_ann, ncol = K)  # per-annotation slopes
+      z <- as.numeric(z_list[[i]])
+      z / sqrt(n + z^2)
     }
-  } else {
-    A <- NULL; m_ann <- 0L
-    alpha <- rep(log((0.03 / K) / 0.97), K)   # same sparse initial prior
-    gamma <- matrix(0, nrow = 0L, ncol = K)
-  }
+  })
 
-  # Silent-degradation guard: with annotations but no pooled gamma we fall back
-  # to the unstable in-loop refit (see the WARNING in the Gibbs loop below).
-  if (has_annot && is.null(pooled_gamma)) .sbayesrc_warn_no_pooled()
-
-  # Prior mixture proportions per SNP: pi[j, ] over (0, 1, ..., K)
-  pi_mat <- .sbayesrc_priors_from_gamma(A, alpha, gamma, K, p = p)
-
-  # --- Storage for post-burn PIP estimation ---------------------------------
-  pip_running   <- rep(0, p)
-  beta_running  <- rep(0, p)
-  n_kept        <- 0L
-
-  # --- Main Gibbs loop ------------------------------------------------------
-  for (it in seq_len(n_iter)) {
-    # Sweep over SNPs
-    swp <- .sbayesrc_gibbs_sweep(
-      beta_hat = beta_hat, LD = LD, n = n,
-      beta = beta, comp = comp, R_beta = R_beta,
-      pi_mat = pi_mat, sigma2_scale = sigma2_scale
-    )
-    beta   <- swp$beta
-    comp   <- swp$comp
-    R_beta <- swp$R_beta
-
-    # Update annotation regression periodically (only when pooled_gamma is NULL
-    # and we have annotations). Under run_methods()/scenario_setup the pooled
-    # coefficients are supplied and this branch is skipped.
-    #
-    # WARNING (verified empirically 2026-07-29): this in-loop refit path is
-    # UNSTABLE. On a benchmark-like locus (p=300, n=1000, phi=0.05, S=3) it
-    # inflates total posterior mass ~15x relative to the pooled-gamma path
-    # (mass ratio ~55 vs ~3.7) EVEN WITH THE TRUE LD - so the inflation is
-    # caused by the annotation refit, not by LD mis-specification. It is only
-    # reached when run_sbayesrc_scenario_setup() returned nothing (fewer than 2
-    # regions, absent/ragged annotations, or a failed pilot), which previously
-    # degraded results silently. It now warns; see .sbayesrc_warn_no_pooled().
-    if (has_annot && is.null(pooled_gamma) &&
-        (it %% gamma_update_every == 0L)) {
-      fit <- tryCatch(.sbayesrc_fit_gamma(comp, A, K), error = function(e) NULL)
-      if (!is.null(fit)) {
-        alpha  <- fit$alpha
-        gamma  <- fit$gamma
-        pi_mat <- .sbayesrc_priors_from_gamma(A, alpha, gamma, K, p = p)
+  # --- annotations: binary kept, quantitative standardised --------------------
+  A <- NULL
+  if (!is.null(annot_list)) {
+    A <- do.call(rbind, lapply(annot_list, as.matrix))
+    stopifnot(nrow(A) == sum(sizes))
+    for (cc in seq_len(ncol(A))) {
+      if (!all(A[, cc] %in% c(0, 1))) {
+        s_cc <- stats::sd(A[, cc])
+        if (!is.finite(s_cc) || s_cc == 0) {
+          stop("annotation ", cc, " is constant", call. = FALSE)
+        }
+        A[, cc] <- (A[, cc] - mean(A[, cc])) / s_cc
       }
     }
-
-    # Accumulate post-burn samples
-    if (it > burn_in) {
-      pip_running  <- pip_running  + (comp > 0L)
-      beta_running <- beta_running + beta
-      n_kept       <- n_kept + 1L
-    }
   }
 
-  pip  <- if (n_kept > 0L) pip_running  / n_kept else rep(0, p)
-  bhat <- if (n_kept > 0L) beta_running / n_kept else rep(0, p)
+  eig <- lapply(ld_list, .sbrc_eigen)
 
-  # --- 95%-mass credible set (greedy on PIP) --------------------------------
-  ord      <- order(pip, decreasing = TRUE)
-  cumpip   <- cumsum(pip[ord])
-  keep     <- ord[seq_len(min(which(cumpip >= 0.95 * sum(pip)), length(ord)))]
-  if (length(keep) == 0L || sum(pip) == 0) keep <- integer(0)
-  cs_list  <- if (length(keep) > 0L) list(as.integer(keep)) else list()
+  # --- tune rho by pseudo-validation (Supp. Note 10) --------------------------
+  tuning <- NULL
+  if (is.null(rho)) {
+    rho_max <- max(tune_grid)
+    n_t <- round(train_prop * n); n_v <- n - n_t
+    b_t <- vector("list", R); b_v <- vector("list", R)
+    for (i in seq_len(R)) {
+      e  <- eig[[i]]
+      qm <- .sbrc_q(e$values, rho_max)
+      xi <- stats::rnorm(qm)
+      noise <- e$vectors[, seq_len(qm), drop = FALSE] %*%
+        (sqrt(e$values[seq_len(qm)]) * xi)
+      b_t[[i]] <- b_list[[i]] + sqrt(1 / n_t - 1 / n) * as.numeric(noise)
+      b_v[[i]] <- (b_list[[i]] * n - b_t[[i]] * n_t) / n_v
+    }
+    bv_all <- unlist(b_v, use.names = FALSE)
+    Rcor <- vapply(tune_grid, function(r) {
+      blocks <- .sbrc_blocks(eig, b_t, r)
+      fit <- .sbrc_mcmc(blocks, A = NULL, n = n_t, n_iter = tune_iter,
+                        burn_in = tune_iter - tune_keep, gamma = gamma,
+                        start_h2 = start_h2, start_pi = start_pi,
+                        nu_alpha = nu_alpha, tau2_alpha = tau2_alpha,
+                        nu_e = nu_e, tau2_e = tau2_e)
+      bm <- unlist(fit$beta, use.names = FALSE)
+      sum(bm * bv_all) / sqrt(length(bm) * stats::var(bm))
+    }, numeric(1))
+    tuning <- data.frame(rho = tune_grid, R = Rcor)
+    rho <- .sbrc_choose_rho(tune_grid, Rcor)
+  }
 
-  list(
-    pip             = pip,
-    credible_sets   = cs_list,
-    method          = "sbayesrc",
-    input_type      = "summary",
-    params          = list(
-      sigma2_scale = sigma2_scale, n_iter = n_iter, burn_in = burn_in,
-      gamma_update_every = gamma_update_every, K = K
-    ),
-    runtime_seconds = as.numeric(difftime(Sys.time(), t0, units = "secs")),
-    additional      = list(
-      posterior_mean_beta = bhat,
-      prior_source        = prior_source,
-      alpha               = alpha,
-      gamma               = gamma,
-      variant_ids         = variant_ids
-    )
-  )
+  # --- main run ------------------------------------------------------------------
+  blocks <- .sbrc_blocks(eig, b_list, rho)
+  fit <- .sbrc_mcmc(blocks, A = A, n = n, n_iter = n_iter, burn_in = burn_in,
+                    gamma = gamma, start_h2 = start_h2, start_pi = start_pi,
+                    nu_alpha = nu_alpha, tau2_alpha = tau2_alpha,
+                    nu_e = nu_e, tau2_e = tau2_e)
+  c(fit, list(rho = rho, tuning = tuning,
+              q = vapply(blocks, function(bk) nrow(bk$Q), integer(1))))
+}
+
+
+# =============================================================================
+# run_sbayesrc(): one region
+# =============================================================================
+
+#' Run SBayesRC on a single region
+#'
+#' Treats the region as the only LD block. Under \code{run_methods()} the
+#' fit is joint across the regions of a scenario instead (see
+#' \code{run_sbayesrc_scenario_setup()}).
+#'
+#' @param z Numeric vector. Marginal z-scores.
+#' @param LD Matrix. LD correlation matrix.
+#' @param n Integer. Sample size.
+#' @param annotations Matrix or NULL. Annotation matrix.
+#' @param beta_hat,se Numeric or NULL. Marginal effects and standard errors.
+#' @param variant_ids Character or NULL.
+#' @param ... Passed to \code{\link{sbayesrc}}.
+#'
+#' @return List with pip, credible_sets (empty), method = "sbayesrc",
+#'   params, runtime_seconds and additional.
+#' @export
+run_sbayesrc <- function(z, LD, n, annotations = NULL, beta_hat = NULL,
+                         se = NULL, variant_ids = NULL, ...) {
+  t0 <- Sys.time()
+  p <- length(z)
+  stopifnot("LD must be p x p" = is.matrix(LD) && all(dim(LD) == c(p, p)))
+  extra <- list(...)
+  extra <- extra[intersect(names(extra), names(formals(sbayesrc)))]
+  fit <- do.call(sbayesrc, c(list(
+    z_list = list(z), ld_list = list(LD), n = n,
+    annot_list = if (is.null(annotations)) NULL else list(annotations),
+    beta_hat_list = if (is.null(beta_hat)) NULL else list(beta_hat),
+    se_list = if (is.null(se)) NULL else list(se)), extra))
+  .sbrc_region_output(fit, 1L, runtime = as.numeric(difftime(Sys.time(), t0,
+                                                             units = "secs")),
+                      joint = FALSE, variant_ids = variant_ids)
 }
 
 
@@ -281,134 +292,81 @@ run_sbayesrc <- function(z, LD, n,
 # run_sbayesrc_region(): adapter for run_methods()
 # =============================================================================
 
-#' Adapter for run_methods() - forwards to run_sbayesrc
+#' Region adapter for SBayesRC
 #'
-#' @param region_geno One element of \code{simulation$genotypes}.
-#' @param region_pheno One element of a scenario's \code{regions}.
-#' @param pooled_gamma List or NULL. Shared (alpha, gamma) from
-#'   \code{run_sbayesrc_scenario_setup()}. When supplied, no region-local
-#'   annotation refit happens.
-#' @param ... Forwarded to \code{run_sbayesrc()}.
+#' Returns the region's result from the joint fit computed by
+#' \code{run_sbayesrc_scenario_setup()}; without that result it fits the
+#' region on its own.
 #'
-#' @return Output of run_sbayesrc.
+#' @param region_geno,region_pheno Region data.
+#' @param .sbayesrc_cache Named list of per-region results keyed by z
+#'   fingerprint. Default NULL.
+#' @param .sbayesrc_error Character or NULL. Error from the scenario setup.
+#' @param ... Passed to \code{\link{run_sbayesrc}}.
+#'
+#' @return The per-region result list.
 #' @export
 run_sbayesrc_region <- function(region_geno, region_pheno,
-                                pooled_gamma = NULL, ...) {
+                                .sbayesrc_cache = NULL,
+                                .sbayesrc_error = NULL, ...) {
+  if (!is.null(.sbayesrc_error)) stop(.sbayesrc_error, call. = FALSE)
+  if (!is.null(.sbayesrc_cache)) {
+    hit <- .sbayesrc_cache[[.fb_fingerprint(region_pheno$z)]]
+    if (!is.null(hit)) return(hit)
+  }
   A <- region_geno$annotations_matrix
   if (is.null(A)) A <- region_pheno$annotations_matrix
-  run_sbayesrc(
-    z            = region_pheno$z,
-    LD           = region_geno$LD,
-    n            = region_geno$n,
-    annotations  = A,
-    pooled_gamma = pooled_gamma,
-    variant_ids  = region_geno$variant_ids,
-    ...
-  )
+  run_sbayesrc(z = region_pheno$z, LD = region_geno$LD, n = region_geno$n,
+               annotations = A, beta_hat = region_pheno$beta_hat,
+               se = region_pheno$se, variant_ids = region_geno$variant_ids, ...)
 }
 
 
 # =============================================================================
-# Scenario-level setup: pool across regions, estimate shared (alpha, gamma)
+# Scenario-level setup: the joint fit across the regions
 # =============================================================================
 
-#' Fit a pooled annotation regression for sbayesrc across the scenario
+#' Scenario-level SBayesRC fit
 #'
-#' Runs a short-burn Gibbs on every region with region-local annotation
-#' refits, pools the resulting per-SNP component assignments across all
-#' regions, and does one final multinomial regression on the pooled data to
-#' obtain the shared \code{(alpha, gamma)} - i.e., the annotation-to-prior
-#' mapping learned genome-wide-style from the whole scenario.
+#' Fits all regions of a scenario jointly, one LD block per region, and
+#' returns the per-region results keyed by z fingerprint.
 #'
-#' Downstream calls (per region) use those shared coefficients as
-#' \code{pooled_gamma}, so each region's Gibbs skips the per-region
-#' annotation refit and its priors are set from the cross-region model. This
-#' implements the plan's §0.1 requirement that SBayesRC's annotation prior
-#' be learned jointly across regions and fed back per-block.
+#' @param genotypes List of per-region genotype data.
+#' @param regions List of per-region phenotype data for one scenario.
+#' @param user_args Named list of arguments for \code{\link{sbayesrc}}.
 #'
-#' Returns an empty list (no forwarding) when there are fewer than 2 regions,
-#' when annotation matrices are missing/inconsistent, or when the pilot Gibbs
-#' fails - the per-region wrapper then does its own single-region refit.
-#'
-#' @param genotypes List of region_geno.
-#' @param regions List of region_pheno for this scenario.
-#' @param user_args User's method_args for sbayesrc.
-#'
-#' @return List with a single element \code{pooled_gamma} = list(alpha, gamma),
-#'   or an empty list.
+#' @return A named list merged into each region's arguments.
 #' @export
 run_sbayesrc_scenario_setup <- function(genotypes, regions, user_args) {
-  n_regions <- length(regions)
-  if (n_regions < 2L) return(list())
-
-  # Resolve tuning knobs (allow user override of sigma2_scale, K, etc.)
-  sigma2_scale       <- user_args$sigma2_scale %||% c(0.05, 0.005, 5e-4, 5e-5)
-  pilot_iter         <- user_args$scenario_pilot_iter %||% 100L
-  pilot_burn         <- user_args$scenario_pilot_burn %||% 40L
-  gamma_update_every <- user_args$gamma_update_every  %||% 10L
-  K <- length(sigma2_scale)
-
-  # Validate that every region has an annotation matrix of consistent width
-  A_list <- vector("list", n_regions)
-  comp_list <- vector("list", n_regions)
-  for (i in seq_len(n_regions)) {
-    A_i <- genotypes[[i]]$annotations_matrix
-    if (is.null(A_i)) A_i <- regions[[i]]$annotations_matrix
-    if (is.null(A_i) || !is.matrix(A_i)) return(list())
-    A_list[[i]] <- A_i
-  }
-  ncols <- vapply(A_list, ncol, integer(1))
-  if (length(unique(ncols)) != 1L) return(list())
-
-  # Pilot Gibbs per region to seed component assignments the joint regression
-  # will pool over. We do NOT need the full posterior - just enough for a
-  # reasonable pooled fit.
-  for (i in seq_len(n_regions)) {
-    A_i <- A_list[[i]]
-    z_i <- regions[[i]]$z
-    if (is.null(z_i) || length(z_i) != nrow(A_i)) return(list())
-    LD_i <- genotypes[[i]]$LD
-    n_i  <- genotypes[[i]]$n
-    if (is.null(LD_i) || is.null(n_i)) return(list())
-
-    pilot <- tryCatch(
-      run_sbayesrc(
-        z = z_i, LD = LD_i, n = n_i, annotations = A_i,
-        sigma2_scale = sigma2_scale, n_iter = pilot_iter, burn_in = pilot_burn,
-        gamma_update_every = gamma_update_every, pooled_gamma = NULL
-      ),
-      error = function(e) NULL
-    )
-    if (is.null(pilot)) return(list())
-    # Threshold each SNP's PIP to a component: 0 for the spike, or a slab
-    # index sampled proportional to sigma2_scale (larger slab -> more mass).
-    # We don't have full sample paths outside run_sbayesrc's memory, but the
-    # posterior mean beta gives a reasonable slab-index proxy: sort SNPs by
-    # |bhat| within the non-null (PIP > 0.5) set and assign the top third to
-    # slab 1 (largest variance), middle third to slab 2, etc.
-    pip_i  <- pilot$pip
-    bhat_i <- pilot$additional$posterior_mean_beta
-    comp_i <- rep(0L, length(z_i))
-    hits   <- which(pip_i > 0.5)
-    if (length(hits) > 0L) {
-      # Assign slab by rank of |bhat| among the hits
-      ranks <- rank(-abs(bhat_i[hits]))
-      slab  <- pmin(K, ceiling(ranks / length(hits) * K))
-      comp_i[hits] <- slab
+  R <- length(regions)
+  t0 <- Sys.time()
+  A_list <- lapply(seq_len(R), function(i) {
+    A <- genotypes[[i]]$annotations_matrix
+    if (is.null(A)) regions[[i]]$annotations_matrix else A
+  })
+  has_A <- !vapply(A_list, is.null, logical(1))
+  tryCatch({
+    if (any(has_A) && !all(has_A)) {
+      stop("some regions have no annotation matrix", call. = FALSE)
     }
-    comp_list[[i]] <- comp_i
-  }
-
-  # Pool and fit the shared (alpha, gamma)
-  A_pooled    <- do.call(rbind, A_list)
-  comp_pooled <- unlist(comp_list, use.names = FALSE)
-  fit <- tryCatch(
-    .sbayesrc_fit_gamma(comp_pooled, A_pooled, K),
-    error = function(e) NULL
-  )
-  if (is.null(fit)) return(list())
-
-  list(pooled_gamma = list(alpha = fit$alpha, gamma = fit$gamma))
+    known <- names(formals(sbayesrc))
+    extra <- user_args[intersect(names(user_args), known)]
+    fit <- do.call(sbayesrc, c(list(
+      z_list        = lapply(regions, `[[`, "z"),
+      ld_list       = lapply(genotypes, `[[`, "LD"),
+      n             = genotypes[[1]]$n,
+      annot_list    = if (all(has_A)) A_list else NULL,
+      beta_hat_list = lapply(regions, `[[`, "beta_hat"),
+      se_list       = lapply(regions, `[[`, "se")), extra))
+    runtime <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    cache <- lapply(seq_len(R), function(i)
+      .sbrc_region_output(fit, i, runtime = runtime / R, joint = TRUE,
+                          variant_ids = genotypes[[i]]$variant_ids))
+    names(cache) <- vapply(regions, function(r) .fb_fingerprint(r$z),
+                           character(1))
+    list(.sbayesrc_cache = cache)
+  }, error = function(e) list(.sbayesrc_error = paste("SBayesRC failed:",
+                                                      conditionMessage(e))))
 }
 
 
@@ -416,172 +374,253 @@ run_sbayesrc_scenario_setup <- function(genotypes, regions, user_args) {
 # Internals
 # =============================================================================
 
-# One Gibbs sweep over SNPs in a single region.
-# Updates in place (returns new copies of) beta, comp, and R_beta = LD %*% beta
-# so per-SNP residuals stay cheap to compute.
-.sbayesrc_gibbs_sweep <- function(beta_hat, LD, n, beta, comp, R_beta,
-                                  pi_mat, sigma2_scale) {
-  p <- length(beta_hat)
-  K <- length(sigma2_scale)
-  # Precompute per-component posterior variance and log-BF scale factor
-  # (which do not depend on r_j).
-  v_k    <- 1 / (1 / sigma2_scale + n)           # posterior variance
-  # log p(r|k) - log p(r|k=0) has two pieces:
-  #   log-sd ratio  = 0.5 * log((1/n) / (sigma2_k + 1/n))
-  #                 = -0.5 * log(1 + n * sigma2_k)
-  #   quadratic in r = 0.5 * (n - 1/(sigma2_k + 1/n)) * r^2
-  #                  = 0.5 * n^2 * sigma2_k / (1 + n * sigma2_k) * r^2
-  log_sd_ratio <- -0.5 * log(1 + n * sigma2_scale)
-  quad_scale   <- 0.5 * n^2 * sigma2_scale / (1 + n * sigma2_scale)
-
-  for (j in seq_len(p)) {
-    # Residual: beta_hat_j - sum_{k != j} R_{j,k} beta_k
-    #         = beta_hat_j - (R_beta[j] - R[j,j] * beta[j])
-    #         = beta_hat_j - R_beta[j] + beta[j]     (R[j,j] = 1)
-    r_j <- beta_hat[j] - R_beta[j] + beta[j]
-
-    # log-likelihood contribution per component (relative to k=0)
-    log_lik <- c(0, log_sd_ratio + quad_scale * r_j^2)   # length K+1
-
-    # log-priors from pi_mat (already normalized rows over 0..K)
-    log_pri <- log(pmax(pi_mat[j, ], 1e-30))
-
-    log_post <- log_pri + log_lik
-    log_post <- log_post - max(log_post)
-    w_post   <- exp(log_post); w_post <- w_post / sum(w_post)
-
-    new_k <- sample.int(K + 1L, size = 1L, prob = w_post) - 1L
-    if (new_k == 0L) {
-      new_beta <- 0
-    } else {
-      m_k      <- v_k[new_k] * n * r_j
-      new_beta <- stats::rnorm(1L, mean = m_k, sd = sqrt(v_k[new_k]))
-    }
-
-    # Update R_beta with the change in beta_j
-    delta_j <- new_beta - beta[j]
-    if (delta_j != 0) R_beta <- R_beta + LD[, j] * delta_j
-    beta[j] <- new_beta
-    comp[j] <- new_k
-  }
-
-  list(beta = beta, comp = comp, R_beta = R_beta)
-}
-
-
-# Compute per-SNP prior mixture proportions pi[j, ] over (0, 1, ..., K)
-# from alpha and gamma (with k=0 spike as reference class).
-# When annotations are NULL, the row-common softmax over (0, alpha) is broadcast
-# to all p rows.
-.sbayesrc_priors_from_gamma <- function(A, alpha, gamma, K, p = NULL) {
-  if (is.null(A) || nrow(gamma) == 0L) {
-    logits <- matrix(alpha, nrow = 1L, ncol = K)
-  } else {
-    logits <- sweep(as.matrix(A) %*% gamma, 2, alpha, "+")
-    if (is.null(p)) p <- nrow(logits)
-  }
-  ext <- cbind(0, logits)
-  ext <- ext - apply(ext, 1L, max)
-  ex  <- exp(ext)
-  pi_row <- ex / rowSums(ex)
-  if (is.null(A) || nrow(gamma) == 0L) {
-    if (is.null(p)) stop(".sbayesrc_priors_from_gamma needs p when A is NULL")
-    matrix(rep(as.numeric(pi_row), each = p), nrow = p, ncol = K + 1L)
-  } else {
-    pi_row
-  }
-}
-
-
-# Fit a multinomial logistic regression of comp (0..K) on A. Returns
-# alpha (K-vector) and gamma (m_ann x K matrix) with k=0 (spike) as the
-# reference class.
-#
-# Two failure modes have to be guarded for at benchmark scale:
-#   (a) EMPTY CLASSES: with small p some slab labels never appear. The
-#       correct behaviour is "give this class ~0 prior mass" (very negative
-#       alpha), NOT the padded 0 that softmax would then convert into equal
-#       prior with the spike — the latter puts non-causal PIPs at ~0.8.
-#   (b) DIVERGENT FITS: with few non-spike observations, unregularized
-#       multinom overshoots. Heavy L2 (decay = 1) plus a coefficient cap
-#       keeps priors sane. This is a Gibbs-sampler auxiliary update, not a
-#       final scientific estimate, so aggressive regularization is fine.
-.sbayesrc_fit_gamma <- function(comp, A, K,
-                                empty_alpha = -12,
-                                coef_cap    =   6) {
-  m_ann <- ncol(A)
-  y <- factor(comp, levels = as.character(0:K))
-  # Empirical class counts — used both to detect empty classes and to
-  # sanity-check the fitted intercepts.
-  counts <- table(y)
-
-  fit <- tryCatch(
-    suppressMessages(suppressWarnings(nnet::multinom(
-      y ~ ., data = data.frame(y = y, as.data.frame(A)),
-      trace = FALSE, MaxNWts = 1e5, decay = 1.0, maxit = 200L
-    ))),
-    error = function(e) NULL
+.sbrc_region_output <- function(fit, i, runtime, joint, variant_ids) {
+  list(
+    pip             = fit$pip[[i]],
+    credible_sets   = list(),
+    method          = "sbayesrc",
+    input_type      = "summary",
+    params          = list(rho = fit$rho, q = fit$q[[i]], joint = joint),
+    runtime_seconds = runtime,
+    additional      = list(
+      posterior_mean_beta = fit$beta[[i]],
+      tuning              = fit$tuning,
+      sigma2_g            = fit$sigma2_g,
+      mu                  = fit$mu,
+      alpha               = fit$alpha,
+      variant_ids         = variant_ids
+    )
   )
-  if (is.null(fit)) {
-    return(list(alpha = rep(empty_alpha, K),
-                gamma = matrix(0, nrow = m_ann, ncol = K)))
-  }
-  coefs <- tryCatch(coef(fit), error = function(e) NULL)
-  if (is.null(coefs)) {
-    return(list(alpha = rep(empty_alpha, K),
-                gamma = matrix(0, nrow = m_ann, ncol = K)))
-  }
-  # coefs shape:
-  #   - (K x (1 + m_ann)) matrix with rownames "1".."K" when >=2 non-reference
-  #     classes are present in the data;
-  #   - plain (1 + m_ann) numeric vector when only ONE non-reference class was
-  #     fit (nnet::multinom collapses to a binary logistic). The class it
-  #     belongs to has NO rowname on the vector, so infer it from `comp`.
-  if (is.null(dim(coefs))) {
-    present <- setdiff(sort(unique(as.integer(as.character(y)))), 0L)
-    lone_class <- if (length(present) == 1L) present else 1L
-    coefs <- matrix(coefs, nrow = 1L,
-                    dimnames = list(as.character(lone_class),
-                                    names(coefs)))
-  }
-
-  # Reindex to always have rows 1..K in that order, padding empty classes
-  # with `empty_alpha` (intercept) and zero (annotation slopes) so that
-  # they get essentially zero prior mass — not the softmax-uniform prior
-  # a raw zero-padding would produce.
-  full <- matrix(0, nrow = K, ncol = ncol(coefs),
-                 dimnames = list(as.character(1:K), colnames(coefs)))
-  seen <- rownames(coefs)
-  if (!is.null(seen)) full[seen, ] <- coefs
-  # Empty classes: fill intercept column with a strongly negative value
-  unseen <- setdiff(as.character(1:K), seen)
-  if (length(unseen) > 0L) full[unseen, 1L] <- empty_alpha
-
-  # Cap magnitudes to prevent divergence when the data is scarce. Use
-  # `full[] <-` so the matrix dim/dimnames survive (pmax on a matrix
-  # returns a plain vector, which breaks the [, 1L] extraction below).
-  full[] <- pmax(-coef_cap, pmin(coef_cap, full))
-
-  alpha <- as.numeric(full[, 1L])
-  gamma <- t(full[, -1L, drop = FALSE])
-  list(alpha = alpha, gamma = gamma)
 }
 
+# Eigen-decomposition of one LD block with the nonzero eigenvalues marked.
+.sbrc_eigen <- function(LD) {
+  e <- eigen(as.matrix(LD), symmetric = TRUE)
+  tol <- max(e$values) * nrow(LD) * .Machine$double.eps
+  nz <- sum(e$values > tol)
+  list(values = e$values[seq_len(nz)],
+       vectors = e$vectors[, seq_len(nz), drop = FALSE])
+}
 
-# Warn (once per session) that sbayesrc is running WITHOUT pooled annotation
-# coefficients and has therefore fallen back to the unstable in-loop refit.
-# Verified 2026-07-29: that path inflates posterior mass ~15x relative to the
-# pooled path even under the true LD, so a silent fallback would corrupt any
-# annotated-arm result without producing an error.
-.sbayesrc_warned <- new.env(parent = emptyenv())
-.sbayesrc_warn_no_pooled <- function() {
-  if (isTRUE(.sbayesrc_warned$done)) return(invisible(NULL))
-  .sbayesrc_warned$done <- TRUE
-  warning("sbayesrc: annotations supplied but pooled_gamma is NULL, so the ",
-          "unstable in-loop annotation refit is being used (empirically ~15x ",
-          "posterior-mass inflation vs the pooled path). This happens when ",
-          "run_sbayesrc_scenario_setup() returned nothing - check that the ",
-          "scenario has >=2 regions with consistent annotation matrices.",
-          call. = FALSE)
-  invisible(NULL)
+# Smallest q whose leading eigenvalues explain at least rho of the total.
+.sbrc_q <- function(values, rho) {
+  cs <- cumsum(values) / sum(values)
+  min(which(cs >= rho - 1e-12))
+}
+
+# Low-rank blocks at cut-off rho: Q (q x m), w (q), column norms d.
+.sbrc_blocks <- function(eig, b_list, rho) {
+  lapply(seq_along(eig), function(i) {
+    e <- eig[[i]]
+    q <- .sbrc_q(e$values, rho)
+    Ut <- t(e$vectors[, seq_len(q), drop = FALSE])
+    lam <- e$values[seq_len(q)]
+    Q <- sqrt(lam) * Ut
+    w <- as.numeric((Ut %*% b_list[[i]]) / sqrt(lam))
+    list(Q = Q, w = w, d = colSums(Q * Q))
+  })
+}
+
+# Choice of rho from the pseudo-validation correlations.
+.sbrc_choose_rho <- function(grid, Rcor) {
+  base <- max(grid)
+  R0 <- Rcor[grid == base]
+  ok <- is.finite(Rcor) & Rcor > 0
+  if (!any(ok)) {
+    stop("all pseudo-validation correlations are non-positive; check the ",
+         "summary statistics", call. = FALSE)
+  }
+  chosen <- base
+  if (is.finite(R0) && R0 > 0) {
+    pass <- ok & abs(Rcor / R0) > 1.25
+    if (any(pass)) chosen <- grid[pass][which.max(Rcor[pass])]
+  } else {
+    chosen <- grid[ok][which.max(Rcor[ok])]
+  }
+  if (chosen == min(grid)) {
+    stop("the best eigen cut-off is the smallest in the tuning grid (",
+         chosen, "); extend the grid or check the summary statistics",
+         call. = FALSE)
+  }
+  chosen
+}
+
+# Stick-breaking log mixture proportions from the probit linear predictors.
+# eta: SNPs x 4 matrix for k = 2..5. Returns SNPs x 5.
+.sbrc_logpi <- function(eta) {
+  lp <- stats::pnorm(eta, log.p = TRUE)
+  lq <- stats::pnorm(eta, lower.tail = FALSE, log.p = TRUE)
+  c2 <- lp[, 1L]
+  c3 <- c2 + lp[, 2L]
+  c4 <- c3 + lp[, 3L]
+  cbind(lq[, 1L],
+        c2 + lq[, 2L],
+        c3 + lq[, 3L],
+        c4 + lq[, 4L],
+        c4 + lp[, 4L])
+}
+
+# Normal(eta, 1) truncated to (0, Inf) where upper is TRUE, (-Inf, 0) otherwise.
+.sbrc_rtruncnorm <- function(eta, upper) {
+  lu <- log(stats::runif(length(eta)))
+  out <- numeric(length(eta))
+  i1 <- which(upper); i0 <- which(!upper)
+  if (length(i1)) {
+    out[i1] <- eta[i1] - stats::qnorm(lu[i1] + stats::pnorm(eta[i1], log.p = TRUE),
+                                      log.p = TRUE)
+  }
+  if (length(i0)) {
+    out[i0] <- eta[i0] + stats::qnorm(lu[i0] + stats::pnorm(-eta[i0], log.p = TRUE),
+                                      log.p = TRUE)
+  }
+  out
+}
+
+# One draw from N(m, s^2) truncated to (lo, hi), stable in the tails.
+.sbrc_rtnorm1 <- function(m, s, lo, hi) {
+  a <- (lo - m) / s; b <- (hi - m) / s
+  if (a > 0) {
+    la <- stats::pnorm(a, lower.tail = FALSE, log.p = TRUE)
+    lb <- stats::pnorm(b, lower.tail = FALSE, log.p = TRUE)
+    lv <- la + log1p(-stats::runif(1L) * (1 - exp(lb - la)))
+    return(m + s * stats::qnorm(lv, lower.tail = FALSE, log.p = TRUE))
+  }
+  if (b < 0) {
+    la <- stats::pnorm(a, log.p = TRUE)
+    lb <- stats::pnorm(b, log.p = TRUE)
+    lv <- lb + log1p(-stats::runif(1L) * (1 - exp(la - lb)))
+    return(m + s * stats::qnorm(lv, log.p = TRUE))
+  }
+  pa <- stats::pnorm(a); pb <- stats::pnorm(b)
+  m + s * stats::qnorm(pa + stats::runif(1L) * (pb - pa))
+}
+
+# One Gibbs sweep over the SNPs of a block.
+.sbrc_sweep <- function(Q, d, eps, beta, delta, logpi, v, n, s2e) {
+  nk <- n / s2e
+  vk <- v[-1L]
+  lv <- log(vk)
+  for (j in seq_along(beta)) {
+    qj  <- Q[, j]
+    bj  <- beta[j]
+    rhs <- sum(qj * eps) + d[j] * bj
+    P   <- nk * d[j] + 1 / vk
+    num <- nk * rhs
+    ll  <- c(0, -0.5 * (lv + log(P)) + 0.5 * num * num / P) + logpi[j, ]
+    pr  <- exp(ll - max(ll))
+    k   <- 1L + sum(stats::runif(1L) * sum(pr) > cumsum(pr))
+    bnew <- if (k == 1L) 0 else stats::rnorm(1L, num / P[k - 1L], sqrt(1 / P[k - 1L]))
+    if (bnew != bj) eps <- eps + qj * (bj - bnew)
+    beta[j]  <- bnew
+    delta[j] <- k
+  }
+  list(eps = eps, beta = beta, delta = delta)
+}
+
+# The SBayesRC MCMC over a list of low-rank blocks.
+.sbrc_mcmc <- function(blocks, A, n, n_iter, burn_in, gamma, start_h2,
+                       start_pi, nu_alpha, tau2_alpha, nu_e, tau2_e,
+                       mu_bound = 8) {
+  B <- length(blocks)
+  sizes <- vapply(blocks, function(bk) ncol(bk$Q), integer(1))
+  m <- sum(sizes)
+  starts <- cumsum(c(0L, sizes))
+  C <- if (is.null(A)) 0L else ncol(A)
+
+  # starting values
+  pi0 <- start_pi / sum(start_pi)
+  p0 <- c(1 - pi0[1],
+          sum(pi0[3:5]) / sum(pi0[2:5]),
+          sum(pi0[4:5]) / sum(pi0[3:5]),
+          pi0[5] / sum(pi0[4:5]))
+  mu    <- stats::qnorm(p0)
+  alpha <- matrix(0, 4L, C)
+  s2a   <- rep(tau2_alpha, 4L)
+  s2g   <- start_h2
+  s2e   <- rep(1, B)
+  beta  <- lapply(sizes, numeric)
+  delta <- lapply(sizes, function(s) rep(1L, s))
+  eps   <- lapply(blocks, function(bk) bk$w)
+
+  eta_all <- function() {
+    base <- matrix(mu, m, 4L, byrow = TRUE)
+    if (C > 0L) base <- base + A %*% t(alpha)
+    base
+  }
+  logpi <- .sbrc_logpi(eta_all())
+
+  pip_sum <- lapply(sizes, numeric)
+  beta_sum <- lapply(sizes, numeric)
+  s2g_sum <- 0; mu_sum <- numeric(4L); alpha_sum <- matrix(0, 4L, C)
+  n_kept <- 0L
+
+  for (it in seq_len(n_iter)) {
+    v <- gamma * s2g
+    # SNP effects and memberships, block by block
+    for (b in seq_len(B)) {
+      rows <- starts[b] + seq_len(sizes[b])
+      sw <- .sbrc_sweep(blocks[[b]]$Q, blocks[[b]]$d, eps[[b]], beta[[b]],
+                        delta[[b]], logpi[rows, , drop = FALSE], v, n, s2e[b])
+      beta[[b]] <- sw$beta; delta[[b]] <- sw$delta
+    }
+    dall <- unlist(delta, use.names = FALSE)
+
+    # annotation effects (probit, stick-breaking)
+    for (k in 2:5) {
+      idx <- which(dall >= k - 1L)
+      if (length(idx) == 0L) next
+      zk <- dall[idx] >= k
+      Ak <- if (C > 0L) A[idx, , drop = FALSE] else NULL
+      eta <- mu[k - 1L] + (if (C > 0L) as.numeric(Ak %*% alpha[k - 1L, ])
+                           else numeric(length(idx)))
+      l <- .sbrc_rtruncnorm(eta, zk)
+      res <- l - eta
+      # mu_k, flat prior
+      res <- res + mu[k - 1L]
+      mu[k - 1L] <- .sbrc_rtnorm1(mean(res), sqrt(1 / length(idx)),
+                                  -mu_bound, mu_bound)
+      res <- res - mu[k - 1L]
+      if (C > 0L) {
+        ss <- colSums(Ak * Ak)
+        for (cc in seq_len(C)) {
+          ac <- Ak[, cc]
+          res <- res + ac * alpha[k - 1L, cc]
+          Ckc <- ss[cc] + 1 / s2a[k - 1L]
+          alpha[k - 1L, cc] <- stats::rnorm(1L, sum(ac * res) / Ckc, sqrt(1 / Ckc))
+          res <- res - ac * alpha[k - 1L, cc]
+        }
+        s2a[k - 1L] <- (sum(alpha[k - 1L, ]^2) + nu_alpha * tau2_alpha) /
+          stats::rchisq(1L, C + nu_alpha)
+      }
+    }
+    logpi <- .sbrc_logpi(eta_all())
+
+    # genetic variance and residual variances
+    s2g_new <- 0
+    for (b in seq_len(B)) {
+      what <- as.numeric(blocks[[b]]$Q %*% beta[[b]])
+      eps[[b]] <- blocks[[b]]$w - what
+      s2g_new <- s2g_new + sum(what * what)
+      q <- length(eps[[b]])
+      s2e[b] <- (n * sum(eps[[b]]^2) + nu_e * tau2_e) / stats::rchisq(1L, q + nu_e)
+    }
+    if (s2g_new > 0) s2g <- s2g_new
+
+    if (it > burn_in) {
+      for (b in seq_len(B)) {
+        pip_sum[[b]]  <- pip_sum[[b]] + (delta[[b]] >= 2L)
+        beta_sum[[b]] <- beta_sum[[b]] + beta[[b]]
+      }
+      s2g_sum <- s2g_sum + s2g
+      mu_sum <- mu_sum + mu
+      alpha_sum <- alpha_sum + alpha
+      n_kept <- n_kept + 1L
+    }
+  }
+
+  list(pip      = lapply(pip_sum, function(x) x / n_kept),
+       beta     = lapply(beta_sum, function(x) x / n_kept),
+       sigma2_g = s2g_sum / n_kept,
+       mu       = mu_sum / n_kept,
+       alpha    = alpha_sum / n_kept)
 }

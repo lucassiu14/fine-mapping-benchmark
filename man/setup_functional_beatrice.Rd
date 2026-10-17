@@ -8,7 +8,8 @@ setup_functional_beatrice(beatrice_dir, python = "python")
 }
 \arguments{
 \item{beatrice_dir}{Character. Path to the directory containing
-\code{beatrice_annot.py} (i.e. \code{BEATRICE_annot_sparse/}).}
+\code{beatrice_annot.py}, i.e. a clone of the Functional BEATRICE
+repository.}
 
 \item{python}{Character. Path to the Python executable. Default:
 \code{"python"} (searches PATH).}
@@ -22,13 +23,13 @@ Verifies that \code{beatrice_annot.py} can be found in \code{beatrice_dir}
 and that the required Python packages are importable.
 }
 \details{
-The Functional BEATRICE code lives in the \code{BEATRICE_annot_sparse/}
-subdirectory of this repository.  Point \code{beatrice_dir} there and
+Functional BEATRICE is a separate project, at
+\url{https://github.com/lucassiu14/functional-beatrice}. Clone it, then point \code{beatrice_dir} at the clone and
 supply the Python executable from your BEATRICE conda environment:
 
 \preformatted{
   setup_functional_beatrice(
-    beatrice_dir = "BEATRICE_annot_sparse",
+    beatrice_dir = "~/functional-beatrice",
     python       = "~/anaconda3/envs/beatrice/bin/python"
   )
 }

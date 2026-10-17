@@ -18,8 +18,9 @@ this benchmark, how to run them, and the arguments available for each.
 | BEATRICE | `"beatrice"` | Python + PyTorch (GitHub) | No | Variational Bayes with neural network PIP inference |
 | CARMA | `"carma"` | `CARMA` R package (GitHub) | No | Spike-slab EM with LD-discrepancy outlier detection |
 | marginal_z | `"marginal_z"` | Nothing | No | Model-free baseline (pip = \|z\| / sum\|z\|) |
-| polyfun_oracle | `"polyfun_oracle"` | `susieR` (CRAN) | **Reads truth** | PolyFun-style with true per-SNP priors (upper bound) |
-| polyfun_est | `"polyfun_est"` | `susieR` (CRAN) | **Required** | PolyFun-style with priors estimated via LDSC-lite |
+| oracle_susie | `"oracle_susie"` | `susieR` (CRAN) | **Reads truth** | SuSiE with the simulator's true per-variant prior (upper bound) |
+| polyfun_susie | `"polyfun_susie"` | `susieR`, `Ckmeans.1d.dp` (CRAN) | **Required** | PolyFun from the paper: regularised S-LDSC priors into SuSiE |
+| SBayesRC | `"sbayesrc"` | Nothing | **Required** | Low-rank Bayesian mixture with an annotation-informed probit prior |
 | SparsePro | `"sparsepro"` | Python + cloned SparsePro repo | No (not used here) | Variational fine-mapping with a sparse-projection prior on effect groups |
 
 ---
@@ -127,6 +128,29 @@ Every method returns the same top-level fields:
 
 Scenario metadata (`scenario_id`, `region_id`, `S`, `phi`, `p_causal`,
 `iter`) is attached to each result by `run_methods()`.
+
+### Rule: a wrapper retains everything its method produces
+
+`additional` is not optional decoration. **If a method emits an output of its
+own — credible sets, per-component posteriors, annotation importances, fitted
+hyperparameters, convergence diagnostics — the wrapper must return it**, even
+when nothing in the benchmark currently consumes it. The analysis that needs it
+is usually written months after the run, and by then the simulation tree has
+been purged; an output that was computed and not returned is unrecoverable
+without re-running the whole design.
+
+This rule was written after `wrapper_fb_joint.R` was found to violate it.
+`joint_trainer.py` computes the shared LassoNet prior head's annotation
+importances and saves them under the run's target directory, but
+`.fb_joint_parse_output()` read only `pip.csv`, `credible_set.txt` and
+`conditional_credible_variants_probability.txt`, and that directory lives under
+`tempfile()`. The main simulation therefore has annotation importances for
+`functional_beatrice` and none at all for `fb_xregion`, and the
+annotation-selection analysis could only be done for the single-locus model.
+
+When adding a wrapper, list what the method writes to disk or returns in memory,
+and account for every item: either it is in `additional`, or there is a comment
+saying why it is not.
 
 ---
 
@@ -294,76 +318,117 @@ No setup, installation, or external dependencies. Runs in microseconds.
 **Additional outputs (`$additional`):** none (pure baseline; no learned state
 to inspect).
 
-### polyfun_oracle
+### oracle_susie
 
-PolyFun-style fine-mapping with the **true** per-SNP causal probabilities
-recovered from the simulator. Reconstructs
-`pi_j ∝ exp(A_j' log gamma)` from `region_geno$annotations_matrix` and
-`region_pheno$truth$enrichment`, then feeds those probabilities to
-`susieR::susie_rss(prior_weights = pi_vec, ...)`.
+SuSiE given the **true** per-variant prior the simulator used to choose causal
+variants. Reconstructs `pi_j ∝ exp(A_j' log gamma)` from the stored selection
+probabilities (or from `region_geno$annotations_matrix` and
+`region_pheno$truth$enrichment` where those are absent) and passes it to
+`run_susie(prior_weights = pi_vec)`.
 
-Requires `susieR` (already installed via renv). Reads ground truth from
-the simulation object — this is **not a fair comparator**, it is the
-methodological ceiling.
+**It uses none of PolyFun's machinery.** PolyFun's contribution is estimating a
+per-SNP prior from annotations by stratified LD score regression, and that is
+precisely the stage an oracle replaces. What is left is SuSiE with a known
+prior, at exactly the settings the `susie` method uses. On the unannotated arm,
+where there is no prior to know, `oracle_susie` is bit-for-bit identical to
+`susie` — a useful check on the plumbing.
 
-> **Purpose:** upper bound for any annotation-aware method. If a
-> realistic annotation-aware method (Funmap, PAINTOR, polyfun_est,
-> Functional BEATRICE) approaches polyfun_oracle on a given setting,
-> there is little room left for improvement. The gap between them is
-> the cost of estimating the prior rather than knowing it.
+Requires `susieR`. Reads ground truth, so it is **not a fair comparator**: it is
+the methodological ceiling and cannot be run on real data.
+
+> **Purpose:** `susie` → `oracle_susie` isolates what knowing the prior is
+> worth, with the fine-mapping model held fixed. Any annotation-aware method on
+> this backbone that approaches it has little room left.
 >
-> **Limitation:** because it reads truth, polyfun_oracle cannot be run
-> on real data. It exists only as a benchmark ceiling. Excluded from
-> any "fair comparison" plot.
-
-**Arguments:** all standard `susie_rss` arguments are forwarded — see
-SuSiE section above. The wrapper itself takes no extra parameters.
+> **Note on comparing it with `polyfun_susie`:** the two no longer share a
+> backbone. `polyfun_susie` fixes the causal effect variance to the modified-HESS
+> estimate, while `oracle_susie` fits it as SuSiE normally would, so the gap
+> between them is the prior *and* that difference. For the cost of estimating
+> PolyFun's prior specifically, compare `polyfun_susie` with `susie`.
+>
+> **History:** this method was called `polyfun_oracle` and fine-mapped through
+> PolyFun's SuSiE configuration until 2026-10-17. Results stored before that
+> date are not comparable with results from this version.
 
 **Additional outputs (`$additional`):**
 
 | Field | Description |
 |---|---|
-| `prior_weights` | The per-SNP prior probabilities reconstructed from truth |
-| `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the underlying SuSiE fit (same as `susie`) |
+| `prior_source` | `"oracle_stored_probs"`, `"oracle"` (reconstructed), or `"uniform_fallback"` where no annotations were simulated |
+| `prior_weights` | The per-variant prior passed to SuSiE, summing to 1 |
+| `enrichment_used` | The enrichment vector behind a reconstructed prior |
+| `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the SuSiE fit, as for `susie` |
 
-### polyfun_est
+### polyfun_susie
 
-PolyFun-style fine-mapping with **estimated** per-SNP priors. The fair,
-"no-cheating" annotation-aware comparator.
+PolyFun (Weissbrod et al. 2020) implemented from the paper's Online Methods,
+step by step: L2-regularised stratified LD score regression on one parity of
+chromosomes with the ridge penalty chosen by out-of-chromosome error, per-SNP
+heritabilities for the other parity, partition into 20 bins by
+`Ckmeans.1d.dp::Ckmedian.1d.dp`, non-negative re-estimation per bin excluding
+the target, and a prior proportional to each bin's per-SNP heritability.
+Fine-mapping is SuSiE at L = 10 with the modified-HESS prior variance.
 
-Estimates per-annotation contributions `tau_k` by non-negative regression
-of the observed chi-squared statistics on the annotation matrix
-("LDSC-lite"). The regression is fit **once per scenario, pooled across
-all regions** via the scenario-setup hook — per-region estimation would be
-data-starved at typical region sizes (p ≈ 200–800). Once `tau` is
-estimated, per-SNP prior weights are computed as
-`w_j ∝ max(sum_k tau_k * A_{j,k}, eps)`, normalised, and fed to
-`susie_rss(prior_weights = w, ...)`.
+PolyFun works on whole chromosomes; here **each region of a scenario is treated
+as its own chromosome**, so the parity split and the leave-one-out apply to
+regions. At least four regions are needed.
 
-Requires `susieR` (already installed via renv). Uses the same annotation
-matrix that the simulator generated — apples-to-apples with Funmap,
-PAINTOR, and Functional BEATRICE.
+Where the paper and the released code disagree the **paper** is followed, in two
+places: step 2 applies the coefficients fitted on the opposite parity set, and
+the ridge penalty is chosen within each parity set. Where the paper is silent,
+the released MIT code is followed; the wrapper header names every such detail.
 
-> **Purpose:** the head-to-head benchmark for any annotation-aware
-> method. Should beat plain SuSiE when annotations are informative and
-> roughly match plain SuSiE when annotations are null.
->
-> **Limitation:** "LDSC-lite" is much simpler than canonical stratified
-> LDSC. Canonical PolyFun cannot be used on simulated data because its
-> reference LD scores and pretrained annotation priors are calibrated
-> on UK Biobank — they assume real human SNP coordinates and large-scale
-> S-LDSC infrastructure that does not apply to per-region simulation.
+Requires `susieR` and `Ckmeans.1d.dp`.
 
-**Arguments:** all standard `susie_rss` arguments are forwarded — see
-SuSiE section above. The wrapper itself takes no extra parameters.
+> **Note on failures.** The modified HESS estimator returns zero heritability on
+> some loci and PolyFun treats that as an error, so roughly 4.5% of fits return
+> nothing. They concentrate at *small* regions, not large: the estimator uses
+> the SNPs below the 0.005 quantile of the locus p-values, which is two or three
+> variants in a 500-variant region against ten in a 2000-variant one. Pair
+> comparisons on surviving fits.
 
 **Additional outputs (`$additional`):**
 
 | Field | Description |
 |---|---|
-| `prior_weights` | Per-SNP prior weights derived from the estimated `tau` |
-| `tau` | Estimated per-annotation contributions (intercept + one entry per annotation column) |
-| `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the underlying SuSiE fit |
+| `prior_weights` | The estimated per-SNP prior, or a uniform prior where there are no annotations |
+| `prior_var`, `h2_hess` | The modified-HESS prior variance and the locus heritability behind it |
+| `prior_source` | `"polyfun"`, or `"non_functional"` when run without annotations |
+| `variant_ids` | Variant identifiers for the region |
+
+### sbayesrc
+
+SBayesRC (Zheng et al. 2024) implemented from the paper and its Supplementary
+Notes **alone** — no code from the SBayesRC software, which is GPL-3, so this
+package stays MIT. It carries the low-rank model per LD block, the mixture prior
+`gamma_k sigma_g^2` over five components, the stick-breaking probit annotation
+model sampled by Albert–Chib, a per-block residual variance, pseudo-validation
+tuning of the eigenvalue cutoff, and 3,000 iterations with 1,000 burn-in.
+
+SBayesRC is distributed for genome-wide analysis with pre-computed low-rank LD
+from a fixed reference panel, which cannot be applied to simulated regions, so
+the model is implemented directly. Each region of a scenario is one LD block and
+the annotation coefficients are shared across them.
+
+Every point the paper leaves open is listed in the wrapper header with the
+choice made. The significant one is a uniform prior on [−8, 8] for the probit
+intercepts, because a flat prior on the whole line diverges under complete
+separation.
+
+> **It reports no credible sets.** Its published method does not define them, so
+> `n_sets` is 0 for every fit. Earlier versions of this package manufactured
+> single-variant sets, which was an artefact of the implementation rather than a
+> property of the method.
+
+**Additional outputs (`$additional`):**
+
+| Field | Description |
+|---|---|
+| `posterior_mean_beta` | Posterior mean effect sizes for the region |
+| `sigma2_g` | Sampled genetic variance |
+| `mu`, `alpha` | Probit intercepts and annotation coefficients of the mixture model |
+| `tuning` | The eigenvalue cutoff chosen by pseudo-validation |
+| `variant_ids` | Variant identifiers for the region |
 
 ### Funmap
 
@@ -619,7 +684,7 @@ run_methods(sim, methods = "sparsepro",
 > **Limitation:** the wrapper currently does not pass functional annotations
 > to SparsePro (it supports them upstream via the `--anno` flag). The
 > annotation-aware comparators in this benchmark are Funmap, PAINTOR,
-> Functional BEATRICE, polyfun_oracle, and polyfun_est; SparsePro's role
+> Functional BEATRICE and oracle_susie; SparsePro's role
 > here is the "modern variational baseline without annotations" slot.
 
 **Arguments:**

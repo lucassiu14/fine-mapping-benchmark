@@ -2,7 +2,7 @@
 % Please edit documentation in R/wrapper_sbayesrc.R
 \name{setup_sbayesrc}
 \alias{setup_sbayesrc}
-\title{Check that dependencies for sbayesrc are available}
+\title{Check that the dependencies of sbayesrc are available}
 \usage{
 setup_sbayesrc()
 }
@@ -10,5 +10,5 @@ setup_sbayesrc()
 Invisible TRUE.
 }
 \description{
-Check that dependencies for sbayesrc are available
+The implementation uses base R only.
 }

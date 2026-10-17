@@ -1,7 +1,7 @@
 # Fine-Mapping Benchmarking Framework
 
 [![R-CMD-check](https://github.com/lucassiu14/fine-mapping-benchmark/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/lucassiu14/fine-mapping-benchmark/actions/workflows/R-CMD-check.yaml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![Cite this repository](https://img.shields.io/badge/Cite-CITATION.cff-blue.svg)](CITATION.cff)
 
 Benchmarking framework for evaluating statistical fine-mapping methods using
@@ -62,7 +62,7 @@ pkgload::load_all()        # load fmbenchmark from the source checkout
 **Tier 1 unlocks:**
 
 - Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
-  **polyfun_oracle**, **polyfun_est**
+  **oracle_susie**, **polyfun_susie**, **sbayesrc**
 - All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
 - All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
@@ -118,8 +118,12 @@ package):
 git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 ```
 
-**Functional BEATRICE** is bundled in this repo (`BEATRICE_annot_sparse/`) and
-needs no separate clone — it uses the same conda env.
+**Functional BEATRICE** is a separate repository and needs its own clone. It
+uses the same conda env as BEATRICE:
+
+```bash
+git clone https://github.com/lucassiu14/functional-beatrice ~/functional-beatrice
+```
 
 Then get the Python path for use in R:
 
@@ -138,7 +142,7 @@ results <- run_methods(
   method_args = list(
     funmap              = list(python = PYTHON, L = 10),
     beatrice            = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping"),
-    functional_beatrice = list(python = PYTHON, beatrice_dir = "BEATRICE_annot_sparse")
+    functional_beatrice = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
   )
 )
 ```
@@ -232,14 +236,19 @@ project root.
 | **SuSiE-inf** | 1 | R package | None (installed via renv) |
 | **ABF** | 1 | R (built-in) | None |
 | **CARMA** | 1 | R package | None (installed via renv) |
+| **marginal_z** | 1 | R (built-in) | None |
+| **oracle_susie** | 1 | R package | susieR (already in renv) |
+| **PolyFun** (`polyfun_susie`) | 1 | R (built-in) | `Ckmeans.1d.dp` (for the 20-bin tau partition) |
+| **SBayesRC** (`sbayesrc`) | 1 | R (built-in) | None |
+| **FiniMOM** | 1 | R package | `finimom` — needs a source patch, see `setup_finimom()` |
 | **FINEMAP** | 2 | C++ binary | Auto-downloaded by `setup_finemap()` |
 | **PAINTOR** | 2 | C++ binary | `conda install -c bioconda paintor` |
+| **CAVIAR** | 2 | C++ binary | Build from source (needs GSL), see `setup_caviar()` |
+| **FINEMAP-inf** | 3 | Python script | Clone FinucaneLab/fine-mapping-inf |
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
-| **Functional BEATRICE** | 3 | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
-| **marginal_z** | 1 | R (built-in) | None |
-| **polyfun_oracle** | 1 | R package | susieR (already in renv) |
-| **polyfun_est** | 1 | R package | susieR (already in renv) |
+| **Functional BEATRICE** | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice |
+| **FB joint** (`fb_pooled`, `fb_xregion`) | 3 | Python script | Same as Functional BEATRICE; one prior head shared across a scenario's regions |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.
@@ -262,12 +271,15 @@ fine-mapping-benchmark/
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AUPRC, CS metrics, PIP calibration
 │   ├── plot_results.R          # Generates multi-page PDF plots
-│   └── wrapper_*.R             # One file per method (wrapper_susie.R, wrapper_finemap.R,
-│                               #   wrapper_abf.R, wrapper_carma.R, wrapper_paintor.R,
-│                               #   wrapper_funmap.R, wrapper_beatrice.R,
-│                               #   wrapper_functional_beatrice.R, wrapper_susie_inf.R,
-│                               #   wrapper_marginal_z.R, wrapper_polyfun_oracle.R,
-│                               #   wrapper_polyfun_est.R, wrapper_sparsepro.R)
+│   └── wrapper_*.R             # One file per method: wrapper_susie.R, wrapper_susie_inf.R,
+│                               #   wrapper_finemap.R, wrapper_finemap_inf.R,
+│                               #   wrapper_caviar.R, wrapper_finimom.R, wrapper_abf.R,
+│                               #   wrapper_carma.R, wrapper_paintor.R, wrapper_funmap.R,
+│                               #   wrapper_polyfun_susie.R, wrapper_sbayesrc.R,
+│                               #   wrapper_sparsepro.R, wrapper_beatrice.R,
+│                               #   wrapper_functional_beatrice.R, wrapper_fb_joint.R,
+│                               #   wrapper_marginal_z.R, wrapper_oracle_susie.R
+├── man/                        # Generated help pages (roxygen2; do not edit by hand)
 ├── inst/
 │   ├── CITATION                # Package citation
 │   ├── extdata/                # Bundled region tables (ship with the package)
@@ -283,24 +295,16 @@ fine-mapping-benchmark/
 │   └── testthat/               # test-pipeline.R, test-evaluate.R, test-comprehensive.R
 ├── vignettes/
 │   └── getting-started.Rmd     # Quick-start vignette
-├── BEATRICE_annot_sparse/      # Functional BEATRICE source (Python + training scripts)
 ├── data/                       # Working caches (gitignored; not part of the package)
 │   ├── vcf/                    # Downloaded 1000G VCF slices for per-locus regions
 │   ├── gwfm_vcf/               # Downloaded 1000G VCF slices for genome-wide regions
 │   └── genetic_maps/           # Cached HapMap GRCh37 maps (auto-downloaded)
-├── scripts/
-│   └── hpc/                         # SLURM job array for the benchmark
-│       ├── generate_params_grid.R   # Build params_grid.csv (40 jobs)
-│       ├── params_grid.csv          # One row per HPC array task
-│       ├── run_benchmark_job.R      # Worker script: runs one (model, p, annot) combination
-│       ├── collect_results.R        # Combines per-job outputs into one data frame
-│       ├── smoke_test.R             # Per-method smoke test before submitting
-│       └── submit_benchmark.sh      # Submits the SLURM array
 ├── docs/
 │   ├── methods.md                       # Method descriptions and wrapper API
 │   ├── evaluation.md                    # Evaluation metrics: formulas and implementation
 │   └── gw_simulation_documentation.md   # Technical spec of genome-wide simulation
-├── LICENSE                     # MIT license
+├── LICENSE                     # MIT licence (DCF stub R CMD check expects)
+├── LICENSE.md                  # MIT licence, full text
 ├── CITATION.cff                # Citation File Format metadata
 ├── environment.yml             # conda environment for Funmap + BEATRICE
 ├── renv.lock                   # R package lockfile (use renv::restore())
@@ -701,32 +705,9 @@ for the full statistical specification.
 A warning is emitted when combined LD storage exceeds ~4 GB. For the full LDetect
 partition (~1,700 blocks), run on a high-memory node or reduce `coverage`.
 
-## Running on an HPC cluster
-
-The `scripts/hpc/` directory contains a self-contained SLURM job array that
-sweeps the benchmark across `(model, p, annotation)` combinations.
-
-```bash
-# 1. (Optional) regenerate the grid
-Rscript scripts/hpc/generate_params_grid.R
-
-# 2. Smoke-test all methods first
-Rscript scripts/hpc/smoke_test.R
-
-# 3. Submit the array (40 jobs)
-bash scripts/hpc/submit_benchmark.sh
-
-# 4. Combine results once jobs complete
-Rscript scripts/hpc/collect_results.R
-```
-
-Edit `submit_benchmark.sh` for your cluster's partition, account, and conda
-environment, and edit `run_benchmark_job.R` for the paths to BEATRICE / PAINTOR
-on your system.
-
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE)
+This project is licensed under the MIT License — see the [LICENSE.md](LICENSE.md)
 file for the full text. In short: you can use, copy, modify, and redistribute
 the code commercially or non-commercially, as long as you preserve the
 copyright notice.

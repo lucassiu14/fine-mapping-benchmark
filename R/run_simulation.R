@@ -36,6 +36,11 @@
 #' @param inf_model Character. Infinitesimal formulation: \code{"beatrice"}
 #'   or \code{"susie_inf"}. Only used when \code{model = "sparse_inf"}.
 #'   Default: "beatrice".
+#' @param relationship Character. Shape of the annotation-to-causality map,
+#'   passed to \code{\link{simulate_phenotypes}}. Default: "additive", the
+#'   log-linear form annotation-aware methods assume.
+#' @param n_informative Integer or NULL. How many leading annotation columns
+#'   carry signal. NULL uses the relationship's own default.
 #' @param effect_distribution Character. \code{"normal"} or \code{"equal"}.
 #'   Default: "normal".
 #' @param effect_variance Numeric. Variance for normal effect sizes.
@@ -144,6 +149,8 @@ run_simulation <- function(n_regions = 3,
                            model = "sparse",
                            p_causal = c(0.1, 0.2, 0.4),
                            inf_model = "beatrice",
+                           relationship = "additive",
+                           n_informative = NULL,
                            effect_distribution = "normal",
                            effect_variance = 0.36,
                            annotations = "none",
@@ -414,6 +421,8 @@ run_simulation <- function(n_regions = 3,
       annotation_proportions = annotation_proportions,
       enrichment = enrichment,
       annotation_correlation = annotation_correlation,
+      relationship = relationship,
+      n_informative = n_informative,
       seed = NULL,  # let the RNG continue sequentially
       verbose = FALSE
     )

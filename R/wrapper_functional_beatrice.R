@@ -57,19 +57,20 @@
 #' Verifies that \code{beatrice_annot.py} can be found in \code{beatrice_dir}
 #' and that the required Python packages are importable.
 #'
-#' The Functional BEATRICE code lives in the \code{BEATRICE_annot_sparse/}
-#' subdirectory of this repository.  Point \code{beatrice_dir} there and
+#' Functional BEATRICE is a separate project, at
+#' \url{https://github.com/lucassiu14/functional-beatrice}. Clone it, then point \code{beatrice_dir} at the clone and
 #' supply the Python executable from your BEATRICE conda environment:
 #'
 #' \preformatted{
 #'   setup_functional_beatrice(
-#'     beatrice_dir = "BEATRICE_annot_sparse",
+#'     beatrice_dir = "~/functional-beatrice",
 #'     python       = "~/anaconda3/envs/beatrice/bin/python"
 #'   )
 #' }
 #'
 #' @param beatrice_dir Character. Path to the directory containing
-#'   \code{beatrice_annot.py} (i.e. \code{BEATRICE_annot_sparse/}).
+#'   \code{beatrice_annot.py}, i.e. a clone of the Functional BEATRICE
+#'   repository.
 #' @param python Character. Path to the Python executable. Default:
 #'   \code{"python"} (searches PATH).
 #'
@@ -84,9 +85,11 @@ setup_functional_beatrice <- function(beatrice_dir, python = "python") {
   if (!file.exists(script_path)) {
     stop(
       "beatrice_annot.py not found in: ", beatrice_dir, "\n\n",
-      "The Functional BEATRICE code should be in BEATRICE_annot_sparse/.\n",
+      "Functional BEATRICE is a separate repository. Clone it from\n",
+      "  https://github.com/lucassiu14/functional-beatrice\n",
       "Pass that directory:\n",
-      "  setup_functional_beatrice(beatrice_dir = 'BEATRICE_annot_sparse')",
+      "and point beatrice_dir at the clone:\n",
+      "  setup_functional_beatrice(beatrice_dir = '~/functional-beatrice')",
       call. = FALSE
     )
   }
@@ -100,7 +103,7 @@ setup_functional_beatrice <- function(beatrice_dir, python = "python") {
         "Python executable not found: '", python, "'\n\n",
         "Pass the full path:\n",
         "  setup_functional_beatrice(\n",
-        "    beatrice_dir = 'BEATRICE_annot_sparse',\n",
+        "    beatrice_dir = '~/functional-beatrice',\n",
         "    python       = '~/anaconda3/envs/beatrice/bin/python'\n",
         "  )",
         call. = FALSE

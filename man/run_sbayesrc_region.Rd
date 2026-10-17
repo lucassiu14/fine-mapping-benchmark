@@ -2,24 +2,31 @@
 % Please edit documentation in R/wrapper_sbayesrc.R
 \name{run_sbayesrc_region}
 \alias{run_sbayesrc_region}
-\title{Adapter for run_methods() - forwards to run_sbayesrc}
+\title{Region adapter for SBayesRC}
 \usage{
-run_sbayesrc_region(region_geno, region_pheno, pooled_gamma = NULL, ...)
+run_sbayesrc_region(
+  region_geno,
+  region_pheno,
+  .sbayesrc_cache = NULL,
+  .sbayesrc_error = NULL,
+  ...
+)
 }
 \arguments{
-\item{region_geno}{One element of \code{simulation$genotypes}.}
+\item{region_geno, region_pheno}{Region data.}
 
-\item{region_pheno}{One element of a scenario's \code{regions}.}
+\item{.sbayesrc_cache}{Named list of per-region results keyed by z
+fingerprint. Default NULL.}
 
-\item{pooled_gamma}{List or NULL. Shared (alpha, gamma) from
-\code{run_sbayesrc_scenario_setup()}. When supplied, no region-local
-annotation refit happens.}
+\item{.sbayesrc_error}{Character or NULL. Error from the scenario setup.}
 
-\item{...}{Forwarded to \code{run_sbayesrc()}.}
+\item{...}{Passed to \code{\link{run_sbayesrc}}.}
 }
 \value{
-Output of run_sbayesrc.
+The per-region result list.
 }
 \description{
-Adapter for run_methods() - forwards to run_sbayesrc
+Returns the region's result from the joint fit computed by
+\code{run_sbayesrc_scenario_setup()}; without that result it fits the
+region on its own.
 }

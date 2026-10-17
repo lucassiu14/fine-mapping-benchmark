@@ -14,6 +14,8 @@ run_simulation(
   model = "sparse",
   p_causal = c(0.1, 0.2, 0.4),
   inf_model = "beatrice",
+  relationship = "additive",
+  n_informative = NULL,
   effect_distribution = "normal",
   effect_variance = 0.36,
   annotations = "none",
@@ -62,6 +64,13 @@ If a vector, all values are swept. Default: c(0.1, 0.2, 0.4).}
 \item{inf_model}{Character. Infinitesimal formulation: \code{"beatrice"}
 or \code{"susie_inf"}. Only used when \code{model = "sparse_inf"}.
 Default: "beatrice".}
+
+\item{relationship}{Character. Shape of the annotation-to-causality map,
+passed to \code{\link{simulate_phenotypes}}. Default: "additive", the
+log-linear form annotation-aware methods assume.}
+
+\item{n_informative}{Integer or NULL. How many leading annotation columns
+carry signal. NULL uses the relationship's own default.}
 
 \item{effect_distribution}{Character. \code{"normal"} or \code{"equal"}.
 Default: "normal".}

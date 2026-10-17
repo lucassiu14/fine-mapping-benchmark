@@ -52,15 +52,11 @@
 # it is not part of the package.
 ^results$
 
-# --- External methods bundled as repo subdirectories -------------------------
-# Functional BEATRICE's Python implementation is shipped here for
-# convenience but is not part of the R package surface.
-^BEATRICE_annot_sparse$
-
-# --- Orchestration scripts ---------------------------------------------------
-# scripts/ holds HPC orchestration tooling (scripts/hpc/); kept at the repo
-# root and excluded from the package build.
-^scripts$
+# --- Licence -----------------------------------------------------------------
+# LICENSE is the DCF stub R expects alongside `License: MIT + file LICENSE`;
+# LICENSE.md carries the full MIT text for GitHub's licence detection and is
+# not part of the tarball.
+^LICENSE\.md$
 
 # --- Test / build artefacts --------------------------------------------------
 ^.+\.tar\.gz$

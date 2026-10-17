@@ -1,24 +1,26 @@
 # =============================================================================
 # wrapper_fb_joint.R
 #
-# CROSS-REGION JOINT (Functional) BEATRICE  -  Iteration 003 model changes.
+# CROSS-REGION JOINT (Functional) BEATRICE.
 #
 # Two methods that train ONE shared annotation prior head JOINTLY across all
 # regions of a scenario (not the sequential warm-start chain, not per-locus):
 #
-#   fb_pooled   -> prior_head = 'linear'    (user idea #1, flagship):
+#   fb_pooled   -> prior_head = 'linear':
 #                  a shared logistic annotation->prior map, funmap/PolyFun-style.
-#   fb_xregion  -> prior_head = 'lassonet'  (user idea #2):
+#   fb_xregion  -> prior_head = 'lassonet':
 #                  the LassoNet prior, shared and jointly trained across regions.
 #
 # Objective  L(phi,{psi_r}) = sum_r ELBO_r( psi_r ; p0_r = f_phi(v_r) ), with the
-# shared head phi updated ONCE per step from the equal-weighted mean of the
-# per-region gradients (EQUAL WEIGHT PER REGION; see docs/autoresearch/iteration-003.md).
+# shared head phi updated ONCE per step from the mean of the per-region
+# gradients. Regions are weighted EQUALLY, not by size: each locus is one
+# exchangeable draw of the shared enrichment.
 #
 # Mechanism. run_methods() calls a method's `run_<method>_scenario_setup(genotypes,
 # regions, user_args)` ONCE per scenario (all regions visible) and merges the
 # returned list into every region's args. We use that hook to run the joint Python
-# trainer (BEATRICE_annot_sparse/beatrice_joint.py) over ALL regions in one process,
+# trainer (beatrice_joint.py, from the Functional BEATRICE repository) over ALL
+# regions in one process,
 # parse each region's pip.csv/credible_set.txt, and return a cache keyed by a
 # z-fingerprint. The thin per-region function looks up its own region's result.
 #
@@ -107,7 +109,23 @@
       suppressWarnings(as.numeric(strsplit(trimws(line), "\\s+")[[1]])))
   }
 
-  list(pip = pip, credible_sets = credible_sets, cs_pip = cs_pip)
+  # Annotation importance from the SHARED joint prior head. joint_trainer.py
+  # writes the same feature_importance.csv schema into every region's target as
+  # the single-locus path does, so this mirrors wrapper_functional_beatrice.R's
+  # parser. Before this existed the joint head's importances were computed and
+  # then discarded with work_dir, and every fb_xregion importance row in the
+  # analysis came from the per-region fallback instead (see
+  # the annotation-recovery analysis).
+  feature_importance <- NULL
+  fi_path <- file.path(out_dir, "feature_importance.csv")
+  if (file.exists(fi_path)) {
+    feature_importance <- tryCatch(
+      utils::read.csv(fi_path, stringsAsFactors = FALSE),
+      error = function(e) NULL)
+  }
+
+  list(pip = pip, credible_sets = credible_sets, cs_pip = cs_pip,
+       feature_importance = feature_importance)
 }
 
 
@@ -204,13 +222,95 @@
 }
 
 
+# --- shared documentation for the generated wrapper family ------------------
+
+#' Cross-region joint (Functional) BEATRICE wrappers
+#'
+#' Method wrappers registered with \code{\link{run_methods}} for the joint
+#' models, which train one annotation prior head across every region of a
+#' scenario. Each method comes as a pair: a \code{_scenario_setup} hook, called
+#' once per scenario with all regions visible, which runs the joint Python
+#' trainer and returns a result cache; and a \code{_region} function, which
+#' looks that region's result up in the cache. They are called by name by
+#' \code{run_methods} rather than directly.
+#'
+#' \code{fb_pooled} uses a prior head linear in the annotations;
+#' \code{fb_xregion} uses the LassoNet head. The \code{fb_xregion_id*} names
+#' come from the \code{lambda_l1} sweep: \code{fb_xregion_id} is identical to
+#' \code{fb_xregion}, and each \code{_lNN} arm differs from it only in
+#' \code{lambda_l1} (\code{l03} = 0.03 through \code{l200} = 2.00).
+#'
+#' @param genotypes List. \code{simulation$genotypes} for the whole scenario.
+#' @param regions List. \code{simulation$phenotypes$regions}, all regions of
+#'   the scenario, used to write the joint trainer's manifest.
+#' @param user_args List. Method arguments from \code{run_methods}, forwarded
+#'   to the Python trainer.
+#' @param region_geno List. One element of \code{simulation$genotypes}.
+#' @param region_pheno List. The matching element of
+#'   \code{simulation$phenotypes$regions}.
+#' @param ... Passed to \code{\link{run_functional_beatrice_region}} on the
+#'   per-region fallback path.
+#'
+#' @return A \code{_scenario_setup} hook returns a list of arguments merged
+#'   into every region's call (the fingerprint-keyed cache, the prior head and
+#'   whether annotations were available). A \code{_region} function returns the
+#'   standardised fine-mapping output, with
+#'   \code{additional$joint_fallback = TRUE} when the joint result was
+#'   unavailable and the region was fitted on its own.
+#'
+#' @name fb_joint_wrappers
+#' @keywords internal
+NULL
+
+
 # --- public scenario-setup hooks (looked up by name in run_methods) ----------
 #' @export
+#' @rdname fb_joint_wrappers
 run_fb_pooled_scenario_setup <- function(genotypes, regions, user_args) {
   .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "linear")
 }
 #' @export
+#' @rdname fb_joint_wrappers
 run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+# The fb_xregion_id* names come from the lambda_l1 sweep, which compared a
+# single-logit LassoNet head with a two-logit one. The two-logit head has since
+# been removed and every LassoNet head is single-logit, so fb_xregion_id is now
+# identical to fb_xregion and the _lNN arms differ from it only in lambda_l1.
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l03_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l06_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l25_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l50_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l100_scenario_setup <- function(genotypes, regions, user_args) {
+  .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l200_scenario_setup <- function(genotypes, regions, user_args) {
   .fb_joint_scenario_setup(genotypes, regions, user_args, prior_head = "lassonet")
 }
 
@@ -231,7 +331,8 @@ run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
       input_type      = "summary",
       params          = list(prior_head = .fb_joint_head, joint = TRUE),
       runtime_seconds = NA_real_,
-      additional      = list(cs_pip = entry$cs_pip, joint_fallback = FALSE)
+      additional      = list(cs_pip = entry$cs_pip, joint_fallback = FALSE,
+                             feature_importance = entry$feature_importance)
     ))
   }
 
@@ -252,10 +353,47 @@ run_fb_xregion_scenario_setup <- function(genotypes, regions, user_args) {
 }
 
 #' @export
+#' @rdname fb_joint_wrappers
 run_fb_pooled_region <- function(region_geno, region_pheno, ...) {
   .fb_joint_region(region_geno, region_pheno, method_name = "fb_pooled", ...)
 }
 #' @export
+#' @rdname fb_joint_wrappers
 run_fb_xregion_region <- function(region_geno, region_pheno, ...) {
   .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l03_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l03", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l06_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l06", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l25_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l25", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l50_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l50", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l100_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l100", ...)
+}
+#' @export
+#' @rdname fb_joint_wrappers
+run_fb_xregion_id_l200_region <- function(region_geno, region_pheno, ...) {
+  .fb_joint_region(region_geno, region_pheno, method_name = "fb_xregion_id_l200", ...)
 }

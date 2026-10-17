@@ -48,31 +48,42 @@
   carma                 = "run_carma_region",
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
-  polyfun_oracle        = "run_polyfun_oracle_region",
-  polyfun_est           = "run_polyfun_est_region",
-  polyfun_ldsc          = "run_polyfun_ldsc_region",
+  oracle_susie          = "run_oracle_susie_region",
+  polyfun_susie         = "run_polyfun_susie_region",
   # SBayesRC-style Bayesian regression with annotation-informed mixture prior
-  # pooled across regions (§0.1 of the auto-research plan).
+  # pooled across regions.
   sbayesrc              = "run_sbayesrc_region",
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region",
 
-  # --- Iteration 003: FB cross-region JOINT prior models ---------------------
-  # (The manual FB/BEATRICE hyperparameter-variant methods that lived here -
-  # fb_l1hi, fb_prreg5, beatrice_ncaus2, etc. - were dropped: a hand-picked knob
-  # grid is the wrong tool for tuning; principled search, e.g. Optuna, belongs in
-  # a separate study. Only the genuinely new joint-prior models are kept.)
+  # --- Functional BEATRICE cross-region JOINT prior models -------------------
   # A shared annotation prior head trained JOINTLY across all regions of a
   # scenario (not per-locus, not sequential). Each has a scenario_setup hook
   # (run_<method>_scenario_setup) that runs the joint Python trainer once per
   # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
   fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
   fb_xregion      = "run_fb_xregion_region",   # idea #2: shared LassoNet head
+  # The lambda_l1 sweep's arm names. The sweep compared a single-logit LassoNet
+  # head (fb_xregion_id*) with a two-logit one (fb_xregion); the two-logit head
+  # has since been removed, so fb_xregion_id is now identical to fb_xregion and
+  # the _lNN arms below differ from it only in lambda_l1.
+  fb_xregion_id   = "run_fb_xregion_id_region",
+  fb_xregion_id_l03 = "run_fb_xregion_id_l03_region",
+  fb_xregion_id_l06 = "run_fb_xregion_id_l06_region",
+  fb_xregion_id_l25 = "run_fb_xregion_id_l25_region",
+  # Larger penalties, to see how many annotations are driven to exactly zero and
+  # whether that changes fine-mapping accuracy. Full collapse (10 of 10 zeroed)
+  # was measured at lambda = 2.0; between production and 1.0 the count moves
+  # non-monotonically on a single fit, so the sparsity path needs the full grid
+  # to resolve.
+  fb_xregion_id_l50  = "run_fb_xregion_id_l50_region",
+  fb_xregion_id_l100 = "run_fb_xregion_id_l100_region",
+  fb_xregion_id_l200 = "run_fb_xregion_id_l200_region",
 
-  # --- Iteration 004 additions: summary-statistic methods ---------------------
-  # Chosen to target the constraint the Iteration 003 deep dive identified as
-  # binding (LD mis-specification) and to resolve an open question about the
-  # infinitesimal model.
+  # --- Further summary-statistic methods --------------------------------------
+  # Chosen to target the constraint this benchmark identified as binding (LD
+  # mis-specification) and to resolve an open question about the infinitesimal
+  # model.
   #   caviar      exhaustive configuration enumeration under an MVN z model
   #   finimom     non-local product inverse-moment prior + beta-binomial
   #               model-size prior; has an explicit in-sample-LD switch
@@ -234,9 +245,9 @@ run_methods <- function(simulation,
     # user_args)`, it is called once per scenario before that scenario's
     # per-region calls. The hook returns a named list whose entries are
     # merged into `user_args` for every region of that scenario. This lets
-    # methods compute shared state (e.g. pooled per-annotation coefficients
-    # in polyfun_est) without needing to see all regions inside the
-    # per-region wrapper.
+    # methods compute shared state (e.g. the annotation coefficients
+    # polyfun_susie fits across the scenario's other regions) without needing
+    # to see all regions inside the per-region wrapper.
     #
     # Methods that do not define this hook behave exactly as before.
     scenario_setup_name <- paste0("run_", method, "_scenario_setup")
