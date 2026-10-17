@@ -11,9 +11,9 @@
 # same settings the `susie` method uses.
 #
 # RENAMED AND RE-POINTED 2026-10-17. It was oracle_susie, and fine-mapped
-# through run_polyfun_ldsc(), which fixes the causal effect variance to the
+# through run_polyfun_susie(), which fixes the causal effect variance to the
 # modified HESS estimate rather than fitting it. That made it comparable to
-# polyfun_ldsc but not to susie. The comparison that matters is the other one:
+# polyfun_susie but not to susie. The comparison that matters is the other one:
 # susie and oracle_susie now differ in the prior and in nothing else, so the gap
 # between them is what knowing the prior is worth. RESULTS STORED BEFORE THAT
 # DATE ARE NOT COMPARABLE TO RESULTS FROM THIS VERSION.

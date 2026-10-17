@@ -47,7 +47,7 @@ HESS estimator. Default: TRUE.}
 \item{...}{Ignored (for wrapper compatibility).
 
 The fine-mapping step is \code{\link{run_susie}}'s, so that
-oracle_susie and polyfun_ldsc differ only in the prior.}
+oracle_susie and polyfun_susie differ only in the prior.}
 }
 \value{
 A list with the standardised fine-mapping output. The

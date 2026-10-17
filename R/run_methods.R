@@ -49,7 +49,7 @@
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
   oracle_susie          = "run_oracle_susie_region",
-  polyfun_ldsc          = "run_polyfun_ldsc_region",
+  polyfun_susie          = "run_polyfun_susie_region",
   # SBayesRC-style Bayesian regression with annotation-informed mixture prior
   # pooled across regions (§0.1 of the auto-research plan).
   sbayesrc              = "run_sbayesrc_region",
@@ -250,7 +250,7 @@ run_methods <- function(simulation,
     # per-region calls. The hook returns a named list whose entries are
     # merged into `user_args` for every region of that scenario. This lets
     # methods compute shared state (e.g. the annotation coefficients
-    # polyfun_ldsc fits across the scenario's other regions) without needing
+    # polyfun_susie fits across the scenario's other regions) without needing
     # to see all regions inside the per-region wrapper.
     #
     # Methods that do not define this hook behave exactly as before.

@@ -19,7 +19,7 @@ this benchmark, how to run them, and the arguments available for each.
 | CARMA | `"carma"` | `CARMA` R package (GitHub) | No | Spike-slab EM with LD-discrepancy outlier detection |
 | marginal_z | `"marginal_z"` | Nothing | No | Model-free baseline (pip = \|z\| / sum\|z\|) |
 | oracle_susie | `"oracle_susie"` | `susieR` (CRAN) | **Reads truth** | SuSiE with the simulator's true per-variant prior (upper bound) |
-| polyfun_ldsc | `"polyfun_ldsc"` | `susieR`, `Ckmeans.1d.dp` (CRAN) | **Required** | PolyFun from the paper: regularised S-LDSC priors into SuSiE |
+| polyfun_susie | `"polyfun_susie"` | `susieR`, `Ckmeans.1d.dp` (CRAN) | **Required** | PolyFun from the paper: regularised S-LDSC priors into SuSiE |
 | SBayesRC | `"sbayesrc"` | Nothing | **Required** | Low-rank Bayesian mixture with an annotation-informed probit prior |
 | SparsePro | `"sparsepro"` | Python + cloned SparsePro repo | No (not used here) | Variational fine-mapping with a sparse-projection prior on effect groups |
 
@@ -340,11 +340,11 @@ the methodological ceiling and cannot be run on real data.
 > worth, with the fine-mapping model held fixed. Any annotation-aware method on
 > this backbone that approaches it has little room left.
 >
-> **Note on comparing it with `polyfun_ldsc`:** the two no longer share a
-> backbone. `polyfun_ldsc` fixes the causal effect variance to the modified-HESS
+> **Note on comparing it with `polyfun_susie`:** the two no longer share a
+> backbone. `polyfun_susie` fixes the causal effect variance to the modified-HESS
 > estimate, while `oracle_susie` fits it as SuSiE normally would, so the gap
 > between them is the prior *and* that difference. For the cost of estimating
-> PolyFun's prior specifically, compare `polyfun_ldsc` with `susie`.
+> PolyFun's prior specifically, compare `polyfun_susie` with `susie`.
 >
 > **History:** this method was called `polyfun_oracle` and fine-mapped through
 > PolyFun's SuSiE configuration until 2026-10-17. Results stored before that
@@ -359,7 +359,7 @@ the methodological ceiling and cannot be run on real data.
 | `enrichment_used` | The enrichment vector behind a reconstructed prior |
 | `alpha`, `posterior_mean`, `lbf`, `converged`, `elbo`, `n_iter_run` | Forwarded from the SuSiE fit, as for `susie` |
 
-### polyfun_ldsc
+### polyfun_susie
 
 PolyFun (Weissbrod et al. 2020) implemented from the paper's Online Methods,
 step by step: L2-regularised stratified LD score regression on one parity of

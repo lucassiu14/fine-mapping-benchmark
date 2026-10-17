@@ -374,8 +374,6 @@ You now have a working end-to-end pipeline. Common next steps:
   phenotype across many regions, polygenic causal assignment), use
   `simulate_gwfm_data()` instead of `run_simulation()`. See
   [`docs/gw_simulation_documentation.md`](../docs/gw_simulation_documentation.md).
-- **HPC runs.** For large parameter sweeps, the `scripts/hpc/` directory has
-  a SLURM job array template. See
   [README §Running on an HPC cluster](../README.md#running-on-an-hpc-cluster).
 - **Evaluation internals.** For the precise definition of every metric and
   the SE-across-replicates machinery, see

@@ -2125,19 +2125,19 @@ test_that("[13] oracle_susie: falls back to uniform prior when annotations absen
   }
 })
 
-test_that("[13] oracle_susie: fine-maps exactly as polyfun_ldsc given the same prior", {
+test_that("[13] oracle_susie: fine-maps exactly as polyfun_susie given the same prior", {
   set.seed(8)
   fit <- run_oracle_susie_region(.rg_po, .rp_po, hess = FALSE)
-  ref <- run_polyfun_ldsc(.rp_po$z, .rg_po$LD, .rg_po$n,
+  ref <- run_polyfun_susie(.rp_po$z, .rg_po$LD, .rg_po$n,
                           prior = fit$additional$prior_weights, hess = FALSE)
   expect_equal(fit$pip, ref$pip)
 })
 
 
 # =============================================================================
-# SECTION 14b: polyfun_ldsc (PolyFun + SuSiE, Weissbrod et al. 2020)
+# SECTION 14b: polyfun_susie (PolyFun + SuSiE, Weissbrod et al. 2020)
 # =============================================================================
-# See wrapper_polyfun_ldsc.R for the step-by-step mapping to the paper and
+# See wrapper_polyfun_susie.R for the step-by-step mapping to the paper and
 # the released code.
 
 .fmb_ns <- function(name) get(name, envir = asNamespace("fmbenchmark"))
@@ -2249,7 +2249,7 @@ test_that("[14b] polyfun: priors sum to one and use the opposite-parity fit", {
 })
 
 test_that("[14b] polyfun: non-functional mode without annotations", {
-  fit <- tryCatch(run_polyfun_ldsc_region(.rg, .rp), error = function(e) e)
+  fit <- tryCatch(run_polyfun_susie_region(.rg, .rp), error = function(e) e)
   if (inherits(fit, "error")) {
     expect_match(conditionMessage(fit), "HESS")
   } else {
@@ -2260,14 +2260,14 @@ test_that("[14b] polyfun: non-functional mode without annotations", {
 
 test_that("[14b] polyfun: annotated region without scenario priors is an error", {
   sim <- .sim_pf(32)
-  expect_error(run_polyfun_ldsc_region(sim$genotypes[[1]],
+  expect_error(run_polyfun_susie_region(sim$genotypes[[1]],
                                        sim$scenarios[[1]]$regions[[1]]),
                "PolyFun priors were not computed")
 })
 
 test_that("[14b] polyfun: scenario setup with too few regions reports the error", {
   sim <- .sim_pf(33)
-  su <- run_polyfun_ldsc_scenario_setup(sim$genotypes[1:3],
+  su <- run_polyfun_susie_scenario_setup(sim$genotypes[1:3],
                                         sim$scenarios[[1]]$regions[1:3], list())
   expect_named(su, ".polyfun_error")
 })
@@ -2275,8 +2275,8 @@ test_that("[14b] polyfun: scenario setup with too few regions reports the error"
 test_that("[14b] polyfun via run_methods uses the scenario priors", {
   skip_if_not_installed("Ckmeans.1d.dp")
   sim <- .sim_pf(34)
-  res <- run_methods(sim, methods = "polyfun_ldsc", save = FALSE, verbose = FALSE)
-  ok <- Filter(function(f) is.null(f$error), res$polyfun_ldsc$results)
+  res <- run_methods(sim, methods = "polyfun_susie", save = FALSE, verbose = FALSE)
+  ok <- Filter(function(f) is.null(f$error), res$polyfun_susie$results)
   expect_gt(length(ok), 0)
   for (f in ok) {
     expect_equal(f$additional$prior_source, "polyfun")

@@ -287,14 +287,6 @@ fine-mapping-benchmark/
 │   ├── vcf/                    # Downloaded 1000G VCF slices for per-locus regions
 │   ├── gwfm_vcf/               # Downloaded 1000G VCF slices for genome-wide regions
 │   └── genetic_maps/           # Cached HapMap GRCh37 maps (auto-downloaded)
-├── scripts/
-│   └── hpc/                         # SLURM job array for the benchmark
-│       ├── generate_params_grid.R   # Build params_grid.csv (40 jobs)
-│       ├── params_grid.csv          # One row per HPC array task
-│       ├── run_benchmark_job.R      # Worker script: runs one (model, p, annot) combination
-│       ├── collect_results.R        # Combines per-job outputs into one data frame
-│       ├── smoke_test.R             # Per-method smoke test before submitting
-│       └── submit_benchmark.sh      # Submits the SLURM array
 ├── docs/
 │   ├── methods.md                       # Method descriptions and wrapper API
 │   ├── evaluation.md                    # Evaluation metrics: formulas and implementation
@@ -699,29 +691,6 @@ for the full statistical specification.
 **Memory:** the simulator holds one dense p×p LD matrix per region in memory.
 A warning is emitted when combined LD storage exceeds ~4 GB. For the full LDetect
 partition (~1,700 blocks), run on a high-memory node or reduce `coverage`.
-
-## Running on an HPC cluster
-
-The `scripts/hpc/` directory contains a self-contained SLURM job array that
-sweeps the benchmark across `(model, p, annotation)` combinations.
-
-```bash
-# 1. (Optional) regenerate the grid
-Rscript scripts/hpc/generate_params_grid.R
-
-# 2. Smoke-test all methods first
-Rscript scripts/hpc/smoke_test.R
-
-# 3. Submit the array (40 jobs)
-bash scripts/hpc/submit_benchmark.sh
-
-# 4. Combine results once jobs complete
-Rscript scripts/hpc/collect_results.R
-```
-
-Edit `submit_benchmark.sh` for your cluster's partition, account, and conda
-environment, and edit `run_benchmark_job.R` for the paths to BEATRICE / PAINTOR
-on your system.
 
 ## License
 

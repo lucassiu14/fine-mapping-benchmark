@@ -113,7 +113,7 @@
   # parser. Before this existed the joint head's importances were computed and
   # then discarded with work_dir, and every fb_xregion importance row in the
   # analysis came from the per-region fallback instead (see
-  # scripts/analysis/iter004_annotation_recovery.R).
+  # the annotation-recovery analysis).
   feature_importance <- NULL
   fi_path <- file.path(out_dir, "feature_importance.csv")
   if (file.exists(fi_path)) {

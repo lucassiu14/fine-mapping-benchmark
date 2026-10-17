@@ -640,7 +640,7 @@ simulate_annotations_for_region <- function(p,
     },
 
     # Log-linear, hence representable in principle - but a linear prior clamps
-    # negative coefficients to zero and polyfun_ldsc constrains non-negativity,
+    # negative coefficients to zero and polyfun_susie constrains non-negativity,
     # so neither can express the depleting half.
     mixed = {
       npos <- ceiling(k / 2)
