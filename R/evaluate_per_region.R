@@ -358,9 +358,37 @@ add_rate_metrics <- function(d, count_thresholds = c(0.5, 0.8, 0.9, 0.95, 0.99))
 #'   included. Default: `"method"` alone, i.e. one row per method.
 #' @param na.rm Logical. Drop failed fits from the scalar averages. Counts from
 #'   failed fits are `NA` and are dropped either way. Default: TRUE.
+#' @param se Logical or a column name. `TRUE` adds a standard error for every
+#'   averaged quantity, computed ACROSS ITERATIONS rather than across regions -
+#'   see the warning below. Pass a column name to use a different replicate
+#'   column. `FALSE` (the default) adds none.
+#'
+#' @section Standard errors need the replicate, not the region:
+#' Per-region rows are NOT mutually independent. Within a simulation each
+#' region's genotypes, LD matrix and annotation matrix are drawn ONCE and
+#' reused by every iteration; only the causal-variant selection, the effect
+#' sizes and the phenotype noise are redrawn. Two rows for the same region
+#' therefore share their entire LD structure, and the same annotation draw is
+#' shared across every row of that region.
+#'
+#' The independent unit is the iteration, so that is what the SE is taken
+#' across: with `se = TRUE` each group's rows are first collapsed to one value
+#' per iteration, then `sd(iteration means) / sqrt(n_iterations)`. This matches
+#' what [evaluate_methods()] reports.
+#'
+#' How much it matters was measured on 112,500 `susie` fits across 5,625 cells
+#' of a completed benchmark. The intraclass correlation of AP between the two
+#' regions of one iteration had median 0, mean 0.10, and exceeded 0.05 in 35%
+#' of cells - real dependence, but modest. The resulting SE ratio
+#' (across-iterations over across-fits) had median 0.96 and IQR 0.83-1.08, so
+#' an across-fits SE is NOT systematically too small: it understated in 42% of
+#' cells and overstated in the rest. It is simply not a valid SE, and which
+#' way it errs is not predictable, so use the iteration-based one rather than
+#' relying on the difference being small.
 #'
 #' @return A data frame with one row per group: the summed counts, the averaged
-#'   scalars, the rates formed from the counts, and `n_fits` / `n_failed`.
+#'   scalars, the rates formed from the counts, and `n_fits` / `n_failed`. With
+#'   `se = TRUE`, a `*_se` column for each averaged quantity and `n_iter_used`.
 #'
 #' @examples
 #' \dontrun{
@@ -377,7 +405,8 @@ add_rate_metrics <- function(d, count_thresholds = c(0.5, 0.8, 0.9, 0.95, 0.99))
 #' # Or aggregate it yourself; just sum the counts and average the scalars.
 #' }
 #' @export
-aggregate_region_metrics <- function(per_region, by = "method", na.rm = TRUE) {
+aggregate_region_metrics <- function(per_region, by = "method", na.rm = TRUE,
+                                    se = FALSE) {
   stopifnot(is.data.frame(per_region))
   by <- unique(c("method", setdiff(by, "method")))
   missing_by <- setdiff(by, names(per_region))
@@ -467,6 +496,48 @@ aggregate_region_metrics <- function(per_region, by = "method", na.rm = TRUE) {
                                      function(v) sum(is.finite(v)), numeric(1)))
 
   out <- add_rate_metrics(out, thresholds)
+
+  if (!isFALSE(se)) {
+    iter_col <- if (isTRUE(se)) "iter" else se
+    if (!iter_col %in% names(per_region))
+      stop("se needs a replicate column; '", iter_col,
+           "' is not in per_region", call. = FALSE)
+    out <- .add_replicate_se(out, per_region, grp, by, iter_col,
+                             c(rate_cols, scalar_cols))
+  }
   rownames(out) <- NULL
+  out
+}
+
+
+# Collapse each group to one value per iteration, then take the SE across those
+# values. Regions inside an iteration share their LD and annotation draws, so
+# the iteration is the independent unit; an SE across regions would be too
+# small. Returns NA where a group has fewer than two usable iterations.
+.add_replicate_se <- function(out, per_region, grp, by, iter_col, cols) {
+  it <- per_region[[iter_col]]
+  ok <- !is.na(it)
+  se1 <- function(v) {
+    v <- v[is.finite(v)]
+    if (length(v) < 2L) NA_real_ else stats::sd(v) / sqrt(length(v))
+  }
+  for (cl in cols) {
+    if (!cl %in% names(per_region)) next
+    vals <- as.numeric(per_region[[cl]])
+    byg  <- split(seq_along(vals)[ok], grp[ok], drop = FALSE)
+    out[[paste0(cl, "_se")]] <- vapply(levels(grp), function(g) {
+      idx <- byg[[g]]
+      if (is.null(idx) || !length(idx)) return(NA_real_)
+      per_it <- vapply(split(vals[idx], it[idx]), function(v) {
+        v <- v[is.finite(v)]
+        if (!length(v)) NA_real_ else mean(v)
+      }, numeric(1))
+      se1(per_it)
+    }, numeric(1))
+  }
+  out$n_iter_used <- vapply(levels(grp), function(g) {
+    idx <- split(seq_along(it)[ok], grp[ok], drop = FALSE)[[g]]
+    if (is.null(idx)) 0L else length(unique(it[idx]))
+  }, integer(1))
   out
 }

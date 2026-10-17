@@ -1310,3 +1310,74 @@ test_that("[N] per-region rates are NA where undefined, never 0", {
   if (any(empty_band))
     expect_true(all(is.na(pr$frac_causal_band_top[empty_band])))
 })
+
+
+# =============================================================================
+# [O] The unit is one region of one iteration, and SEs need the iteration
+# =============================================================================
+
+test_that("[O] one per_region row is one (method, iteration, region)", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  # The scenario id and the (S, phi, iter) triple identify the same thing.
+  expect_equal(nrow(pr),
+               nrow(unique(pr[c("method", "scenario_id", "region_id")])))
+  expect_equal(nrow(pr),
+               nrow(unique(pr[c("method", "S", "phi", "iter", "region_id")])))
+  # Every scenario carries exactly one iteration.
+  expect_true(all(tapply(pr$iter, pr$scenario_id,
+                         function(v) length(unique(v))) == 1L))
+  expect_false(anyNA(pr$iter))
+  expect_setequal(unique(pr$iter), seq_len(2L))   # sim_A has n_iter = 2
+})
+
+test_that("[O] se = TRUE uses the iteration, matching evaluate_methods", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr, se = TRUE)
+  expect_true("ap_se" %in% names(ag))
+  expect_true("n_iter_used" %in% names(ag))
+  expect_true(all(ag$n_iter_used == 2L))
+  for (m in ag$method) {
+    ref <- eval_A[[m]]$global$ap_se
+    if (is.null(ref) || is.na(ref)) next
+    expect_equal(ag$ap_se[ag$method == m], ref, tolerance = 1e-10, info = m)
+  }
+})
+
+test_that("[O] the iteration SE is built from iteration means, not fits", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr, se = TRUE)
+  for (m in ag$method) {
+    sub <- pr[pr$method == m, ]
+    per_it <- vapply(split(sub$ap, sub$iter), function(v) {
+      v <- v[is.finite(v)]
+      if (!length(v)) NA_real_ else mean(v)
+    }, numeric(1))
+    per_it <- per_it[is.finite(per_it)]
+    want <- if (length(per_it) < 2L) NA_real_
+            else sd(per_it) / sqrt(length(per_it))
+    got <- ag$ap_se[ag$method == m]
+    if (is.na(want)) expect_true(is.na(got), info = m)
+    else expect_equal(got, want, tolerance = 1e-12, info = m)
+  }
+})
+
+test_that("[O] se = FALSE adds nothing, and a bad replicate column errors", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr)
+  expect_false("ap_se" %in% names(ag))
+  expect_false("n_iter_used" %in% names(ag))
+  expect_error(aggregate_region_metrics(pr, se = "not_a_column"),
+               "replicate column")
+})
+
+test_that("[O] LD and annotations are shared across a region's iterations", {
+  # This is why the iteration, not the region-fit, is the independent unit:
+  # genotypes are stored per REGION and reused by every scenario, so only the
+  # phenotype draw changes between iterations.
+  expect_equal(length(sim_A$genotypes), 2L)          # per region, not per fit
+  expect_true(length(sim_A$scenarios) > length(sim_A$genotypes))
+  # The same region's truth differs between iterations, so something does vary.
+  tr <- lapply(sim_A$scenarios, function(sc) sc$regions[[1]]$truth$causal_indices)
+  expect_true(length(unique(vapply(tr, function(x) paste(x, collapse = ","),
+                                   character(1)))) > 1L)
+})

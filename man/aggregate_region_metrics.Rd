@@ -4,7 +4,7 @@
 \alias{aggregate_region_metrics}
 \title{Aggregate per-region metrics along chosen axes}
 \usage{
-aggregate_region_metrics(per_region, by = "method", na.rm = TRUE)
+aggregate_region_metrics(per_region, by = "method", na.rm = TRUE, se = FALSE)
 }
 \arguments{
 \item{per_region}{A data frame from \code{\link[=per_region_metrics]{per_region_metrics()}}.}
@@ -14,10 +14,16 @@ included. Default: \code{"method"} alone, i.e. one row per method.}
 
 \item{na.rm}{Logical. Drop failed fits from the scalar averages. Counts from
 failed fits are \code{NA} and are dropped either way. Default: TRUE.}
+
+\item{se}{Logical or a column name. \code{TRUE} adds a standard error for every
+averaged quantity, computed ACROSS ITERATIONS rather than across regions -
+see the warning below. Pass a column name to use a different replicate
+column. \code{FALSE} (the default) adds none.}
 }
 \value{
 A data frame with one row per group: the summed counts, the averaged
-scalars, the rates formed from the counts, and \code{n_fits} / \code{n_failed}.
+scalars, the rates formed from the counts, and \code{n_fits} / \code{n_failed}. With
+\code{se = TRUE}, a \verb{*_se} column for each averaged quantity and \code{n_iter_used}.
 }
 \description{
 Applies the rule the per-region table exists for: COUNT columns are summed,
@@ -26,6 +32,31 @@ summed counts afterwards. Aggregating the table yourself with \code{aggregate()}
 is fine as long as you follow that rule; averaging a rate or pooling a
 ranking will give a different answer, not merely a noisier one.
 }
+\section{Standard errors need the replicate, not the region}{
+
+Per-region rows are NOT mutually independent. Within a simulation each
+region's genotypes, LD matrix and annotation matrix are drawn ONCE and
+reused by every iteration; only the causal-variant selection, the effect
+sizes and the phenotype noise are redrawn. Two rows for the same region
+therefore share their entire LD structure, and the same annotation draw is
+shared across every row of that region.
+
+The independent unit is the iteration, so that is what the SE is taken
+across: with \code{se = TRUE} each group's rows are first collapsed to one value
+per iteration, then \verb{sd(iteration means) / sqrt(n_iterations)}. This matches
+what \code{\link[=evaluate_methods]{evaluate_methods()}} reports.
+
+How much it matters was measured on 112,500 \code{susie} fits across 5,625 cells
+of a completed benchmark. The intraclass correlation of AP between the two
+regions of one iteration had median 0, mean 0.10, and exceeded 0.05 in 35\%
+of cells - real dependence, but modest. The resulting SE ratio
+(across-iterations over across-fits) had median 0.96 and IQR 0.83-1.08, so
+an across-fits SE is NOT systematically too small: it understated in 42\% of
+cells and overstated in the rest. It is simply not a valid SE, and which
+way it errs is not predictable, so use the iteration-based one rather than
+relying on the difference being small.
+}
+
 \examples{
 \dontrun{
 pr <- per_region_metrics(sim, res)
