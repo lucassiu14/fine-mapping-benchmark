@@ -35,6 +35,16 @@
 #' @param inf_model Character. Which infinitesimal formulation to use. Either
 #'   \code{"beatrice"} (noncausal variants only) or \code{"susie_inf"} (all
 #'   variants). Only used when \code{model = "sparse_inf"}. Default: "beatrice".
+#' @param relationship Character. Shape of the annotation-to-causality map used
+#'   to select causal variants, one of \code{"additive"}, \code{"cooccur"},
+#'   \code{"nonmono"}, \code{"mixed"}, \code{"threshold"}, \code{"null"},
+#'   \code{"wavg2"}, \code{"valthresh"}, \code{"valthresh_wavg2"},
+#'   \code{"square"}, \code{"cubic"} or \code{"cosine10"}. Only used when
+#'   annotations are simulated. \code{"additive"} is the log-linear form every
+#'   annotation-aware method assumes, and is the default; the others exist so a
+#'   method can be tested against a map it does not assume. Default: "additive".
+#' @param n_informative Integer or NULL. How many leading annotation columns
+#'   carry signal; the rest are noise. NULL uses the relationship's own default.
 #' @param effect_distribution Character. Distribution for causal effect sizes.
 #'   \code{"normal"} draws from N(0, effect_variance).
 #'   \code{"equal"} partitions variance equally among causal variants.
@@ -680,6 +690,16 @@ simulate_annotations_for_region <- function(p,
 #' leaves shape as the only free variable. The consequence is that
 #' `enrichment_fold` no longer denotes a fold; it indexes a concentration
 #' ladder, calibrated to what the additive/binary form produces at that fold.
+#'
+#' @param log_w Numeric vector of unnormalised log selection weights, one per
+#'   variant, as returned by [.causal_log_weights()].
+#' @param target Numeric. The concentration to hit: the share of total selection
+#'   probability carried by the top tenth of variants.
+#' @param tol Numeric. Stop once the achieved concentration is within `tol` of
+#'   `target`. Default: 0.005.
+#' @param max_it Integer. Maximum bisection steps. Default: 40.
+#' @return `log_w` scaled by the multiplier found, or a vector of zeros (a
+#'   uniform prior) when `target` is unreachable from below.
 .calibrate_log_weights <- function(log_w, target, tol = 0.005, max_it = 40L) {
   if (!is.finite(target) || target <= 0.1) return(log_w * 0)   # null / uniform
   conc <- function(mult) {
@@ -703,6 +723,10 @@ simulate_annotations_for_region <- function(p,
 #' The concentration ladder. Values are what the ADDITIVE relationship produces
 #' on BINARY annotations at each enrichment fold, so the control arm is
 #' unchanged by calibration and the other arms are matched to it.
+#'
+#' @param fold Numeric. The `enrichment_fold` setting. Values off the ladder are
+#'   linearly interpolated, and clamped at its ends.
+#' @return Numeric scalar: the target concentration for [.calibrate_log_weights()].
 .concentration_target <- function(fold) {
   ladder <- c("2.7" = 0.349, "5.4" = 0.605, "8.1" = 0.741, "10.8" = 0.839)
   key <- as.character(fold)

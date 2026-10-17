@@ -8,6 +8,22 @@ top decile of variants.}
 \usage{
 .calibrate_log_weights(log_w, target, tol = 0.005, max_it = 40L)
 }
+\arguments{
+\item{log_w}{Numeric vector of unnormalised log selection weights, one per
+variant, as returned by \code{\link[=.causal_log_weights]{.causal_log_weights()}}.}
+
+\item{target}{Numeric. The concentration to hit: the share of total selection
+probability carried by the top tenth of variants.}
+
+\item{tol}{Numeric. Stop once the achieved concentration is within \code{tol} of
+\code{target}. Default: 0.005.}
+
+\item{max_it}{Integer. Maximum bisection steps. Default: 40.}
+}
+\value{
+\code{log_w} scaled by the multiplier found, or a vector of zeros (a
+uniform prior) when \code{target} is unreachable from below.
+}
 \description{
 WHY THIS IS NECESSARY. The five relationships produce wildly different
 enrichment strengths at the same nominal fold. Measured over 30 replicate

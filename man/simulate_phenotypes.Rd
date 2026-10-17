@@ -49,6 +49,18 @@ Must be in (0, 1]. Default: 0.5.}
 \code{"beatrice"} (noncausal variants only) or \code{"susie_inf"} (all
 variants). Only used when \code{model = "sparse_inf"}. Default: "beatrice".}
 
+\item{relationship}{Character. Shape of the annotation-to-causality map used
+to select causal variants, one of \code{"additive"}, \code{"cooccur"},
+\code{"nonmono"}, \code{"mixed"}, \code{"threshold"}, \code{"null"},
+\code{"wavg2"}, \code{"valthresh"}, \code{"valthresh_wavg2"},
+\code{"square"}, \code{"cubic"} or \code{"cosine10"}. Only used when
+annotations are simulated. \code{"additive"} is the log-linear form every
+annotation-aware method assumes, and is the default; the others exist so a
+method can be tested against a map it does not assume. Default: "additive".}
+
+\item{n_informative}{Integer or NULL. How many leading annotation columns
+carry signal; the rest are noise. NULL uses the relationship's own default.}
+
 \item{effect_distribution}{Character. Distribution for causal effect sizes.
 \code{"normal"} draws from N(0, effect_variance).
 \code{"equal"} partitions variance equally among causal variants.

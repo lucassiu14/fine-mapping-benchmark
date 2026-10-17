@@ -36,6 +36,11 @@
 #' @param inf_model Character. Infinitesimal formulation: \code{"beatrice"}
 #'   or \code{"susie_inf"}. Only used when \code{model = "sparse_inf"}.
 #'   Default: "beatrice".
+#' @param relationship Character. Shape of the annotation-to-causality map,
+#'   passed to \code{\link{simulate_phenotypes}}. Default: "additive", the
+#'   log-linear form annotation-aware methods assume.
+#' @param n_informative Integer or NULL. How many leading annotation columns
+#'   carry signal. NULL uses the relationship's own default.
 #' @param effect_distribution Character. \code{"normal"} or \code{"equal"}.
 #'   Default: "normal".
 #' @param effect_variance Numeric. Variance for normal effect sizes.

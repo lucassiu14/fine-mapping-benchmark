@@ -6,6 +6,17 @@
 \usage{
 .honesty(fp, nsel, sum_pip_sel)
 }
+\arguments{
+\item{fp}{Numeric. False positives actually made among the selections.}
+
+\item{nsel}{Numeric. Number of variants selected.}
+
+\item{sum_pip_sel}{Numeric. Sum of the PIPs of the selected variants.}
+}
+\value{
+Named list: \code{exp_fp} (the method's own expected false-positive count),
+\code{ex_fp} (excess over it) and \code{rho} (their ratio, \code{NA} for an abstainer).
+}
 \description{
 Requires no external calibration theory: it asks the method to state its own
 expected false-positive count among its selections, then scores it.

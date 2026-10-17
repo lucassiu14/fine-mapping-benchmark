@@ -8,6 +8,13 @@ unchanged by calibration and the other arms are matched to it.}
 \usage{
 .concentration_target(fold)
 }
+\arguments{
+\item{fold}{Numeric. The \code{enrichment_fold} setting. Values off the ladder are
+linearly interpolated, and clamped at its ends.}
+}
+\value{
+Numeric scalar: the target concentration for \code{\link[=.calibrate_log_weights]{.calibrate_log_weights()}}.
+}
 \description{
 The concentration ladder. Values are what the ADDITIVE relationship produces
 on BINARY annotations at each enrichment fold, so the control arm is

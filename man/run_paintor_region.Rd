@@ -13,6 +13,10 @@ containing \code{LD}, \code{n}, and optionally \code{variant_ids}.}
 \item{region_pheno}{List. One element of a scenario's \code{regions},
 containing \code{z} and optionally \code{annotations_matrix}.}
 
+\item{.paintor_cache}{List or NULL. The fingerprint-keyed cache built once
+per scenario by \code{\link{run_paintor_scenario_setup}}, supplied by
+\code{\link{run_methods}}. NULL forces a single-locus run.}
+
 \item{...}{Additional arguments passed to \code{\link{run_paintor}}
 (e.g. \code{max_causal}, \code{mcmc}, \code{paintor_path}).}
 }

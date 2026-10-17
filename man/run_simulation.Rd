@@ -65,6 +65,13 @@ If a vector, all values are swept. Default: c(0.1, 0.2, 0.4).}
 or \code{"susie_inf"}. Only used when \code{model = "sparse_inf"}.
 Default: "beatrice".}
 
+\item{relationship}{Character. Shape of the annotation-to-causality map,
+passed to \code{\link{simulate_phenotypes}}. Default: "additive", the
+log-linear form annotation-aware methods assume.}
+
+\item{n_informative}{Integer or NULL. How many leading annotation columns
+carry signal. NULL uses the relationship's own default.}
+
 \item{effect_distribution}{Character. \code{"normal"} or \code{"equal"}.
 Default: "normal".}
 

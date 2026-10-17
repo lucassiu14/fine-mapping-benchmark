@@ -12,6 +12,9 @@
 \item{is_causal}{Logical vector, same length.}
 
 \item{alpha}{Cumulative-mass targets for the uniform credible sets.}
+
+\item{S}{Integer. Number of causal variants in this fit, used as the k of
+\code{prec_at_k}. Defaults to \code{sum(is_causal)}.}
 }
 \value{
 Named list of scalars.

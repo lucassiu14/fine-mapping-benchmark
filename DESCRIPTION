@@ -12,13 +12,14 @@ Description: A framework for benchmarking statistical fine-mapping methods
     Phase 3 haplotypes (via sim1000G), generates phenotypes under sparse
     or sparse+infinitesimal genetic architectures with optional functional
     annotations, applies a catalogue of fine-mapping methods (SuSiE,
-    SuSiE-inf, FINEMAP, ABF, CARMA, PAINTOR, Funmap, BEATRICE, Functional
-    BEATRICE, SparsePro, marginal-z baseline, and PolyFun-style oracle and
-    estimated-prior variants), and evaluates them via AUPRC, credible-set
-    coverage / power / size, PIP calibration, and runtime — stratified by
-    causal-variant count, heritability, p_causal, causal-variant MAF, and
-    annotation regime. Supports both per-locus and genome-wide simulation
-    and an LD-mismatch experiment via an independent reference panel.
+    SuSiE-inf, FINEMAP, FINEMAP-inf, CAVIAR, FiniMOM, ABF, CARMA, PAINTOR,
+    Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE, Functional BEATRICE and
+    its cross-region joint variants, plus marginal-z and oracle-prior
+    baselines), and evaluates them via AUPRC, credible-set coverage / power
+    / size, PIP calibration, and runtime — stratified by causal-variant
+    count, heritability, p_causal, causal-variant MAF, and annotation
+    regime. Supports both per-locus and genome-wide simulation and an
+    LD-mismatch experiment via an independent reference panel.
 License: MIT + file LICENSE
 URL: https://github.com/lucassiu14/fine-mapping-benchmark
 BugReports: https://github.com/lucassiu14/fine-mapping-benchmark/issues
@@ -36,6 +37,7 @@ Imports:
 Suggests:
     CARMA,
     Ckmeans.1d.dp,
+    finimom,
     knitr,
     nnet,
     remotes,

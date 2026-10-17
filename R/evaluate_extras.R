@@ -79,6 +79,8 @@
 #' @param pip Numeric vector of PIPs for one fit.
 #' @param is_causal Logical vector, same length.
 #' @param alpha Cumulative-mass targets for the uniform credible sets.
+#' @param S Integer. Number of causal variants in this fit, used as the k of
+#'   `prec_at_k`. Defaults to `sum(is_causal)`.
 #' @return Named list of scalars.
 .rank_set_metrics <- function(pip, is_causal, alpha = c(0.5, 0.95),
                               S = sum(is_causal)) {
@@ -189,6 +191,12 @@
 #'
 #' Zero for an abstainer by construction, which is honest - neither rewarded nor
 #' punished, unlike raw FDR where selecting nothing wins every comparison.
+#'
+#' @param fp Numeric. False positives actually made among the selections.
+#' @param nsel Numeric. Number of variants selected.
+#' @param sum_pip_sel Numeric. Sum of the PIPs of the selected variants.
+#' @return Named list: `exp_fp` (the method's own expected false-positive count),
+#'   `ex_fp` (excess over it) and `rho` (their ratio, `NA` for an abstainer).
 .honesty <- function(fp, nsel, sum_pip_sel) {
   exp_fp <- nsel - sum_pip_sel
   list(exp_fp = exp_fp,
