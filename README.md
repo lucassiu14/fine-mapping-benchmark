@@ -64,7 +64,6 @@ pkgload::load_all()        # load fmbenchmark from the source checkout
 - Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
   **oracle_susie**, **polyfun_susie**, **sbayesrc**
 - All of `evaluate_methods()` (AP, CS metrics, PIP calibration)
-- All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
   `run_simulation()`, `simulate_gwfm_data()`)
 
@@ -215,8 +214,9 @@ eval_out <- evaluate_methods(
   output_dir = "results/run1"
 )
 
-# 4. Plot
-plot_results(eval_out, output_dir = "results/run1")
+# 4. Summarise however you like
+pr <- eval_out$per_region
+aggregate(ap ~ method + region_size, data = pr, FUN = mean)
 ```
 
 > **Without `prepare_vcfs.R`:** omit `vcf_dir` and the simulator falls back to
@@ -270,7 +270,6 @@ fine-mapping-benchmark/
 │   ├── run_methods.R           # Runs fine-mapping methods on a simulation object
 │   ├── evaluate.R              # Computes AP, CS metrics, PIP calibration
 │   ├── evaluate_per_region.R   # Per-region metric table + correct aggregation
-│   ├── plot_results.R          # Generates multi-page PDF plots
 │   └── wrapper_*.R             # One file per method: wrapper_susie.R, wrapper_susie_inf.R,
 │                               #   wrapper_finemap.R, wrapper_finemap_inf.R,
 │                               #   wrapper_caviar.R, wrapper_finimom.R, wrapper_abf.R,
@@ -317,7 +316,7 @@ Results are written to `results/` (gitignored).
 
 ## API Reference
 
-All six main functions share a consistent interface: every function accepts
+All five main functions share a consistent interface: every function accepts
 `save`, `output_dir`, and `verbose` arguments. Setting `save = TRUE` writes
 output to `output_dir` (which is created automatically if it does not exist).
 Setting `verbose = FALSE` suppresses all progress messages.
@@ -563,59 +562,30 @@ eval_out <- evaluate_methods(
 | `output_dir` | character | `"results"` | Output directory; created automatically if absent |
 | `verbose` | logical | `TRUE` | Print progress messages |
 
-**Returns:** A named list (one entry per method) containing `global`, `by_S`, `by_phi`, and `by_p_causal` strata.
-Each stratum contains:
+**Returns:** A named list with one entry per method, each containing `global`,
+plus a single `per_region` data frame covering every method.
+
+`global` is the metrics over all of that method's fits:
 
 | Field | Description |
 |-------|-------------|
-| `fdr_power_curve` | Data frame with columns `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`, `power_se`, `precision_se` |
-| `ap` | Area under the precision-recall curve (±`ap_se`) |
-| `pip_calibration` | Data frame: binned mean PIP vs observed fraction causal (±`frac_causal_se`) |
-| `cs_coverage` | Proportion of reported credible sets containing ≥1 true causal variant (±`cs_coverage_se`) |
-| `cs_power` | Proportion of true causal variants captured by any credible set (±`cs_power_se`) |
-| `cs_size_median` | Median number of variants per credible set (±SE) |
-| `cs_size_mean` | Mean number of variants per credible set (±SE) |
+| `ap` | Mean of the per-region average precisions (`ap_n_fits` = regions contributing) |
+| `fdr_power_curve` | Data frame: `threshold`, `fdr`, `power`, `precision`, `recall` as region means, `n_regions`, the `*_pooled` call-weighted variants, and the `tp`/`fp`/`fn` totals |
+| `pip_calibration` | Data frame: binned `mean_pip` vs `frac_causal` as region means, `n_regions`, the `*_pooled` variants, and the `n`/`n_causal` counts |
+| `cs_coverage` | Mean over regions of the share of that region's credible sets holding a causal variant (`cs_coverage_n`) |
+| `cs_power` | Mean over regions of the share of that region's causal variants captured by any set (`cs_power_n`) |
+| `cs_size_median`, `cs_size_mean` | Means over regions of that region's own median and mean set size |
 | `n_cs_reported` | Total credible sets reported across all fits |
-| `runtime_mean` | Mean runtime in seconds across successful fits (±`runtime_mean_se`) |
-| `n_fits` | Total fits attempted |
-| `n_failed` | Fits that errored |
+| `runtime_mean`, `runtime_sd` | Runtime in seconds across successful fits |
+| `n_fits`, `n_failed` | Fits attempted, and fits that errored |
 
-Standard errors are computed across replicates (`n_iter`). SE fields are `NA` when `n_iter < 2`.
+A method with no usable fit has `ap = NA`, `ap_n_fits = 0` and a `NULL` curve —
+not a zero FDR.
 
----
-
-### `plot_results()`
-
-Generates a multi-page PDF with precision-recall curves, PIP calibration plots,
-and summary metric panels — globally and stratified by S, phi, and p_causal.
-
-```r
-plot_results(
-  eval_out    = eval_out,
-  output_file = NULL,
-  output_dir  = "results",
-  save        = TRUE,
-  methods     = NULL,
-  verbose     = TRUE
-)
-```
-
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `eval_out` | list | — | Output of `evaluate_methods()` |
-| `output_file` | character or `NULL` | `NULL` | Full path for the PDF. When specified, takes precedence over `output_dir`. When `NULL`, the file is written as `evaluation.pdf` inside `output_dir` |
-| `output_dir` | character | `"results"` | Directory in which to write `evaluation.pdf` when `output_file` is `NULL`. Created automatically if absent |
-| `save` | logical | `TRUE` | If `FALSE`, skip writing the PDF entirely (useful for dry runs) |
-| `methods` | character vector or `NULL` | `NULL` | Methods to include in the plots. `NULL` = all evaluated methods |
-| `verbose` | logical | `TRUE` | Print section progress |
-
-**Returns:** Invisibly returns the path of the PDF that was (or would have been) written.
-
-**PDF sections:**
-1. **Global** — PR curve (all methods), PIP calibration (faceted by method), summary table with ±SE
-2. **By S** — PR grid, calibration grid, metric line plots vs S with error bars
-3. **By phi** — same structure as By S
-4. **By p_causal** — same structure (sparse_inf model only)
+There are no `by_*` strata, no standard errors and no plotting function. Those
+were one analysis's choices; group `per_region` on whichever of its factor
+columns you want instead, and take any standard error across iterations (see
+below).
 
 ---
 
@@ -636,61 +606,69 @@ identify the same row — each scenario is one `(S, phi, iter)` draw.
 ev <- evaluate_methods(sim, res)
 pr <- ev$per_region          # or per_region_metrics(sim, res)
 
-aggregate_region_metrics(pr)                                 # one row per method
-aggregate_region_metrics(pr, by = c("region_size", "phi"))   # any combination
-aggregate_region_metrics(pr, by = "true_annotation_type")
-aggregate_region_metrics(pr, by = "region_size", se = TRUE)  # with SEs
+# Any axis the table carries, with base R.
+aggregate(ap ~ method, data = pr, FUN = mean)
+aggregate(ap ~ method + region_size, data = pr, FUN = mean)
+aggregate(ap ~ method + true_annotation_type, data = pr, FUN = mean)
 ```
 
-**Use `se = TRUE` rather than computing an SE across the rows yourself.** The
-rows are not independent: each region's genotypes, LD matrix and annotation
-matrix are drawn once and reused by every iteration, so only the
-causal-variant selection, effect sizes and phenotype noise are redrawn. The
-independent unit is the iteration, so `se = TRUE` collapses each group to one
-value per iteration first.
+**The three column families, and the rule for each.** Getting this wrong
+changes the answer, not just its precision:
 
-Measured on 112,500 fits across 5,625 cells of a completed benchmark: the
-intraclass correlation of AP between the two regions of one iteration had
-median 0 and mean 0.10, exceeding 0.05 in 35% of cells. The resulting SE ratio
-had median 0.96 and IQR 0.83–1.08 — so an across-rows SE is not reliably too
-small or too large, just not valid, and which way it errs is not predictable.
+| Family | Columns | Aggregate by |
+|---|---|---|
+| **Counts** | `nsel_at_*`, `tp_at_*`, `sum_pip_sel_at_*`, `n_band_*`, `c_band_*`, `sum_pip_band_*`, `n_cs`, `n_cs_with_causal`, `n_causal_captured`, `cs_size_sum`, `n_variants`, `n_causal`, `sum_pip_total` | **Summing**, then form the rate — this gives the call-weighted rate |
+| **Rates** | `fdr_at_*`, `precision_at_*`, `power_at_*`, `frac_causal_band_*`, `mean_pip_band_*`, `cs_coverage`, `cs_power` | **Averaging over the regions where defined** — the region-weighted rate. Report how many that was |
+| **Scalars** | `ap`, `max_pip`, `cs_size_mean`, `cs_size_median`, `runtime_seconds` | **Averaging** |
 
-**The aggregation rule.** If you aggregate the table yourself, follow it —
-`aggregate_region_metrics()` exists because getting it wrong changes the
-answer, not just its precision:
-
-> **Rates are pooled from counts. Per-region scalars are averaged.**
+Three things follow from that:
 
 - **Average precision is per region.** The AP of two regions' merged ranked
   list is not the mean of their APs: merging lets one region's false positives
-  outrank the other's true positive. So `ap` is averaged, never pooled.
+  outrank the other's true positive.
 - **FDR, power and calibration are per region too.** Fine-mapping is applied
-  to a locus, so the reported rate is the mean over regions of each region's
+  to a locus, so the rate to report is the mean over regions of each region's
   own rate — "how trustworthy are the calls in a region". The call-weighted
-  rate, in which a region making many calls dominates, is a different
-  quantity and sits beside it as `*_pooled`. The counts are kept
-  (`nsel_at_*`, `tp_at_*`, `n_band_*`, `c_band_*`, `n_cs`,
-  `n_cs_with_causal`, `n_causal_captured`), so either can be re-formed.
-- **A region that selects nothing is excluded from the FDR mean, not scored
-  0.** The "FDR is 0 when nothing is selected" convention is harmless when
-  pooling but rewards abstention under averaging, so `*_n` reports how many
-  regions each mean rests on. Always read the rate with it.
+  rate, where a region making many calls dominates, is a different quantity;
+  the counts are kept so you can form it if you want it.
+- **A rate is `NA` where undefined, never 0.** A region that selected nothing
+  has no FDR; scoring it 0 would reward abstention. So average with
+  `na.rm = TRUE` *and* count the contributing regions:
+
+  ```r
+  v <- pr$fdr_at_095[pr$method == "susie"]
+  c(fdr = mean(v, na.rm = TRUE), n_regions = sum(!is.na(v)))
+  ```
+
+**For a standard error, the unit is the iteration, not the region.** Each
+region's genotypes, LD matrix and annotation matrix are drawn once and reused
+by every iteration; only the causal-variant selection, effect sizes and
+phenotype noise are redrawn. So collapse to one value per `iter` first:
+
+```r
+per_iter <- aggregate(ap ~ method + iter, data = pr, FUN = mean)
+aggregate(ap ~ method, data = per_iter,
+          FUN = function(v) sd(v) / sqrt(length(v)))
+```
+
+Measured on 112,500 fits across 5,625 cells of a completed benchmark: the
+intraclass correlation of AP between the two regions of one iteration had
+median 0 and mean 0.10, exceeding 0.05 in 35% of cells. The SE ratio
+(across-iterations over across-rows) had median 0.96 and IQR 0.83–1.08 — so an
+across-rows SE is not reliably too small or too large, just not valid, and
+which way it errs is not predictable.
 
 A failed fit contributes an all-`NA` row rather than vanishing — a method that
 cannot run on part of the grid is not missing at random.
 
-### Pre-aggregated
+### `global`
 
-`global` plus `by_S`, `by_phi`, `by_p_causal`, `by_region_size`,
-`by_causal_maf` and `by_true_annotation_type`:
+The same metrics over every one of a method's fits, as a convenience. **Every
+rate is region-weighted** and ships with the count of regions it rests on; the
+call-weighted value sits beside it under a `_pooled` suffix.
 
-**Every rate here is region-weighted** — computed within each region, then
-averaged over regions — and ships with the count of regions it rests on. The
-call-weighted value, where a region making many calls dominates, sits beside
-each under a `_pooled` suffix.
-
-- **`ap`** — mean of the per-region average precisions, with `ap_n_fits` and
-  `ap_se`. The single headline number.
+- **`ap`** — mean of the per-region average precisions, with `ap_n_fits`.
+  The single headline number.
 - **`fdr_power_curve`** — `fdr`, `precision`, `power`, `recall` as region
   means, `n_regions` per threshold, the `*_pooled` variants, and the
   `tp`/`fp`/`fn` totals.

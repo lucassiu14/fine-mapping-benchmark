@@ -1,7 +1,7 @@
 # Evaluation Methodology
 
 This document describes every step of the evaluation pipeline implemented in
-`R/evaluate.R` and `R/plot_results.R`: how raw method outputs are matched to
+`R/evaluate.R` and `R/evaluate_per_region.R`: how raw method outputs are matched to
 ground truth, how each metric is computed, how standard errors are derived, how
 results are stratified, and what each plot shows.
 
@@ -11,24 +11,16 @@ results are stratified, and what each plot shows.
 
 1. [Inputs](#inputs)
 2. [Annotating fits with ground truth](#annotating-fits-with-ground-truth)
-3. [Stratification](#stratification)
+3. [Grouping: there are no fixed strata](#grouping-there-are-no-fixed-strata)
 4. [Metric computation](#metric-computation)
    - [Power / FDR curve](#power--fdr-curve)
    - [Average precision](#average-precision-ap)
    - [PIP calibration](#pip-calibration)
    - [Credible-set metrics](#credible-set-metrics)
    - [Runtime](#runtime)
-5. [Standard error computation](#standard-error-computation)
-6. [Output structure](#output-structure)
-7. [Saving to disk](#saving-to-disk)
-8. [Plots](#plots)
-   - [Global PR curve](#global-pr-curve)
-   - [Global PIP calibration](#global-pip-calibration)
-   - [Global summary table](#global-summary-table)
-   - [Stratified PR curve grid](#stratified-pr-curve-grid)
-   - [Stratified PIP calibration grid](#stratified-pip-calibration-grid)
-   - [Metrics vs stratification variable](#metrics-vs-stratification-variable)
-9. [Quick reference — field names](#quick-reference--field-names)
+5. [Output structure](#output-structure)
+6. [Saving to disk](#saving-to-disk)
+7. [Quick reference — field names](#quick-reference--field-names)
 
 ---
 
@@ -81,29 +73,30 @@ computations (see below).
 
 ---
 
-## Stratification
+## Grouping: there are no fixed strata
 
-Metrics are computed four times per method, each over a different subset of fits:
+`evaluate_methods()` does not pre-compute a set of strata. It returns `global`
+per method - the metrics over all of that method's fits - plus one
+`per_region` data frame whose unit is **one method fitted to one region of one
+iteration**.
 
-| Stratum | Key in output | Fits included |
-|---|---|---|
-| **Global** | `$global` | All fits across all scenarios and regions |
-| **By S** | `$by_S` | Fits grouped by the number of causal variants (`f$S`). One entry per unique `S` value. |
-| **By phi** | `$by_phi` | Fits grouped by the proportion of variance explained (`f$phi`). One entry per unique `phi` value. |
-| **By p_causal** | `$by_p_causal` | Fits grouped by the sparse-component proportion (`f$p_causal`). One entry per unique `p_causal` value. `NULL` for the `sparse` model. |
+The design factors travel with each row, so any grouping is a `aggregate()`
+call away:
 
-For each stratification variable, `.stratify_metrics()` identifies all unique
-non-`NA` values of that variable across the annotated fits, then calls
-`.metrics_with_se()` on the subset of fits matching each value.
+| Column | What it is |
+|---|---|
+| `method`, `scenario_id`, `region_id`, `iter` | The identity of the fit. `(method, scenario_id, region_id)` and `(method, S, phi, iter, region_id)` are both unique keys over the same rows, because each scenario is one `(S, phi, iter)` draw |
+| `S` | Number of causal variants in the region |
+| `phi` | Heritability of the region |
+| `p_causal` | Sparse-component share (`NA` outside the `sparse_inf` model) |
+| `region_size` | Nominal region length, the requested per-region `p`. Fine-mapping difficulty scales steeply with it, so it is a genuine axis and metrics should never be pooled across region lengths without saying so |
+| `min_causal_maf`, `causal_maf_bin` | Lowest causal-variant MAF, and its bin: `rare` (<= 0.01), `low` (<= 0.05), `common`. `NA_character_` when the region has no causal variants |
+| `true_annotation_type` | `none`, `binary` or `continuous`, from the simulation's parameters. Constant within one simulation; it earns its place when evaluation objects from differently-annotated runs are combined |
+| `failed`, `bad_pip` | Whether the fit errored, and whether it returned non-finite PIPs |
 
-When a stratification variable is `NULL` or `NA` on all fits (e.g. `p_causal`
-for a `sparse` model), the stratum is returned as `NULL`.
-
-**What "pooling" means:** within each stratum, all (PIP, is-causal) pairs from
-all fits in that stratum are concatenated into a single vector before metric
-computation. Metrics are therefore computed on this aggregate — they reflect the
-average behaviour across regions and, within a stratification level, across all
-values of the other parameters and all replicates.
+A fixed set of strata computed inside the package would only be one analysis's
+choice of axes. The cost of this freedom is that the aggregation rules are the
+caller's to follow - see the next chapter.
 
 ---
 
@@ -183,7 +176,9 @@ shipping two wrong answers alongside the right one, so they were removed and
 
 `per_region_metrics()` returns one row per (method, scenario, region): the
 design factors, the per-region scalars, and the counts that rates are formed
-from. `aggregate_region_metrics()` applies the rule above for any grouping.
+from. The rules above are the caller's to follow - see the
+[Quick reference](#quick-reference--field-names) for which column is in which
+family.
 Both are also reachable as `evaluate_methods(...)$per_region`.
 
 A failed fit contributes an all-`NA` metric row rather than being dropped, so
@@ -242,7 +237,8 @@ The implementation uses an O(N log N + T) approach:
 `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`.
 
 After SE computation (see below), two additional columns are present:
-`power_se` and `precision_se`.
+`n_regions`, the `*_pooled` call-weighted variants, and the `tp`/`fp`/`fn`
+totals.
 
 **Boundary behaviour:**
 - At `t = 0`: all variants are called, so `n_sel = N`, `TP = total_causal`,
@@ -331,7 +327,8 @@ corresponds to all points lying on the identity line `y = x`.
 `bin`, `bin_lower`, `bin_upper`, `bin_mid`, `n`, `n_causal`, `mean_pip`,
 `frac_causal`.
 
-After SE computation, one additional column is present: `frac_causal_se`.
+`n_regions` gives the number of regions populating each bin, and
+`mean_pip_pooled` / `frac_causal_pooled` the call-weighted values.
 
 ---
 
@@ -387,114 +384,53 @@ runtime_mean = mean(runtime_seconds)   over valid fits
 runtime_sd   = sd(runtime_seconds)     over valid fits (NA if n_valid < 2)
 ```
 
-After SE computation, `runtime_mean_se` is also present (see below).
-
----
-
-## Standard error computation
-
-All SE fields are computed by `.metrics_with_se()`, which wraps
-`.metrics_for_fits()`. The SE represents variability **across replicates**
-(the `iter` dimension of the simulation design).
-
-**Grouping.** The `iter` field on each fit records which independent replicate
-it belongs to (1 through `n_iter`). Fits are grouped by their `iter` value.
-Within a given stratum (e.g. all fits with `S = 1`), there is one group per
-unique `iter` value found in that stratum.
-
-**Per-replicate metrics.** For each replicate `r`, `.metrics_for_fits()` is
-called on the subset of fits with `iter == r`. This produces one complete set
-of metrics pooled across all regions and parameter values (S, phi, p_causal)
-within that replicate and stratum.
-
-**SE formula.** Let `x_1, ..., x_K` be the per-replicate values of a scalar
-metric (some may be `NA`). Let `K*` = number of non-NA values. Then:
-
-```
-SE = sd(x_1, ..., x_K, na.rm = TRUE) / sqrt(K*)
-```
-
-If `K* < 2`, the SE is `NA` (cannot estimate from fewer than two replicates).
-
-**Which fields have SE.** The following scalar metrics have a paired `_se` field:
-
-| Metric field | SE field |
-|---|---|
-| `ap` | `ap_se` |
-| `cs_coverage` | `cs_coverage_se` |
-| `cs_power` | `cs_power_se` |
-| `cs_size_median` | `cs_size_median_se` |
-| `cs_size_mean` | `cs_size_mean_se` |
-| `runtime_mean` | `runtime_mean_se` |
-
-In addition, two data frames carry per-row SE fields:
-
-- **`fdr_power_curve`** gains `power_se` and `precision_se`: the SE of power
-  (recall) and precision at each threshold across replicates. These are computed
-  by running `.metrics_for_fits()` per replicate and collecting the
-  `power`/`precision` vectors into a matrix (rows = thresholds,
-  columns = replicates), then applying the SE formula row-wise.
-
-- **`pip_calibration`** gains `frac_causal_se`: the SE of `frac_causal` in
-  each bin across replicates. Computed similarly as a matrix of per-replicate
-  `frac_causal` vectors.
-
-**Interpretation.** Because grouping is by `iter` within the stratum, the SE
-reflects variability due to both random noise in the phenotype simulation and
-stochastic variation in the fine-mapping algorithm (where applicable). It does
-**not** reflect uncertainty from the choice of S or phi (those are design
-parameters, not sources of noise). For the global stratum, per-replicate
-pooling spans all S and phi values, so the global SE also captures
-cross-parameter variability — it is larger than the within-parameter SE.
+`runtime_sd` is the SD over valid fits, and each region's own
+`runtime_seconds` is in the per-region table.
 
 ---
 
 ## Output structure
 
-`evaluate_methods()` returns a named list with one element per evaluated method
-plus three top-level metadata fields:
+`evaluate_methods()` returns a named list: one element per evaluated method,
+one shared per-region table, and three metadata fields.
 
 ```
 eval_out
 ├── methods_evaluated       character vector of method names
 ├── simulation_params       copy of simulation$params
 ├── pip_thresholds_used     the pip_thresholds vector used
+├── per_region              data.frame, one row per (method, region, iteration)
 └── <method>                one entry per method (e.g. "susie", "abf")
-    ├── global              metrics pooled over all scenarios × regions
-    ├── by_S                named list; one entry per unique S value
-    │   ├── "1"             metrics for fits with S = 1
-    │   ├── "2"             metrics for fits with S = 2
-    │   └── ...
-    ├── by_phi              named list; one entry per unique phi value
-    │   ├── "0.1"
-    │   └── ...
-    └── by_p_causal         named list (sparse_inf model only); NULL otherwise
-        ├── "0.2"
-        └── ...
+    └── global              the metrics over all of that method's fits
 ```
 
-Each stratum object (global, or an entry in by_S / by_phi / by_p_causal)
-contains:
+There are no `by_*` strata and no `_se` fields. Group `per_region` instead, and
+take standard errors across iterations (see
+[Grouping](#grouping-there-are-no-fixed-strata)).
+
+### `global`
+
+Every rate here is **region-weighted**: computed within each region, then
+averaged over the regions where it is defined. Each ships with the count of
+contributing regions, and with the call-weighted value under a `_pooled`
+suffix.
 
 | Field | Type | Description |
 |---|---|---|
-| `fdr_power_curve` | data.frame or NULL | 201 rows (one per threshold). Columns: `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`, `power_se`, `precision_se`. NULL when no valid fits exist. |
-| `ap` | numeric | Mean over regions of the per-region average precision. NA when no valid fits. |
-| `ap_se` | numeric | SE of `ap` across replicates. NA when n_iter < 2. |
-| `pip_calibration` | data.frame or NULL | `n_pip_cal_bins` rows. Columns: `bin`, `bin_lower`, `bin_upper`, `bin_mid`, `n`, `n_causal`, `mean_pip`, `frac_causal`, `frac_causal_se`. NULL when no valid fits. |
-| `cs_coverage` | numeric | Proportion of CSs containing ≥1 causal variant. NA if no CSs reported. |
-| `cs_coverage_se` | numeric | SE of cs_coverage across replicates. |
-| `cs_power` | numeric | Proportion of causal variants captured by any CS. |
-| `cs_power_se` | numeric | SE of cs_power across replicates. |
-| `cs_size_median` | numeric | Median variants per CS. NA if no CSs reported. |
-| `cs_size_median_se` | numeric | SE of cs_size_median across replicates. |
-| `cs_size_mean` | numeric | Mean variants per CS. NA if no CSs reported. |
-| `cs_size_mean_se` | numeric | SE of cs_size_mean across replicates. |
-| `n_cs_reported` | integer | Total CSs reported across all fits in stratum. |
+| `ap` | numeric | Mean over regions of the per-region average precision. `NA` when no valid fits. |
+| `ap_n_fits` | integer | Regions contributing to `ap`. A failed fit and a region with no causal variants both contribute none. |
+| `fdr_power_curve` | data.frame or NULL | One row per threshold. Region means in `fdr`, `precision`, `power`, `recall`; `n_regions` and `n_regions_with_causal`; call-weighted `fdr_pooled`, `precision_pooled`, `power_pooled`, `recall_pooled`; and the `tp`/`fp`/`fn` totals. **NULL when no valid fits** - a method that produced nothing gets no curve, not a zero FDR. |
+| `pip_calibration` | data.frame or NULL | `n_pip_cal_bins` rows. `bin`, `bin_lower`, `bin_upper`, `bin_mid`; region means in `mean_pip` and `frac_causal`; `n_regions` per bin; call-weighted `mean_pip_pooled` and `frac_causal_pooled`; and the `n`/`n_causal` totals. NULL when no valid fits. |
+| `cs_coverage` | numeric | Mean over regions of the share of that region's credible sets holding a causal variant. `NA` when no region reported a set. |
+| `cs_coverage_n` | integer | Regions that reported at least one credible set. |
+| `cs_power` | numeric | Mean over regions of the share of that region's causal variants captured by any set. |
+| `cs_power_n` | integer | Regions with at least one causal variant. |
+| `cs_size_median`, `cs_size_mean` | numeric | Means over regions of that region's own median and mean set size. |
+| `cs_coverage_pooled`, `cs_power_pooled`, `cs_size_median_pooled`, `cs_size_mean_pooled` | numeric | The same quantities pooled over sets, and over causal variants for power. |
+| `n_cs_reported` | integer | Total credible sets reported across all fits. |
 | `runtime_mean` | numeric | Mean runtime in seconds over valid fits. |
-| `runtime_mean_se` | numeric | SE of runtime_mean across replicates. |
-| `runtime_sd` | numeric | SD of runtime over valid fits. NA if n_valid < 2. |
-| `n_fits` | integer | Total fits attempted (including failed). |
+| `runtime_sd` | numeric | SD of runtime over valid fits. `NA` if fewer than 2 valid fits. |
+| `n_fits` | integer | Fits attempted, including failed. |
 | `n_failed` | integer | Fits where `f$error` is non-NULL. |
 
 ---
@@ -511,205 +447,114 @@ Load with:
 ```r
 ev <- readRDS("results/my_run/evaluation.rds")
 ev$susie$global$ap
-ev$susie$by_S[["1"]]$fdr_power_curve
+ev$susie$global$fdr_power_curve
 ```
 
 ### `evaluation_summary.csv`
 
-A flat CSV with one row per method and the following columns. All `_se` columns
-are NA when `n_iter < 2`.
+A flat CSV with one row per method:
 
 | Column | Description |
 |---|---|
 | `method` | Method name |
-| `ap` | Global AP |
-| `ap_se` | SE of AP |
-| `cs_coverage` | Global CS coverage |
-| `cs_coverage_se` | SE of CS coverage |
-| `cs_power` | Global CS power |
-| `cs_power_se` | SE of CS power |
-| `cs_size_median` | Global median CS size |
-| `cs_size_median_se` | SE of median CS size |
-| `cs_size_mean` | Global mean CS size |
-| `cs_size_mean_se` | SE of mean CS size |
-| `n_cs_reported` | Total CSs reported globally |
-| `runtime_mean` | Mean runtime (s) |
-| `runtime_mean_se` | SE of mean runtime |
-| `runtime_sd` | SD of runtime |
-| `n_fits` | Total fits attempted |
-| `n_failed` | Fits that errored |
+| `ap` | Mean over regions of the per-region average precision |
+| `ap_n_fits` | Regions contributing to `ap` |
+| `cs_coverage` | Region-weighted credible-set coverage |
+| `cs_coverage_n` | Regions that reported at least one set |
+| `cs_power` | Region-weighted credible-set power |
+| `cs_power_n` | Regions with at least one causal variant |
+| `cs_size_median`, `cs_size_mean` | Region-weighted set sizes |
+| `n_cs_reported` | Total credible sets reported |
+| `runtime_mean`, `runtime_sd` | Runtime in seconds over valid fits |
+| `n_fits`, `n_failed` | Fits attempted, and fits that errored |
 
----
-
-## Plots
-
-`plot_results()` writes a multi-page PDF. The number of pages depends on the
-number of methods with successful fits and the number of unique parameter values.
-For the `sparse` model with M successful methods, K_S unique S values, and
-K_phi unique phi values, the PDF has 3 + 3×K_S + 3×K_phi pages. For
-`sparse_inf` with K_pc unique p_causal values, 3 additional pages are added.
-
-Call:
-
-```r
-source("R/plot_results.R")
-plot_results(eval_out, output_file = "results/my_run/results.pdf")
-```
-
-Arguments:
-
-| Argument | Default | Meaning |
-|---|---|---|
-| `eval_out` | — | Output of `evaluate_methods()` |
-| `output_file` | `"results/evaluation.pdf"` | Path of PDF to write |
-| `methods` | `NULL` (all) | Character vector to restrict which methods are plotted |
-| `verbose` | `TRUE` | Print progress messages |
-
-Methods where all fits failed (i.e. `fdr_power_curve` is NULL) are excluded
-from PR curve and calibration plots but are included in the summary table and
-in the metrics line plots (where they appear as NA points).
-
----
-
-### Global PR curve
-
-**Page 1.** One panel. x-axis: recall (= power), y-axis: precision (= 1 − FDR).
-Each method is a separate coloured line. The curve is derived from the global
-`fdr_power_curve` data frame: each threshold gives one (recall, precision) point.
-
-The curve starts at (recall=1, precision=total_causal/N) at threshold=0 (all
-variants called) and moves towards (recall=0, precision=1) at threshold=1 (no
-variants called). A method with strong discriminative power has a curve that
-stays close to the top-right corner of the plot.
-
-No error bands are shown on this plot. SE on precision and power is available
-in the evaluation object (`precision_se`, `power_se` columns) but is omitted
-from this figure for clarity.
-
----
-
-### Global PIP calibration
-
-**Page 2.** Faceted by method (up to 3 columns). x-axis: `mean_pip` (expected
-causal probability), y-axis: `frac_causal` (observed fraction of causal
-variants). Each point is one of the `n_pip_cal_bins` (default 10) PIP bins.
-Error bars show ±1 SE (`frac_causal_se`) on the y-axis. The dashed diagonal
-line is the identity `y = x`; a perfectly calibrated method has all points on
-this line.
-
-Bins with no variants (`n = 0`) are omitted (they carry `NA` for `mean_pip`
-and `frac_causal`).
-
----
-
-### Global summary table
-
-**Page 3.** A formatted table with one row per method (including failed methods).
-Columns: Method, AP, CS Coverage, CS Power, Median CS Size, Runtime (s),
-n_fits, n_failed. Where n_iter ≥ 2, values are formatted as `mean ± SE`.
-Where n_iter < 2 or the method failed entirely, values are shown as `NA`.
-
----
-
-### Stratified PR curve grid
-
-**Pages 4, 7, (10).** One page per stratification variable (by S, by phi, by
-p_causal). A `facet_grid(method ~ stratum_value)` layout: rows are methods
-(only those with at least one successful fit), columns are the unique values of
-the stratification variable.
-
-Each panel shows the PR curve for that (method, parameter-value) combination,
-pooled across all other parameters and all replicates. The curve is computed
-from the corresponding stratum's `fdr_power_curve` object.
-
-The layout for by_S with 4 methods and 3 S values produces a 4×3 grid of PR
-curves (12 panels). Methods with no successful fits in a given stratum show an
-empty panel.
-
----
-
-### Stratified PIP calibration grid
-
-**Pages 5, 8, (11).** Same `facet_grid(method ~ stratum_value)` layout as the
-PR curve grids, but showing calibration plots. Each panel: x = `mean_pip`,
-y = `frac_causal` with ±1 SE error bars, dashed identity line.
-
----
-
-### Metrics vs stratification variable
-
-**Pages 6, 9, (12).** One page per stratification variable. A `facet_wrap` of
-5 panels (one per metric: AP, CS Coverage, CS Power, Median CS Size,
-Runtime). In each panel:
-
-- x-axis: the stratification variable value (e.g. S = 1, 2, 3)
-- y-axis: the metric value (scale is free across panels)
-- one coloured line + points per method
-- error bars: ±1 SE across replicates
-
-All methods (including those that failed entirely) are included, but methods
-with all-NA values produce invisible lines. The y-axis scale is free across
-panels (each metric uses its own range).
-
-This plot is the primary tool for assessing how each method's performance
-changes as the simulation difficulty changes (more causal variants, lower PVE,
-or smaller sparse proportion).
+The curve and calibration tables are not in the CSV - they are data frames, and
+live in `evaluation.rds` and in `per_region`.
 
 ---
 
 ## Quick reference — field names
 
-### Within a stratum object
+### Inside `global`
 
 ```
-$fdr_power_curve         data.frame(threshold, tp, fp, fn, fdr, power,
-                                    precision, recall, power_se, precision_se)
-$ap                   numeric scalar
-$ap_se                numeric scalar (NA if n_iter < 2)
+$ap                      numeric scalar (mean over regions)
+$ap_n_fits               integer scalar
+$fdr_power_curve         data.frame(threshold, fdr, power, precision, recall,
+                                    n_regions, n_regions_with_causal,
+                                    fdr_pooled, precision_pooled,
+                                    power_pooled, recall_pooled, tp, fp, fn)
 $pip_calibration         data.frame(bin, bin_lower, bin_upper, bin_mid,
-                                    n, n_causal, mean_pip, frac_causal,
-                                    frac_causal_se)
-$cs_coverage             numeric scalar
-$cs_coverage_se          numeric scalar
-$cs_power                numeric scalar
-$cs_power_se             numeric scalar
+                                    mean_pip, frac_causal, n_regions,
+                                    mean_pip_pooled, frac_causal_pooled,
+                                    n, n_causal)
+$cs_coverage             numeric scalar      $cs_coverage_n   integer scalar
+$cs_power                numeric scalar      $cs_power_n      integer scalar
 $cs_size_median          numeric scalar
-$cs_size_median_se       numeric scalar
 $cs_size_mean            numeric scalar
-$cs_size_mean_se         numeric scalar
+$cs_coverage_pooled      numeric scalar
+$cs_power_pooled         numeric scalar
+$cs_size_median_pooled   numeric scalar
+$cs_size_mean_pooled     numeric scalar
 $n_cs_reported           integer scalar
 $runtime_mean            numeric scalar
-$runtime_mean_se         numeric scalar
 $runtime_sd              numeric scalar
 $n_fits                  integer scalar
 $n_failed                integer scalar
 ```
 
-### Accessing stratified results
+### Inside `per_region`
+
+One row per (method, region, iteration). Three column families, each with its
+own aggregation rule:
+
+```
+identity   method, scenario_id, region_id, iter
+factors    S, phi, p_causal, region_size, min_causal_maf, causal_maf_bin,
+           true_annotation_type
+status     failed, bad_pip
+
+COUNTS -> sum, then form the rate (call-weighted)
+           nsel_at_*, tp_at_*, sum_pip_sel_at_*,
+           n_band_*, c_band_*, sum_pip_band_*,
+           n_cs, n_cs_with_causal, n_causal_captured, cs_size_sum,
+           n_variants, n_causal, sum_pip_total
+
+RATES  -> average over the regions where DEFINED (region-weighted), and
+          report how many; NA where undefined, never 0
+           fdr_at_*, precision_at_*, power_at_*,
+           frac_causal_band_*, mean_pip_band_*,
+           cs_coverage, cs_power
+
+SCALARS -> average
+           ap, max_pip, cs_size_mean, cs_size_median, runtime_seconds
+```
+
+### Working with it
 
 ```r
 ev <- readRDS("results/my_run/evaluation.rds")
+pr <- ev$per_region
 
-# Global metrics for SuSiE
+# A method's headline AP, and the same thing from the table.
 ev$susie$global$ap
-ev$susie$global$ap_se
+mean(pr$ap[pr$method == "susie"], na.rm = TRUE)
 
-# By S
-ev$susie$by_S[["1"]]$ap          # AP at S = 1
-ev$susie$by_S[["2"]]$cs_coverage    # CS coverage at S = 2
+# Any axis, or combination of axes.
+aggregate(ap ~ method + S, data = pr, FUN = mean)
+aggregate(ap ~ method + region_size + phi, data = pr, FUN = mean)
+aggregate(ap ~ method + causal_maf_bin, data = pr, FUN = mean)
 
-# By phi
-ev$abf$by_phi[["0.2"]]$cs_power
+# A rate: average over the regions where it is defined, and count them.
+v <- pr$fdr_at_095[pr$method == "susie"]
+c(fdr = mean(v, na.rm = TRUE), n_regions = sum(!is.na(v)))
 
-# By p_causal (sparse_inf model only)
-ev$susie_inf$by_p_causal[["0.4"]]$ap
+# A standard error: collapse to one value per iteration FIRST.
+per_iter <- aggregate(ap ~ method + iter, data = pr, FUN = mean)
+aggregate(ap ~ method, data = per_iter,
+          FUN = function(v) sd(v) / sqrt(length(v)))
 
-# PR curve at S = 1
-df <- ev$susie$by_S[["1"]]$fdr_power_curve
+# The PR curve for one method.
+df <- ev$susie$global$fdr_power_curve
 plot(df$recall, df$precision, type = "l")
-
-# Calibration globally
-cal <- ev$abf$global$pip_calibration
-plot(cal$mean_pip, cal$frac_causal)
-abline(0, 1, lty = 2)
 ```

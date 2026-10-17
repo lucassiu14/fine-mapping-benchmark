@@ -97,11 +97,13 @@
 #'   which a region making many calls dominates, sits beside each under a
 #'   \code{_pooled} suffix.
 #'
-#'   To aggregate on your own axes, work from \code{$per_region} with
-#'   \code{\link{aggregate_region_metrics}}.
+#'   To summarise on your own axes, group \code{$per_region} by whichever of
+#'   its factor columns you want. Sum the count columns and average the rate
+#'   and scalar columns - see \code{\link{per_region_metrics}} for which is
+#'   which, and why a standard error has to be taken across iterations rather
+#'   than across regions.
 #'
-#' @seealso \code{\link{per_region_metrics}},
-#'   \code{\link{aggregate_region_metrics}}
+#' @seealso \code{\link{per_region_metrics}}
 #' @export
 evaluate_methods <- function(simulation,
                              results,
@@ -130,14 +132,13 @@ evaluate_methods <- function(simulation,
     fits_raw <- results[[method]]$results
     fits     <- .annotate_fits_with_truth(fits_raw, simulation)
 
+    # `global` is the metrics over every one of this method's fits. Any other
+    # grouping - by S, by phi, by region size, by causal MAF, by annotation
+    # type, or any combination - comes from $per_region, which carries those
+    # factors as columns. A fixed set of strata computed here would only be one
+    # analysis's choice of axes baked into the package.
     output[[method]] <- list(
-      global      = .metrics_with_se(fits, pip_thresholds, n_pip_cal_bins),
-      by_S                    = .stratify_metrics(fits, "S",           pip_thresholds, n_pip_cal_bins),
-      by_phi                  = .stratify_metrics(fits, "phi",         pip_thresholds, n_pip_cal_bins),
-      by_p_causal             = .stratify_metrics(fits, "p_causal",    pip_thresholds, n_pip_cal_bins),
-      by_region_size          = .stratify_metrics(fits, "region_size", pip_thresholds, n_pip_cal_bins),
-      by_causal_maf           = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins),
-      by_true_annotation_type = .stratify_metrics_by_annotation_type(fits, pip_thresholds, n_pip_cal_bins)
+      global = .metrics_for_fits(fits, pip_thresholds, n_pip_cal_bins)
     )
   }
 
@@ -173,18 +174,15 @@ evaluate_methods <- function(simulation,
       data.frame(
         method              = m,
         ap                  = g$ap,
-        ap_se               = g$ap_se,
+        ap_n_fits           = g$ap_n_fits,
         cs_coverage         = g$cs_coverage,
-        cs_coverage_se      = g$cs_coverage_se,
+        cs_coverage_n       = g$cs_coverage_n,
         cs_power            = g$cs_power,
-        cs_power_se         = g$cs_power_se,
+        cs_power_n          = g$cs_power_n,
         cs_size_median      = g$cs_size_median,
-        cs_size_median_se   = g$cs_size_median_se,
         cs_size_mean        = g$cs_size_mean,
-        cs_size_mean_se     = g$cs_size_mean_se,
         n_cs_reported       = g$n_cs_reported,
         runtime_mean        = g$runtime_mean,
-        runtime_mean_se     = g$runtime_mean_se,
         runtime_sd          = g$runtime_sd,
         n_fits              = g$n_fits,
         n_failed            = g$n_failed,
@@ -270,110 +268,6 @@ evaluate_methods <- function(simulation,
   if (maf <= 0.01)  return("rare")
   if (maf <= 0.05)  return("low")
   "common"
-}
-
-
-# =============================================================================
-# Internal: stratify fits by a scenario-level variable and compute metrics
-# =============================================================================
-
-.stratify_metrics <- function(fits, by_var, pip_thresholds, n_pip_cal_bins) {
-  values <- sort(unique(sapply(fits, function(f) {
-    v <- f[[by_var]]
-    if (is.null(v)) NA_real_ else v
-  })))
-  values <- values[!is.na(values)]
-
-  if (length(values) == 0) return(NULL)
-
-  result <- lapply(values, function(v) {
-    subset <- Filter(function(f) {
-      fv <- f[[by_var]]
-      !is.null(fv) && !is.na(fv) && fv == v
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- as.character(values)
-  result
-}
-
-
-# =============================================================================
-# Internal: stratify fits by causal-variant MAF bin
-#
-# Groups fits by `causal_maf_bin` (attached in .annotate_fits_with_truth) and
-# computes metrics per bin. Bins are kept in the canonical order
-# "rare" -> "low" -> "common" rather than alphabetical, so downstream plots
-# read left-to-right by increasing MAF.
-#
-# Returns NULL when no fit has a valid bin assignment (e.g. simulation with
-# no causal variants assigned to any region, or genotypes without an attached
-# `maf` field).
-# =============================================================================
-
-.stratify_metrics_by_maf <- function(fits, pip_thresholds, n_pip_cal_bins) {
-  bin_order <- c("rare", "low", "common")
-
-  present <- unique(vapply(fits, function(f) {
-    b <- f$causal_maf_bin
-    if (is.null(b) || length(b) == 0L) NA_character_ else as.character(b[[1L]])
-  }, character(1L)))
-  present <- present[!is.na(present)]
-  present <- bin_order[bin_order %in% present]
-
-  if (length(present) == 0L) return(NULL)
-
-  result <- lapply(present, function(b) {
-    subset <- Filter(function(f) {
-      bv <- f$causal_maf_bin
-      !is.null(bv) && !is.na(bv) && bv == b
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- present
-  result
-}
-
-
-# =============================================================================
-# Internal: stratify fits by the true annotation type used in simulation
-#
-# Groups fits by `true_annotation_type` (attached in
-# .annotate_fits_with_truth from simulation$params$annotation_type) and
-# computes metrics per type. Kept in canonical order
-# "none" -> "binary" -> "continuous" -> "user_supplied" so plots read from
-# the misspecified annotation-null case through to richer annotation
-# regimes.
-#
-# Within a single evaluate_methods() call this typically produces a
-# single bin, because annotation_type is scenario-level. The axis
-# becomes meaningful when evaluation objects from differently-annotated
-# simulations are merged.
-# =============================================================================
-
-.stratify_metrics_by_annotation_type <- function(fits, pip_thresholds,
-                                                  n_pip_cal_bins) {
-  type_order <- c("none", "binary", "continuous", "user_supplied")
-
-  present <- unique(vapply(fits, function(f) {
-    v <- f$true_annotation_type
-    if (is.null(v) || length(v) == 0L) NA_character_ else as.character(v[[1L]])
-  }, character(1L)))
-  present <- present[!is.na(present)]
-  present <- c(type_order[type_order %in% present],
-               setdiff(present, type_order))  # tolerate unknown labels
-
-  if (length(present) == 0L) return(NULL)
-
-  result <- lapply(present, function(t) {
-    subset <- Filter(function(f) {
-      tv <- f$true_annotation_type
-      !is.null(tv) && !is.na(tv) && tv == t
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- present
-  result
 }
 
 
@@ -513,92 +407,6 @@ evaluate_methods <- function(simulation,
     n_fits          = n_fits,
     n_failed        = n_failed
   )
-}
-
-
-# =============================================================================
-# Internal: per-replicate SE wrapper around .metrics_for_fits
-#
-# Groups fits by iter value, computes .metrics_for_fits for each iter, then
-# adds SE fields:
-#   <metric>_se            — SE of each scalar metric across iters
-#   fdr_power_curve$power_se, $precision_se — pointwise SE across iters
-#   pip_calibration$frac_causal_se          — per-bin SE across iters
-#
-# When n_iter < 2 all SE fields are NA.
-# =============================================================================
-
-.metrics_with_se <- function(fits, pip_thresholds, n_pip_cal_bins) {
-
-  main <- .metrics_for_fits(fits, pip_thresholds, n_pip_cal_bins)
-
-  .se <- function(x) {
-    n <- sum(!is.na(x))
-    if (n > 1L) stats::sd(x, na.rm = TRUE) / sqrt(n) else NA_real_
-  }
-
-  scalar_fields <- c("ap", "cs_coverage", "cs_power",
-                     "cs_size_median", "cs_size_mean", "runtime_mean")
-
-  # Identify unique iter values present in these fits
-  iter_vals <- sort(unique(vapply(fits, function(f) {
-    v <- f$iter
-    if (is.null(v) || length(v) == 0L) NA_integer_ else as.integer(v[[1L]])
-  }, integer(1L))))
-  iter_vals <- iter_vals[!is.na(iter_vals)]
-
-  if (length(iter_vals) < 2L) {
-    # Cannot compute SE — attach NA placeholders
-    for (fld in scalar_fields)
-      main[[paste0(fld, "_se")]] <- NA_real_
-    if (!is.null(main$fdr_power_curve)) {
-      main$fdr_power_curve$power_se     <- NA_real_
-      main$fdr_power_curve$precision_se <- NA_real_
-    }
-    if (!is.null(main$pip_calibration))
-      main$pip_calibration$frac_causal_se <- NA_real_
-    return(main)
-  }
-
-  # Per-iter metrics (pooling across regions / S / phi within each iter)
-  per_iter <- lapply(iter_vals, function(it) {
-    sub <- Filter(function(f) {
-      !is.null(f$iter) && !is.na(f$iter) && f$iter == it
-    }, fits)
-    .metrics_for_fits(sub, pip_thresholds, n_pip_cal_bins)
-  })
-
-  # Scalar SEs
-  for (fld in scalar_fields) {
-    vals <- vapply(per_iter, function(m) {
-      v <- m[[fld]]; if (is.null(v) || length(v) == 0L) NA_real_ else as.numeric(v[[1L]])
-    }, numeric(1L))
-    main[[paste0(fld, "_se")]] <- .se(vals)
-  }
-
-  # Pointwise SE on fdr_power_curve
-  if (!is.null(main$fdr_power_curve)) {
-    n_t <- nrow(main$fdr_power_curve)
-    pow_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$fdr_power_curve)) rep(NA_real_, n_t) else m$fdr_power_curve$power
-    }, numeric(n_t))
-    prec_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$fdr_power_curve)) rep(NA_real_, n_t) else m$fdr_power_curve$precision
-    }, numeric(n_t))
-    main$fdr_power_curve$power_se     <- apply(pow_mat,  1L, .se)
-    main$fdr_power_curve$precision_se <- apply(prec_mat, 1L, .se)
-  }
-
-  # Per-bin SE on pip_calibration
-  if (!is.null(main$pip_calibration)) {
-    n_b <- nrow(main$pip_calibration)
-    frac_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$pip_calibration)) rep(NA_real_, n_b) else m$pip_calibration$frac_causal
-    }, numeric(n_b))
-    main$pip_calibration$frac_causal_se <- apply(frac_mat, 1L, .se)
-  }
-
-  main
 }
 
 

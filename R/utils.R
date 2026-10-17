@@ -44,12 +44,3 @@ fmb_extdata <- function(filename) {
     call. = FALSE
   )
 }
-
-
-# Column names referenced via non-standard evaluation inside ggplot2 aes()
-# mappings in plot_results.R. Declared here so R CMD check does not flag them
-# as undefined global variables.
-utils::globalVariables(c(
-  "frac_causal", "frac_causal_se", "mean_pip", "method", "precision",
-  "recall", "se", "stratum_val", "value"
-))

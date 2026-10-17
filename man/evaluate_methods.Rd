@@ -57,13 +57,15 @@ PIP threshold most regions select nothing. The call-weighted value, in
 which a region making many calls dominates, sits beside each under a
 \code{_pooled} suffix.
 
-To aggregate on your own axes, work from \code{$per_region} with
-\code{\link{aggregate_region_metrics}}.
+To summarise on your own axes, group \code{$per_region} by whichever of
+its factor columns you want. Sum the count columns and average the rate
+and scalar columns - see \code{\link{per_region_metrics}} for which is
+which, and why a standard error has to be taken across iterations rather
+than across regions.
 }
 \description{
 Evaluate fine-mapping methods against ground truth
 }
 \seealso{
-\code{\link{per_region_metrics}},
-\code{\link{aggregate_region_metrics}}
+\code{\link{per_region_metrics}}
 }

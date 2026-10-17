@@ -35,13 +35,25 @@ the table to aggregate from: nothing in it is pooled across regions, so you
 choose the axes.
 }
 \details{
-Average precision is already a finished per-region number, so average it.
-FDR, power, coverage and calibration are not: they are rates, and a rate on
-the 0-2 selections a single region carries is unestimable. Their ingredients
-are stored here as counts (\verb{nsel_at_*}, \verb{tp_at_*}, \verb{n_band_*}, \verb{c_band_*},
-\code{n_cs}, \code{n_cs_with_causal}, \code{n_causal_captured}), to be summed over the
-regions you are aggregating before the rate is formed.
-\code{\link[=aggregate_region_metrics]{aggregate_region_metrics()}} does this for you.
+The columns come in three families, and the family decides how to
+aggregate. \strong{Counts} (\verb{nsel_at_*}, \verb{tp_at_*}, \verb{sum_pip_sel_at_*},
+\verb{n_band_*}, \verb{c_band_*}, \verb{sum_pip_band_*}, \code{n_cs}, \code{n_cs_with_causal},
+\code{n_causal_captured}, \code{cs_size_sum}, \code{n_variants}, \code{n_causal},
+\code{sum_pip_total}) are SUMMED, and a rate formed from them afterwards is
+call-weighted. \strong{Rates} (\verb{fdr_at_*}, \verb{precision_at_*}, \verb{power_at_*},
+\verb{frac_causal_band_*}, \verb{mean_pip_band_*}, \code{cs_coverage}, \code{cs_power}) are
+AVERAGED over the regions where they are defined, giving the
+region-weighted rate; they are \code{NA} where undefined, never 0, so count the
+contributing regions alongside the mean. \strong{Scalars} (\code{ap}, \code{max_pip},
+\code{cs_size_mean}, \code{cs_size_median}, \code{runtime_seconds}) are AVERAGED.
+
+For a standard error the unit is the ITERATION, not the region: a region's
+genotypes, LD matrix and annotation matrix are drawn once and reused by
+every iteration, so collapse to one value per \code{iter} before taking
+\code{sd()/sqrt(n)}. Measured on 112,500 fits across 5,625 cells of a completed
+benchmark, an SE taken across region-rows instead had median 0.96 and IQR
+0.83-1.08 of the iteration-based one - understating in 42\% of cells and
+overstating in the rest, so it errs in no predictable direction.
 
 A failed fit contributes an all-\code{NA} metric row rather than being dropped.
 Its absence has to stay visible: a method that cannot run on part of the
@@ -49,6 +61,6 @@ grid is not missing at random, and silently dropping it changes the method
 set per cell.
 }
 \seealso{
-\code{\link[=aggregate_region_metrics]{aggregate_region_metrics()}} to aggregate it correctly,
-\code{\link[=evaluate_methods]{evaluate_methods()}} for the pre-aggregated summary.
+\code{\link[=evaluate_methods]{evaluate_methods()}}, whose \code{global} entry is these metrics over
+every fit of a method.
 }

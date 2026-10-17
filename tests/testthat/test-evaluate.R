@@ -11,15 +11,16 @@
 #   [A] Sparse model, pure-R methods (susie, susie_inf, abf, carma)
 #   [B] Sparse model with binary annotations
 #   [C] Sparse model with continuous annotations
-#   [D] Multiple S and phi values - stratified metric validation
-#   [E] sparse_inf model - p_causal stratification
+#   [D] Multiple S and phi values
+#   [E] sparse_inf model
 #   [F] Alternative simulation args (equal effects, non-default n/p)
 #   [G] External methods (finemap, paintor, funmap, beatrice) - graceful failure
 #   [H] evaluate output structure and metric range validation
 #   [I] Edge cases (single causal variant, high phi, all fits failed)
-#   [J] Standard error fields - presence, validity, and n_iter behaviour
-#   [K] plot_results - PDF output, all sections, method filtering
 #   [L] save argument - evaluate_methods writes correct files
+#   [M] Per-region metrics: nothing pooled across regions
+#   [N] FDR and calibration are region-weighted, not call-weighted
+#   [O] The unit is one region of one iteration
 #
 # Each section sets up its fixtures (sim_X, res_X, eval_X) at file level
 # so multiple test_that blocks can share them. This mirrors the original
@@ -105,57 +106,6 @@ test_that("[A] res_A: run_methods output for pure-R methods", {
 })
 
 
-test_that("[A] eval_A: evaluate_methods output structure", {
-  expect_setequal(eval_A$methods_evaluated,
-                  c("susie", "susie_inf", "abf", "carma"))
-  for (m in eval_A$methods_evaluated) {
-    expect_true(
-      has_names(eval_A[[m]],
-                c("global", "by_S", "by_phi", "by_p_causal")),
-      info = sprintf("method = %s", m)
-    )
-  }
-
-  expect_true(has_names(
-    eval_A$susie$global,
-    c("fdr_power_curve", "ap", "pip_calibration", "cs_coverage",
-      "cs_power", "cs_size_median", "cs_size_mean", "n_cs_reported",
-      "runtime_mean", "runtime_sd", "n_fits", "n_failed")
-  ))
-
-  expect_equal(eval_A$susie$global$n_fits, 16L)
-  expect_true(in_range_or_na(eval_A$susie$global$ap))
-  expect_true(in_range_or_na(eval_A$susie$global$cs_coverage))
-  expect_true(in_range_or_na(eval_A$susie$global$cs_power))
-
-  expect_setequal(names(eval_A$susie$by_S),   c("1", "2"))
-  expect_setequal(names(eval_A$susie$by_phi), c("0.2", "0.4"))
-  expect_null(eval_A$susie$by_p_causal)
-
-  # PR curve table
-  fpc <- eval_A$susie$global$fdr_power_curve
-  expect_s3_class(fpc, "data.frame")
-  expect_true(has_names(fpc,
-    c("threshold", "tp", "fp", "fn", "fdr", "power", "precision", "recall")))
-  expect_true(all(fpc$fdr   >= 0 & fpc$fdr   <= 1))
-  expect_true(all(fpc$power >= 0 & fpc$power <= 1))
-
-  # PIP calibration table
-  pc <- eval_A$susie$global$pip_calibration
-  expect_s3_class(pc, "data.frame")
-  expect_equal(nrow(pc), 10L)
-  expect_true(has_names(pc,
-    c("bin", "bin_lower", "bin_upper", "bin_mid", "n", "n_causal",
-      "mean_pip", "frac_causal")))
-
-  # Runtime sanity
-  expect_true(all(sapply(eval_A$methods_evaluated, function(m) {
-    rt <- eval_A[[m]]$global$runtime_mean
-    is.na(rt) || rt >= 0
-  })))
-})
-
-
 # =============================================================================
 # [B] Sparse model with binary annotations
 # =============================================================================
@@ -191,12 +141,6 @@ test_that("[B] sim_B: binary annotations attached to genotypes and scenarios", {
 })
 
 
-test_that("[B] eval_B: evaluation works on annotated simulation", {
-  expect_false(is.null(eval_B$susie$global$ap))
-  expect_setequal(names(eval_B$susie$by_S), c("1", "2"))
-})
-
-
 # =============================================================================
 # [C] Sparse model with continuous annotations
 # =============================================================================
@@ -227,7 +171,7 @@ test_that("[C] continuous annotations: simulation + evaluation", {
 
 
 # =============================================================================
-# [D] Multiple S and phi - stratified metric validation
+# [D] Multiple S and phi
 # =============================================================================
 
 sim_D <- run_simulation(
@@ -258,26 +202,8 @@ test_that("[D] sim_D: full S * phi * iter grid", {
 })
 
 
-test_that("[D] eval_D: stratified by_S and by_phi populated", {
-  expect_setequal(names(eval_D$susie$by_S),   c("1", "2", "3"))
-  expect_setequal(names(eval_D$susie$by_phi), c("0.1", "0.3", "0.5"))
-
-  # Each S stratum: 3 phi * 2 iter * 2 regions = 12 fits
-  expect_true(all(sapply(eval_D$susie$by_S, function(s) s$n_fits == 12L)))
-  # Each phi stratum: 3 S * 2 iter * 2 regions = 12 fits
-  expect_true(all(sapply(eval_D$susie$by_phi, function(s) s$n_fits == 12L)))
-
-  # Global: 3 S * 3 phi * 2 iter * 2 regions = 36
-  expect_equal(eval_D$susie$global$n_fits, 36L)
-
-  # ABF AP in [0,1] across phi strata.
-  expect_true(all(sapply(eval_D$abf$by_phi,
-                         function(s) in_range_or_na(s$ap))))
-})
-
-
 # =============================================================================
-# [E] sparse_inf model - p_causal stratification
+# [E] sparse_inf model
 # =============================================================================
 
 sim_E <- run_simulation(
@@ -312,22 +238,6 @@ test_that("[E] sim_E: sparse_inf grid with p_causal axis", {
   expect_length(sim_E$scenarios, 16L)
   expect_true(all(sapply(sim_E$scenarios,
                          function(sc) !is.null(sc$p_causal))))
-})
-
-
-test_that("[E] eval_E: by_p_causal stratification populated for sparse_inf", {
-  expect_false(is.null(eval_E$susie$by_p_causal))
-  expect_setequal(names(eval_E$susie$by_p_causal), c("0.2", "0.6"))
-
-  # Each p_causal stratum: 2 S * 2 phi * 2 iter * 2 regions = 16 fits
-  expect_true(all(sapply(eval_E$susie$by_p_causal,
-                         function(s) s$n_fits == 16L)))
-
-  expect_true(all(sapply(eval_E$susie_inf$by_p_causal,
-                         function(s) in_range_or_na(s$ap))))
-
-  # Global: 2 * 2 * 2 * 2 * 2 = 32 fits
-  expect_equal(eval_E$susie_inf$global$n_fits, 32L)
 })
 
 
@@ -755,226 +665,8 @@ test_that("[I3] all-fits-failed method: NA AP, n_failed correct, others unaffect
 })
 
 
-# =============================================================================
-# [J] Standard error fields - presence, validity, n_iter behaviour
-# =============================================================================
-
 SE_SCALAR_FIELDS <- c("ap_se", "cs_coverage_se", "cs_power_se",
                       "cs_size_median_se", "cs_size_mean_se", "runtime_mean_se")
-
-
-test_that("[J1] All scalar SE fields present in global and every stratum (n_iter=2)", {
-  expect_true(has_names(eval_A$susie$global, SE_SCALAR_FIELDS))
-  expect_true(all(sapply(eval_A$susie$by_S,
-                         function(s) has_names(s, SE_SCALAR_FIELDS))))
-  expect_true(all(sapply(eval_A$susie$by_phi,
-                         function(s) has_names(s, SE_SCALAR_FIELDS))))
-  expect_true(all(sapply(eval_E$susie$by_p_causal,
-                         function(s) has_names(s, SE_SCALAR_FIELDS))))
-})
-
-
-test_that("[J2] all scalar SE values are non-negative or NA across methods and strata", {
-  for (m in eval_A$methods_evaluated) {
-    for (f in SE_SCALAR_FIELDS) {
-      v <- eval_A[[m]]$global[[f]]
-      expect_true(is.null(v) || is.na(v) || v >= 0,
-                  info = sprintf("method=%s field=%s value=%s", m, f, format(v)))
-    }
-  }
-})
-
-
-test_that("[J3] SE values are numeric (not NA) when n_iter=2 and fits succeed", {
-  expect_true(is.numeric(eval_A$susie$global$ap_se) &&
-              !is.na(eval_A$susie$global$ap_se))
-  expect_true(is.numeric(eval_A$abf$global$cs_coverage_se) &&
-              !is.na(eval_A$abf$global$cs_coverage_se))
-})
-
-
-test_that("[J4] SE fields are NA when n_iter=1 (no replicates to estimate from)", {
-  # eval_I2 was built with n_iter=1 in section [I2]
-  for (f in SE_SCALAR_FIELDS) {
-    v <- eval_I2$susie$global[[f]]
-    expect_true(is.null(v) || is.na(v),
-                info = sprintf("field=%s value=%s", f, format(v)))
-  }
-
-  df <- eval_I2$susie$global$fdr_power_curve
-  expect_true(is.null(df) || all(is.na(df$power_se)))
-
-  cal <- eval_I2$susie$global$pip_calibration
-  expect_true(is.null(cal) || all(is.na(cal$frac_causal_se)))
-})
-
-
-test_that("[J5] PR curve has power_se / precision_se columns (n_iter>=2)", {
-  fpc <- eval_A$susie$global$fdr_power_curve
-  expect_true("power_se"     %in% names(fpc))
-  expect_true("precision_se" %in% names(fpc))
-  expect_true(all(is.na(fpc$power_se)     | fpc$power_se     >= 0))
-  expect_true(all(is.na(fpc$precision_se) | fpc$precision_se >= 0))
-  expect_true(any(!is.na(fpc$power_se)))
-})
-
-
-test_that("[J6] PIP calibration has frac_causal_se column", {
-  cal <- eval_A$susie$global$pip_calibration
-  expect_true("frac_causal_se" %in% names(cal))
-  expect_true(all(is.na(cal$frac_causal_se) | cal$frac_causal_se >= 0))
-})
-
-
-test_that("[J7] SE is non-NA for n_iter=2 and n_iter=4 (LLN sanity)", {
-  sim_n2 <- run_simulation(n_regions=2, n=200, p=80, n_iter=2,
-                            S=1, phi=0.3, seed=20, verbose=FALSE)
-  sim_n4 <- run_simulation(n_regions=2, n=200, p=80, n_iter=4,
-                            S=1, phi=0.3, seed=20, verbose=FALSE)
-  res_n2 <- run_methods(sim_n2, methods="abf", verbose=FALSE)
-  res_n4 <- run_methods(sim_n4, methods="abf", verbose=FALSE)
-  ev_n2  <- evaluate_methods(sim_n2, res_n2, verbose=FALSE)
-  ev_n4  <- evaluate_methods(sim_n4, res_n4, verbose=FALSE)
-
-  expect_false(is.na(ev_n2$abf$global$ap_se))
-  expect_false(is.na(ev_n4$abf$global$ap_se))
-
-  s2 <- ev_n2$abf$by_S[["1"]]$ap_se
-  s4 <- ev_n4$abf$by_S[["1"]]$ap_se
-  expect_true(is.na(s2) || s2 >= 0)
-  expect_true(is.na(s4) || s4 >= 0)
-})
-
-
-test_that("[J8] all-failed method has NA SE fields", {
-  # Rebuild a failed-finemap run for this test (mirror section G).
-  sim_J8 <- run_simulation(n_regions=1, n=150, p=50, n_iter=1,
-                            S=1, phi=0.3, seed=8, verbose=FALSE)
-  res_J8 <- run_methods(
-    sim_J8,
-    methods     = "finemap",
-    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
-    verbose     = FALSE
-  )
-  ev <- evaluate_methods(sim_J8, res_J8, verbose=FALSE)
-
-  for (f in SE_SCALAR_FIELDS) {
-    v <- ev$finemap$global[[f]]
-    expect_true(is.null(v) || is.na(v),
-                info = sprintf("field=%s value=%s", f, format(v)))
-  }
-})
-
-
-# =============================================================================
-# [K] plot_results - PDF output, all sections, method filtering
-# =============================================================================
-
-test_that("[K1] plot_results produces a non-empty PDF for sparse model + 2 methods", {
-  pdf_path <- tempfile("test_K1_", fileext = ".pdf")
-  on.exit(unlink(pdf_path), add = TRUE)
-
-  # Don't assert silence: plot_results emits benign, version-dependent
-  # ggplot2 warnings (e.g. single-observation groups). The intent here is
-  # a non-empty PDF, which the file checks below verify.
-  plot_results(eval_A, output_file = pdf_path,
-               methods = c("susie", "abf"), verbose = FALSE)
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.size(pdf_path), 1000L)
-})
-
-
-test_that("[K2] sparse_inf eval renders the by_p_causal section in the PDF", {
-  pdf_K1 <- tempfile("test_K1_size_", fileext = ".pdf")
-  pdf_K2 <- tempfile("test_K2_", fileext = ".pdf")
-  on.exit(unlink(c(pdf_K1, pdf_K2)), add = TRUE)
-
-  # Baseline (sparse, no p_causal section).
-  plot_results(eval_A, output_file = pdf_K1,
-               methods = c("susie", "abf"), verbose = FALSE)
-  # sparse_inf adds the p_causal section, so file should be at least as large.
-  plot_results(eval_E, output_file = pdf_K2, verbose = FALSE)
-
-  expect_true(file.exists(pdf_K2))
-  expect_gt(file.size(pdf_K2), file.size(pdf_K1))
-})
-
-
-test_that("[K3] single-method filter still produces a valid PDF", {
-  pdf_path <- tempfile("test_K3_", fileext = ".pdf")
-  on.exit(unlink(pdf_path), add = TRUE)
-
-  # See [K1]: warnings from plotting are version-dependent and benign;
-  # the file checks verify the real intent (a valid, non-empty PDF).
-  plot_results(eval_A, output_file = pdf_path,
-               methods = "susie", verbose = FALSE)
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.size(pdf_path), 1000L)
-})
-
-
-test_that("[K4] plot_results handles a mix of succeeded and failed methods", {
-  sim_K4 <- run_simulation(n_regions=1, n=150, p=50, n_iter=1,
-                            S=1, phi=0.3, seed=8, verbose=FALSE)
-  # Successful ABF + failed finemap, merged into one results object.
-  res_ok  <- run_methods(sim_K4, methods="abf", verbose=FALSE)
-  res_bad <- run_methods(
-    sim_K4,
-    methods     = "finemap",
-    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
-    verbose     = FALSE
-  )
-  merged <- res_ok
-  merged$finemap     <- res_bad$finemap
-  merged$methods_run <- c("abf", "finemap")
-  ev <- evaluate_methods(sim_K4, merged, verbose = FALSE)
-
-  pdf_path <- tempfile("test_K4_", fileext = ".pdf")
-  on.exit(unlink(pdf_path), add = TRUE)
-  plot_results(ev, output_file = pdf_path, verbose = FALSE)
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.size(pdf_path), 1000L)
-})
-
-
-test_that("[K5] plot_results errors on an unknown method name", {
-  pdf_path <- tempfile("test_K5_", fileext = ".pdf")
-  expect_error(
-    plot_results(eval_A, output_file = pdf_path,
-                 methods = "nonexistent", verbose = FALSE)
-  )
-})
-
-
-test_that("[K6] 3xS x 3xphi grid produces a valid PDF without error", {
-  sim_K6 <- run_simulation(n_regions=1, n=150, p=60, n_iter=2,
-                            S=c(1,2,3), phi=c(0.1,0.3,0.5),
-                            seed=30, verbose=FALSE)
-  res_K6 <- run_methods(sim_K6, methods=c("susie","abf"),
-                        method_args=list(susie=list(L=5)), verbose=FALSE)
-  ev <- evaluate_methods(sim_K6, res_K6, verbose=FALSE)
-
-  pdf_path <- tempfile("test_K6_", fileext = ".pdf")
-  on.exit(unlink(pdf_path), add = TRUE)
-  plot_results(ev, output_file = pdf_path, verbose = FALSE)
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.size(pdf_path), 1000L)
-})
-
-
-test_that("[K7] n_iter=1 (no SE) still plots without error", {
-  sim_K7 <- run_simulation(n_regions=1, n=150, p=60, n_iter=1,
-                            S=c(1,2), phi=0.3, seed=31, verbose=FALSE)
-  res_K7 <- run_methods(sim_K7, methods="susie",
-                        method_args=list(susie=list(L=5)), verbose=FALSE)
-  ev <- evaluate_methods(sim_K7, res_K7, verbose=FALSE)
-
-  pdf_path <- tempfile("test_K7_", fileext = ".pdf")
-  on.exit(unlink(pdf_path), add = TRUE)
-  plot_results(ev, output_file = pdf_path, verbose = FALSE)
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.size(pdf_path), 1000L)
-})
 
 
 # =============================================================================
@@ -991,46 +683,6 @@ test_that("[L1] save=TRUE creates output_dir and writes evaluation.rds + .csv", 
   expect_true(dir.exists(out_dir))
   expect_true(file.exists(file.path(out_dir, "evaluation.rds")))
   expect_true(file.exists(file.path(out_dir, "evaluation_summary.csv")))
-})
-
-
-test_that("[L2] evaluation.rds round-trips with metric and SE fields intact", {
-  out_dir <- tempfile("test_L2_")
-  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
-
-  ev <- evaluate_methods(sim_A, res_A,
-                          save = TRUE, output_dir = out_dir, verbose = FALSE)
-  ev2 <- readRDS(file.path(out_dir, "evaluation.rds"))
-
-  expect_identical(ev$susie$global$ap, ev2$susie$global$ap)
-  expect_true(has_names(ev2$susie$global, SE_SCALAR_FIELDS))
-})
-
-
-test_that("[L3] evaluation_summary.csv has correct rows, SE columns, matching values", {
-  out_dir <- tempfile("test_L3_")
-  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
-
-  ev <- evaluate_methods(sim_A, res_A,
-                          save = TRUE, output_dir = out_dir, verbose = FALSE)
-  csv <- read.csv(file.path(out_dir, "evaluation_summary.csv"),
-                  stringsAsFactors = FALSE)
-
-  expect_setequal(csv$method, ev$methods_evaluated)
-  expect_true(has_names(csv,
-                         c("ap_se", "cs_coverage_se", "cs_power_se",
-                           "cs_size_median_se", "runtime_mean_se")))
-
-  for (m in ev$methods_evaluated) {
-    csv_val <- csv$ap[csv$method == m]
-    ev_val  <- ev[[m]]$global$ap
-    if (is.na(csv_val)) {
-      expect_true(is.na(ev_val), info = sprintf("method=%s", m))
-    } else {
-      expect_equal(csv_val, ev_val, tolerance = 1e-10,
-                   info = sprintf("method=%s", m))
-    }
-  }
 })
 
 
@@ -1112,60 +764,6 @@ test_that("[M] evaluate_methods()$ap is the mean of the per-region APs", {
   }
 })
 
-test_that("[M] aggregate_region_metrics sums counts and averages scalars", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr)
-  expect_equal(nrow(ag), length(res_A$methods_run))
-  for (m in ag$method) {
-    sub <- pr[pr$method == m, ]
-    expect_equal(ag$nsel_at_095[ag$method == m],
-                 sum(sub$nsel_at_095, na.rm = TRUE), info = m)
-    v <- sub$ap[is.finite(sub$ap)]
-    if (length(v))
-      expect_equal(ag$ap[ag$method == m], mean(v), tolerance = 1e-12, info = m)
-    expect_equal(ag$n_fits[ag$method == m], nrow(sub), info = m)
-  }
-})
-
-test_that("[M] the CS rates agree between the two paths, both weightings", {
-  # Both paths are region-weighted now, so the unsuffixed columns must match,
-  # and the _pooled columns must match each other too.
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr)
-  for (m in ag$method) {
-    g <- eval_A[[m]]$global
-    for (fld in c("cs_coverage", "cs_power", "cs_size_mean",
-                  "cs_coverage_pooled", "cs_power_pooled",
-                  "cs_size_mean_pooled")) {
-      ref <- g[[fld]]
-      if (is.null(ref) || is.na(ref)) next
-      expect_equal(ag[[fld]][ag$method == m], ref, tolerance = 1e-12,
-                   info = paste(m, fld))
-    }
-  }
-})
-
-test_that("[M] aggregating by a factor splits the fits without losing any", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  for (axis in c("S", "phi", "region_size")) {
-    ag <- aggregate_region_metrics(pr, by = axis)
-    expect_equal(sum(ag$n_fits), nrow(pr), info = axis)
-    expect_true(all(ag$nsel_at_095 >= 0), info = axis)
-  }
-  # And on a combination evaluate_methods() does not offer.
-  ag2 <- aggregate_region_metrics(pr, by = c("S", "phi"))
-  expect_equal(sum(ag2$n_fits), nrow(pr))
-})
-
-test_that("[M] grouping keeps NA levels instead of dropping those rows", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  # p_causal is NA throughout a sparse simulation; grouping on it must not
-  # delete every row, which is what aggregate()/split() would do.
-  expect_true(all(is.na(pr$p_causal)))
-  ag <- aggregate_region_metrics(pr, by = "p_causal")
-  expect_equal(sum(ag$n_fits), nrow(pr))
-  expect_true(all(is.na(ag$p_causal)))
-})
 
 test_that("[M] compute_ap_exact scores ties as a block and guards non-finites", {
   # A perfect ranking.
@@ -1183,20 +781,6 @@ test_that("[M] compute_ap_exact scores ties as a block and guards non-finites", 
   expect_true(is.na(compute_ap_exact(c(1, Inf, 0.5), c(TRUE, FALSE, FALSE))))
 })
 
-test_that("[M] the pooled-ranking AP estimators are gone", {
-  # auprc (trapezoid on the pooled ranking) and ap_pooled_grid (step integral
-  # on the same) both estimated the area under the PR curve, but on the wrong
-  # population - and auprc with an interpolation that is invalid in PR space.
-  # They disagreed with `ap` about which method was best, so keeping them as
-  # alternatives meant shipping two answers to one question.
-  for (m in res_A$methods_run) {
-    g <- eval_A[[m]]$global
-    expect_null(g$auprc)
-    expect_null(g$ap_pooled_grid)
-    expect_true(is.numeric(g$ap))
-    expect_true(is.numeric(g$ap_se) || is.na(g$ap_se))
-  }
-})
 
 test_that("[M] evaluate_methods(per_region = FALSE) omits the table", {
   ev <- evaluate_methods(sim_A, res_A, per_region = FALSE, verbose = FALSE)
@@ -1241,22 +825,6 @@ test_that("[N] a region that selects nothing is excluded, not scored FDR 0", {
   expect_true(all(!is.na(d$fdr[d$n_regions > 0L])))
 })
 
-test_that("[N] the region-weighted FDR is the mean of the per-region FDRs", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr)
-  for (m in ag$method) {
-    v <- pr$fdr_at_095[pr$method == m]
-    v <- v[is.finite(v)]
-    if (!length(v)) {
-      expect_true(is.na(ag$fdr_at_095[ag$method == m]), info = m)
-      expect_equal(ag$fdr_at_095_n[ag$method == m], 0L, info = m)
-    } else {
-      expect_equal(ag$fdr_at_095[ag$method == m], mean(v),
-                   tolerance = 1e-12, info = m)
-      expect_equal(ag$fdr_at_095_n[ag$method == m], length(v), info = m)
-    }
-  }
-})
 
 test_that("[N] the two weightings genuinely differ on unequal call counts", {
   # Two regions: one makes 1 correct call, the other 3 calls of which 1 is
@@ -1330,45 +898,6 @@ test_that("[O] one per_region row is one (method, iteration, region)", {
   expect_setequal(unique(pr$iter), seq_len(2L))   # sim_A has n_iter = 2
 })
 
-test_that("[O] se = TRUE uses the iteration, matching evaluate_methods", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr, se = TRUE)
-  expect_true("ap_se" %in% names(ag))
-  expect_true("n_iter_used" %in% names(ag))
-  expect_true(all(ag$n_iter_used == 2L))
-  for (m in ag$method) {
-    ref <- eval_A[[m]]$global$ap_se
-    if (is.null(ref) || is.na(ref)) next
-    expect_equal(ag$ap_se[ag$method == m], ref, tolerance = 1e-10, info = m)
-  }
-})
-
-test_that("[O] the iteration SE is built from iteration means, not fits", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr, se = TRUE)
-  for (m in ag$method) {
-    sub <- pr[pr$method == m, ]
-    per_it <- vapply(split(sub$ap, sub$iter), function(v) {
-      v <- v[is.finite(v)]
-      if (!length(v)) NA_real_ else mean(v)
-    }, numeric(1))
-    per_it <- per_it[is.finite(per_it)]
-    want <- if (length(per_it) < 2L) NA_real_
-            else sd(per_it) / sqrt(length(per_it))
-    got <- ag$ap_se[ag$method == m]
-    if (is.na(want)) expect_true(is.na(got), info = m)
-    else expect_equal(got, want, tolerance = 1e-12, info = m)
-  }
-})
-
-test_that("[O] se = FALSE adds nothing, and a bad replicate column errors", {
-  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
-  ag <- aggregate_region_metrics(pr)
-  expect_false("ap_se" %in% names(ag))
-  expect_false("n_iter_used" %in% names(ag))
-  expect_error(aggregate_region_metrics(pr, se = "not_a_column"),
-               "replicate column")
-})
 
 test_that("[O] LD and annotations are shared across a region's iterations", {
   # This is why the iteration, not the region-fit, is the independent unit:
@@ -1380,4 +909,144 @@ test_that("[O] LD and annotations are shared across a region's iterations", {
   tr <- lapply(sim_A$scenarios, function(sc) sc$regions[[1]]$truth$causal_indices)
   expect_true(length(unique(vapply(tr, function(x) paste(x, collapse = ","),
                                    character(1)))) > 1L)
+})
+
+
+# =============================================================================
+# [P] The output shape after the post-analysis layer was removed
+#
+# evaluate_methods() returns `global` per method plus one `per_region` table,
+# and nothing else: no pre-chosen strata, no standard errors, no plots. Any
+# other grouping is the caller's, from $per_region.
+# =============================================================================
+
+test_that("[P] each method carries global and nothing else", {
+  for (m in eval_A$methods_evaluated) {
+    expect_named(eval_A[[m]], "global", info = m)
+    g <- eval_A[[m]]$global
+    expect_true(has_names(g,
+      c("ap", "ap_n_fits", "fdr_power_curve", "pip_calibration",
+        "cs_coverage", "cs_power", "cs_size_median", "cs_size_mean",
+        "cs_coverage_n", "cs_power_n", "n_cs_reported",
+        "runtime_mean", "runtime_sd", "n_fits", "n_failed")), info = m)
+    # The removed layers.
+    for (gone in c("by_S", "by_phi", "by_p_causal", "by_region_size",
+                   "by_causal_maf", "by_true_annotation_type",
+                   "auprc", "ap_pooled_grid",
+                   "ap_se", "cs_coverage_se", "runtime_mean_se"))
+      expect_null(g[[gone]], info = paste(m, gone))
+  }
+  expect_null(eval_A$susie$by_S)
+})
+
+test_that("[P] the top level carries per_region and the run metadata", {
+  expect_s3_class(eval_A$per_region, "data.frame")
+  expect_true(all(c("methods_evaluated", "simulation_params",
+                    "pip_thresholds_used") %in% names(eval_A)))
+  # Every method evaluated appears in the one shared table.
+  expect_setequal(unique(eval_A$per_region$method), eval_A$methods_evaluated)
+})
+
+test_that("[P] global is the per-region metrics over all of a method's fits", {
+  pr <- eval_A$per_region
+  for (m in eval_A$methods_evaluated) {
+    v <- pr$ap[pr$method == m]
+    v <- v[is.finite(v)]
+    if (!length(v)) next
+    expect_equal(eval_A[[m]]$global$ap, mean(v), tolerance = 1e-12, info = m)
+    expect_equal(eval_A[[m]]$global$ap_n_fits, length(v), info = m)
+  }
+})
+
+test_that("[P] annotated simulations evaluate and carry the annotation factor", {
+  for (m in eval_B$methods_evaluated) {
+    g <- eval_B[[m]]$global
+    expect_true(is.numeric(g$ap))
+    expect_true(is.na(g$ap) || (g$ap >= 0 && g$ap <= 1), info = m)
+  }
+  pr <- eval_B$per_region
+  expect_true("true_annotation_type" %in% names(pr))
+  expect_setequal(unique(pr$true_annotation_type), "binary")
+  # And a sparse_inf run carries p_causal, so it can be grouped on.
+  expect_false(all(is.na(eval_E$per_region$p_causal)))
+})
+
+test_that("[P] the pooled-ranking AP estimators are gone", {
+  # auprc (trapezoid on the pooled ranking) and ap_pooled_grid (step integral
+  # on the same) estimated the same quantity as `ap` but on the wrong
+  # population, and disagreed with it about which method was best.
+  for (m in res_A$methods_run) {
+    g <- eval_A[[m]]$global
+    expect_null(g$auprc)
+    expect_null(g$ap_pooled_grid)
+    expect_true(is.numeric(g$ap))
+  }
+})
+
+test_that("[P] the region-weighted FDR is the mean of the per-region FDRs", {
+  pr <- eval_A$per_region
+  for (m in res_A$methods_run) {
+    curve <- eval_A[[m]]$global$fdr_power_curve
+    v <- pr$fdr_at_095[pr$method == m]
+    v <- v[is.finite(v)]
+    if (is.null(curve)) {
+      # No usable fit, so there is no curve at all - and correspondingly no
+      # per-region FDR to average. A method that produced nothing must not be
+      # handed an FDR of 0.
+      expect_length(v, 0L)
+      next
+    }
+    i <- which(abs(curve$threshold - 0.95) < 1e-9)
+    got <- curve$fdr[i]
+    if (!length(v)) expect_true(is.na(got), info = m)
+    else expect_equal(got, mean(v), tolerance = 1e-9, info = m)
+  }
+})
+
+test_that("[P] a method whose every fit failed gets no curve, not a zero FDR", {
+  sim_P <- run_simulation(n_regions = 1, n = 150, p = 50, n_iter = 1,
+                          S = 1, phi = 0.3, seed = 11, verbose = FALSE)
+  res_P <- run_methods(
+    sim_P, methods = "finemap",
+    method_args = list(finemap = list(finemap_path = "/nonexistent/finemap")),
+    verbose = FALSE)
+  ev <- evaluate_methods(sim_P, res_P, verbose = FALSE)
+  g  <- ev$finemap$global
+  expect_equal(g$n_failed, g$n_fits)
+  expect_true(is.na(g$ap))
+  expect_equal(g$ap_n_fits, 0L)
+  expect_null(g$fdr_power_curve)
+  expect_null(g$pip_calibration)
+  # The row survives in the table, all-NA, so the absence stays visible.
+  expect_equal(nrow(ev$per_region), 1L)
+  expect_true(ev$per_region$failed[1])
+  expect_true(is.na(ev$per_region$ap[1]))
+})
+
+test_that("[P] evaluation.rds and the summary CSV round-trip", {
+  out_dir <- tempfile("test_P_save_")
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+  ev <- evaluate_methods(sim_A, res_A, save = TRUE, output_dir = out_dir,
+                         verbose = FALSE)
+  ev2 <- readRDS(file.path(out_dir, "evaluation.rds"))
+  expect_identical(ev$susie$global$ap, ev2$susie$global$ap)
+  expect_s3_class(ev2$per_region, "data.frame")
+  expect_equal(nrow(ev2$per_region), nrow(ev$per_region))
+
+  csv <- read.csv(file.path(out_dir, "evaluation_summary.csv"))
+  expect_setequal(csv$method, ev$methods_evaluated)
+  expect_false(any(grepl("_se$", names(csv))))
+  for (m in ev$methods_evaluated)
+    expect_equal(csv$ap[csv$method == m], ev[[m]]$global$ap,
+                 tolerance = 1e-10, info = m)
+})
+
+test_that("[P] plot_results and the aggregation helpers are gone", {
+  for (fn in c("plot_results", "aggregate_region_metrics", "add_rate_metrics"))
+    expect_false(exists(fn, where = asNamespace("fmbenchmark"),
+                        inherits = FALSE), info = fn)
+  # The metric functions that evaluate the fine-mapping output stay.
+  for (fn in c("evaluate_methods", "per_region_metrics", "compute_ap_exact"))
+    expect_true(exists(fn, where = asNamespace("fmbenchmark"),
+                       inherits = FALSE), info = fn)
 })

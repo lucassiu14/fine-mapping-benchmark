@@ -13,13 +13,13 @@ Description: A framework for benchmarking statistical fine-mapping methods
     or sparse+infinitesimal genetic architectures with optional functional
     annotations, applies a catalogue of fine-mapping methods (SuSiE,
     SuSiE-inf, FINEMAP, FINEMAP-inf, CAVIAR, FiniMOM, ABF, CARMA, PAINTOR,
-    Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE, Functional BEATRICE and
-    its cross-region joint variants, plus marginal-z and oracle-prior
-    baselines), and evaluates them via AUPRC, credible-set coverage / power
-    / size, PIP calibration, and runtime — stratified by causal-variant
-    count, heritability, p_causal, causal-variant MAF, and annotation
-    regime. Supports both per-locus and genome-wide simulation and an
-    LD-mismatch experiment via an independent reference panel.
+    Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE and Functional BEATRICE,
+    plus marginal-z and oracle-prior baselines), and evaluates them via
+    average precision, credible-set coverage / power
+    / size, PIP calibration, and runtime, reported per region so they can
+    be summarised along any axis. Supports both per-locus and genome-wide
+    simulation and an LD-mismatch experiment via an independent reference
+    panel.
 License: MIT + file LICENSE
 URL: https://github.com/lucassiu14/fine-mapping-benchmark
 BugReports: https://github.com/lucassiu14/fine-mapping-benchmark/issues
@@ -27,9 +27,6 @@ Encoding: UTF-8
 Depends:
     R (>= 4.1.0)
 Imports:
-    ggplot2,
-    grid,
-    gridExtra,
     sim1000G,
     stats,
     susieR,
