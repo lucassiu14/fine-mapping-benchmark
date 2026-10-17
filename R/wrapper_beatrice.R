@@ -237,7 +237,7 @@ run_beatrice <- function(z,
   beatrice_dir   <- path.expand(beatrice_dir)
   python         <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
 
-  # Prefer beatrice_annot.py (BEATRICE_annot_sparse fork) when present -
+  # Prefer beatrice_annot.py (the Functional BEATRICE fork) when present -
   # upstream beatrice.py has a numpy-2.x bug in trainer.py:calculate_pip that
   # crashes late in training. The fork fixes it and accepts the same flags
   # when --annot is omitted, giving vanilla BEATRICE semantics.

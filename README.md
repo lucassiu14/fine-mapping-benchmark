@@ -118,8 +118,12 @@ package):
 git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 ```
 
-**Functional BEATRICE** is bundled in this repo (`BEATRICE_annot_sparse/`) and
-needs no separate clone — it uses the same conda env.
+**Functional BEATRICE** is a separate repository and needs its own clone. It
+uses the same conda env as BEATRICE:
+
+```bash
+git clone https://github.com/lucassiu14/functional-beatrice ~/functional-beatrice
+```
 
 Then get the Python path for use in R:
 
@@ -138,7 +142,7 @@ results <- run_methods(
   method_args = list(
     funmap              = list(python = PYTHON, L = 10),
     beatrice            = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping"),
-    functional_beatrice = list(python = PYTHON, beatrice_dir = "BEATRICE_annot_sparse")
+    functional_beatrice = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
   )
 )
 ```
@@ -236,7 +240,7 @@ project root.
 | **PAINTOR** | 2 | C++ binary | `conda install -c bioconda paintor` |
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
-| **Functional BEATRICE** | 3 | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
+| **Functional BEATRICE** | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice |
 | **marginal_z** | 1 | R (built-in) | None |
 | **oracle_susie** | 1 | R package | susieR (already in renv) |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
@@ -282,7 +286,6 @@ fine-mapping-benchmark/
 │   └── testthat/               # test-pipeline.R, test-evaluate.R, test-comprehensive.R
 ├── vignettes/
 │   └── getting-started.Rmd     # Quick-start vignette
-├── BEATRICE_annot_sparse/      # Functional BEATRICE source (Python + training scripts)
 ├── data/                       # Working caches (gitignored; not part of the package)
 │   ├── vcf/                    # Downloaded 1000G VCF slices for per-locus regions
 │   ├── gwfm_vcf/               # Downloaded 1000G VCF slices for genome-wide regions

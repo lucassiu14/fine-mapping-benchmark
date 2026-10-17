@@ -18,7 +18,8 @@
 # Mechanism. run_methods() calls a method's `run_<method>_scenario_setup(genotypes,
 # regions, user_args)` ONCE per scenario (all regions visible) and merges the
 # returned list into every region's args. We use that hook to run the joint Python
-# trainer (BEATRICE_annot_sparse/beatrice_joint.py) over ALL regions in one process,
+# trainer (beatrice_joint.py, from the Functional BEATRICE repository) over ALL
+# regions in one process,
 # parse each region's pip.csv/credible_set.txt, and return a cache keyed by a
 # z-fingerprint. The thin per-region function looks up its own region's result.
 #
