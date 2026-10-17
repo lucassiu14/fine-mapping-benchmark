@@ -96,23 +96,45 @@ compute_ap_exact <- function(pip_vals, is_causal) {
     top_pip_is_causal = if (n_var > 0L) y[which.max(pip)] else NA
   )
 
-  # Counts at the decision thresholds: nsel is the number of variants with
-  # pip >= t. Stored as counts, never as per-region rates.
+  # Counts at the decision thresholds, and THIS REGION's rates. The counts are
+  # kept so a caller can also form the call-weighted rate over a set of
+  # regions; the rates are what "how trustworthy are my calls in this region"
+  # actually asks.
+  #
+  # fdr and precision are NA when the region selected nothing - NOT 0 and 1.
+  # The convention that FDR is 0 for an empty selection is harmless when
+  # pooling, since such a region contributes no calls, but it REWARDS
+  # ABSTENTION under averaging: a method that selects nothing anywhere would
+  # average to a perfect FDR. Those regions are excluded from the mean and
+  # counted instead.
   for (t in count_thresholds) {
-    tag <- .thresh_tag(t)
-    sel <- pip >= t
-    out[[paste0("nsel_at_",        tag)]] <- sum(sel)
-    out[[paste0("tp_at_",          tag)]] <- sum(y & sel)
+    tag  <- .thresh_tag(t)
+    sel  <- pip >= t
+    nsel <- sum(sel)
+    tp   <- sum(y & sel)
+    out[[paste0("nsel_at_",        tag)]] <- nsel
+    out[[paste0("tp_at_",          tag)]] <- tp
     out[[paste0("sum_pip_sel_at_", tag)]] <- sum(pip[sel])
+    out[[paste0("fdr_at_",         tag)]] <- if (nsel > 0L) (nsel - tp) / nsel
+                                             else NA_real_
+    out[[paste0("precision_at_",   tag)]] <- if (nsel > 0L) tp / nsel
+                                             else NA_real_
+    out[[paste0("power_at_",       tag)]] <- if (S > 0L) tp / S else NA_real_
   }
 
-  # Calibration band counts.
+  # Calibration band counts and this region's observed frequency per band. A
+  # band with no variant in this region is NA, not 0.
   for (nm in names(.PIP_BANDS)) {
     b   <- .PIP_BANDS[[nm]]
     sel <- pip >= b[1] & pip < b[2]
-    out[[paste0("n_band_",       nm)]] <- sum(sel)
-    out[[paste0("c_band_",       nm)]] <- sum(y & sel)
-    out[[paste0("sum_pip_band_", nm)]] <- sum(pip[sel])
+    nb  <- sum(sel)
+    out[[paste0("n_band_",           nm)]] <- nb
+    out[[paste0("c_band_",           nm)]] <- sum(y & sel)
+    out[[paste0("sum_pip_band_",     nm)]] <- sum(pip[sel])
+    out[[paste0("frac_causal_band_", nm)]] <- if (nb > 0L) sum(y & sel) / nb
+                                              else NA_real_
+    out[[paste0("mean_pip_band_",    nm)]] <- if (nb > 0L) sum(pip[sel]) / nb
+                                              else NA_real_
   }
 
   # Credible sets. `cs_hits` is a Bernoulli per SET and `causal_captured` a
@@ -125,6 +147,8 @@ compute_ap_exact <- function(pip_vals, is_causal) {
     out$cs_size_sum       <- 0L
     out$cs_size_mean      <- NA_real_
     out$cs_size_median    <- NA_real_
+    out$cs_coverage       <- NA_real_   # no sets: coverage undefined, not 0
+    out$cs_power          <- if (S > 0L) 0 else NA_real_
   } else {
     sizes <- vapply(credible_sets, length, integer(1))
     hits  <- vapply(credible_sets, function(cs) any(cs %in% causal_idx), logical(1))
@@ -134,6 +158,8 @@ compute_ap_exact <- function(pip_vals, is_causal) {
     out$cs_size_sum       <- sum(sizes)
     out$cs_size_mean      <- mean(sizes)
     out$cs_size_median    <- stats::median(sizes)
+    out$cs_coverage       <- mean(hits)
+    out$cs_power          <- if (S > 0L) out$n_causal_captured / S else NA_real_
   }
   out
 }
@@ -260,13 +286,21 @@ per_region_metrics <- function(simulation,
 #' regions being aggregated - never on a single region, where a rate on 0-2
 #' selections is unestimable.
 #'
+#' These are the CALL-WEIGHTED rates: a region that makes many calls dominates
+#' them. They are written with a `_pooled` suffix, because the rate normally
+#' reported is the region-weighted one - the mean over regions of each region's
+#' own rate, which is what [aggregate_region_metrics()] puts in the unsuffixed
+#' columns. Fine-mapping is applied to a region, so "how trustworthy are the
+#' calls in a region" is usually the question; "what fraction of all calls made
+#' anywhere were wrong" is a different one.
+#'
 #' @param d A data frame of summed counts, as [aggregate_region_metrics()]
 #'   produces.
 #' @param count_thresholds The thresholds whose counts `d` carries.
-#' @return `d` with the rate columns added: `fdr_at_*`, `precision_at_*`,
-#'   `power_at_*`, `cs_coverage`, `cs_power`, `cs_size_mean`, and per-band
-#'   observed frequencies `frac_causal_band_*` against predicted
-#'   `mean_pip_band_*`.
+#' @return `d` with the call-weighted rate columns added: `fdr_at_*_pooled`,
+#'   `precision_at_*_pooled`, `power_at_*_pooled`, `cs_coverage_pooled`,
+#'   `cs_power_pooled`, `cs_size_mean_pooled`, and per-band
+#'   `frac_causal_band_*_pooled` against `mean_pip_band_*_pooled`.
 #' @export
 add_rate_metrics <- function(d, count_thresholds = c(0.5, 0.8, 0.9, 0.95, 0.99)) {
   for (t in sort(unique(count_thresholds))) {
@@ -275,30 +309,37 @@ add_rate_metrics <- function(d, count_thresholds = c(0.5, 0.8, 0.9, 0.95, 0.99))
     tp   <- d[[paste0("tp_at_",   tag)]]
     if (is.null(nsel) || is.null(tp)) next
     fp <- nsel - tp
-    # FDR is 0 by convention when nothing is selected. THAT CONVENTION LETS AN
-    # ABSTAINER WIN EVERY FDR COMPARISON, so nsel is kept beside it: never
-    # report one without the other.
-    d[[paste0("fdr_at_",       tag)]] <- ifelse(nsel > 0, fp / nsel, 0)
-    d[[paste0("precision_at_", tag)]] <- ifelse(nsel > 0, tp / nsel, NA_real_)
-    d[[paste0("power_at_",     tag)]] <- ifelse(d$n_causal > 0,
-                                                tp / d$n_causal, NA_real_)
+    # FDR is 0 by convention when nothing is selected, which is harmless here -
+    # a region with no calls contributes none to a call-weighted rate - but is
+    # exactly why the region-weighted version must not use it. nsel is kept
+    # beside the rate either way: never report one without the other.
+    d[[paste0("fdr_at_",       tag, "_pooled")]] <-
+      ifelse(nsel > 0, fp / nsel, 0)
+    d[[paste0("precision_at_", tag, "_pooled")]] <-
+      ifelse(nsel > 0, tp / nsel, NA_real_)
+    d[[paste0("power_at_",     tag, "_pooled")]] <-
+      ifelse(d$n_causal > 0, tp / d$n_causal, NA_real_)
   }
 
   if (!is.null(d$n_cs))
-    d$cs_coverage <- ifelse(d$n_cs > 0, d$n_cs_with_causal / d$n_cs, NA_real_)
+    d$cs_coverage_pooled <- ifelse(d$n_cs > 0, d$n_cs_with_causal / d$n_cs,
+                                   NA_real_)
   if (!is.null(d$n_causal_captured))
-    d$cs_power <- ifelse(d$n_causal > 0, d$n_causal_captured / d$n_causal,
-                         NA_real_)
+    d$cs_power_pooled <- ifelse(d$n_causal > 0,
+                                d$n_causal_captured / d$n_causal, NA_real_)
   if (!is.null(d$cs_size_sum))
-    d$cs_size_mean <- ifelse(d$n_cs > 0, d$cs_size_sum / d$n_cs, NA_real_)
+    d$cs_size_mean_pooled <- ifelse(d$n_cs > 0, d$cs_size_sum / d$n_cs,
+                                    NA_real_)
 
   for (nm in names(.PIP_BANDS)) {
     n <- d[[paste0("n_band_", nm)]]
-    c <- d[[paste0("c_band_", nm)]]
-    s <- d[[paste0("sum_pip_band_", nm)]]
+    cc <- d[[paste0("c_band_", nm)]]
+    sp <- d[[paste0("sum_pip_band_", nm)]]
     if (is.null(n)) next
-    d[[paste0("frac_causal_band_", nm)]] <- ifelse(n > 0, c / n, NA_real_)
-    d[[paste0("mean_pip_band_",    nm)]] <- ifelse(n > 0, s / n, NA_real_)
+    d[[paste0("frac_causal_band_", nm, "_pooled")]] <-
+      ifelse(n > 0, cc / n, NA_real_)
+    d[[paste0("mean_pip_band_",    nm, "_pooled")]] <-
+      ifelse(n > 0, sp / n, NA_real_)
   }
   d
 }
@@ -357,9 +398,20 @@ aggregate_region_metrics <- function(per_region, by = "method", na.rm = TRUE) {
                   "n_variants", "n_causal", "sum_pip_total",
                   "n_cs", "n_cs_with_causal", "n_causal_captured",
                   "cs_size_sum")
-  scalar_cols <- c("ap", "max_pip", "cs_size_median", "runtime_seconds")
+  # Per-region RATES are averaged over the regions where they are defined, and
+  # the count of contributing regions is reported with each. A region that
+  # selected nothing has an undefined FDR, not an FDR of zero.
+  rate_cols <- c(paste0("fdr_at_",           tags),
+                 paste0("precision_at_",     tags),
+                 paste0("power_at_",         tags),
+                 paste0("frac_causal_band_", names(.PIP_BANDS)),
+                 paste0("mean_pip_band_",    names(.PIP_BANDS)),
+                 "cs_coverage", "cs_power")
+  scalar_cols <- c("ap", "max_pip", "cs_size_mean", "cs_size_median",
+                   "runtime_seconds")
 
   count_cols  <- intersect(count_cols,  names(per_region))
+  rate_cols   <- intersect(rate_cols,   names(per_region))
   scalar_cols <- intersect(scalar_cols, names(per_region))
 
   # NA-as-level before grouping: aggregate(), split() and table() all drop NA
@@ -382,19 +434,30 @@ aggregate_region_metrics <- function(per_region, by = "method", na.rm = TRUE) {
     as.data.frame(m)
   }
 
-  sums  <- pick(count_cols,  function(v) sum(as.numeric(v), na.rm = TRUE))
+  defined_mean <- function(v) {
+    v <- as.numeric(v)
+    v <- v[is.finite(v)]
+    if (!length(v)) NA_real_ else mean(v)
+  }
+  sums  <- pick(count_cols, function(v) sum(as.numeric(v), na.rm = TRUE))
+  rates <- pick(rate_cols,  defined_mean)
   means <- pick(scalar_cols, function(v) {
     v <- as.numeric(v)
     if (na.rm) v <- v[!is.na(v)]
     if (!length(v)) NA_real_ else mean(v)
   })
+  # How many regions each averaged rate rests on. Mandatory alongside it: at a
+  # high PIP threshold most regions select nothing, so a mean FDR can sit on a
+  # handful of regions out of thousands.
+  rate_n <- pick(rate_cols, function(v) sum(is.finite(as.numeric(v))))
+  if (!is.null(rate_n)) names(rate_n) <- paste0(names(rate_n), "_n")
 
   lev <- do.call(rbind, strsplit(levels(grp), "\r", fixed = TRUE))
   out <- as.data.frame(lev, stringsAsFactors = FALSE)
   names(out) <- by
   for (b in by) out[[b]][out[[b]] == ".NA"] <- NA
 
-  out <- cbind(out, sums, means)
+  out <- cbind(out, sums, rates, rate_n, means)
   out$n_fits   <- as.integer(table(grp))
   out$n_failed <- as.integer(vapply(split(per_region$failed | per_region$bad_pip,
                                           grp), sum, numeric(1)))

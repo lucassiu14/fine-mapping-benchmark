@@ -13,13 +13,22 @@ produces.}
 \item{count_thresholds}{The thresholds whose counts \code{d} carries.}
 }
 \value{
-\code{d} with the rate columns added: \verb{fdr_at_*}, \verb{precision_at_*},
-\verb{power_at_*}, \code{cs_coverage}, \code{cs_power}, \code{cs_size_mean}, and per-band
-observed frequencies \verb{frac_causal_band_*} against predicted
-\verb{mean_pip_band_*}.
+\code{d} with the call-weighted rate columns added: \verb{fdr_at_*_pooled},
+\verb{precision_at_*_pooled}, \verb{power_at_*_pooled}, \code{cs_coverage_pooled},
+\code{cs_power_pooled}, \code{cs_size_mean_pooled}, and per-band
+\verb{frac_causal_band_*_pooled} against \verb{mean_pip_band_*_pooled}.
 }
 \description{
 Call this on a table whose count columns have already been summed over the
 regions being aggregated - never on a single region, where a rate on 0-2
 selections is unestimable.
+}
+\details{
+These are the CALL-WEIGHTED rates: a region that makes many calls dominates
+them. They are written with a \verb{_pooled} suffix, because the rate normally
+reported is the region-weighted one - the mean over regions of each region's
+own rate, which is what \code{\link[=aggregate_region_metrics]{aggregate_region_metrics()}} puts in the unsuffixed
+columns. Fine-mapping is applied to a region, so "how trustworthy are the
+calls in a region" is usually the question; "what fraction of all calls made
+anywhere were wrong" is a different one.
 }

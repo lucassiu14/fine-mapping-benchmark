@@ -401,10 +401,35 @@ evaluate_methods <- function(simulation,
     v
   }))
 
-  # Power / FDR curve. Correctly POOLED: FDR and power are properties of a
-  # population of calls, and a rate computed on one region's 0-2 selections is
-  # unestimable. Per-region counts are available from per_region_metrics().
-  fdr_power <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
+  # Power / FDR curve, REGION-WEIGHTED: one curve per region, averaged
+  # pointwise. The practitioner's question is about the region in front of
+  # them, so the quantity to report is the FDR of a typical region, not the
+  # fraction of all calls made anywhere that were wrong. The two differ
+  # whenever regions make unequal numbers of calls, which they always do.
+  #
+  # `n_regions` travels with it: regions selecting nothing at a threshold are
+  # excluded from the mean rather than scored FDR 0, because averaging that
+  # convention would reward abstention.
+  fdr_power <- .fdr_power_curve_per_region(valid, pip_thresholds)
+
+  # The call-weighted curve, kept because it is what most of the literature
+  # reports and what `auprc` below is computed from.
+  fdr_power_pooled <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
+  if (!is.null(fdr_power)) {
+    # tp/fp/fn are TOTALS over the stratum's regions, so they are counts and
+    # belong with the pooled columns - they are what the pooled rates are
+    # formed from, and are kept because a count is the one thing a reader can
+    # re-aggregate any way they like.
+    fdr_power$tp <- fdr_power_pooled$tp
+    fdr_power$fp <- fdr_power_pooled$fp
+    fdr_power$fn <- fdr_power_pooled$fn
+    fdr_power$fdr_pooled       <- fdr_power_pooled$fdr
+    fdr_power$precision_pooled <- fdr_power_pooled$precision
+    fdr_power$power_pooled     <- fdr_power_pooled$power
+    fdr_power$recall_pooled    <- fdr_power_pooled$recall
+  } else {
+    fdr_power <- fdr_power_pooled
+  }
 
   # AP is a PER-REGION quantity and is averaged over regions, never read off
   # the pooled curve. The AP of several regions' merged ranked list is not the
@@ -422,13 +447,29 @@ evaluate_methods <- function(simulation,
                  mean(ap_per_fit[is.finite(ap_per_fit)]) else NA_real_
   ap_n_fits <- sum(is.finite(ap_per_fit))
 
-  # auprc stays on the pooled curve, as a trapezoid, for continuity with
+  # auprc stays on the CALL-WEIGHTED curve, as a trapezoid, for continuity with
   # results produced before `ap` was separated out. Prefer `ap`.
-  auprc <- .compute_auprc(fdr_power$precision, fdr_power$recall)
-  ap_pooled_grid <- .compute_ap(fdr_power$precision, fdr_power$recall)
+  auprc <- .compute_auprc(fdr_power_pooled$precision, fdr_power_pooled$recall)
+  ap_pooled_grid <- .compute_ap(fdr_power_pooled$precision,
+                                fdr_power_pooled$recall)
 
-  # PIP calibration
-  pip_cal <- .pip_calibration(pip_vals, is_causal, n_pip_cal_bins)
+  # PIP calibration, REGION-WEIGHTED for the same reason: "are this region's
+  # PIPs trustworthy" is the question being asked. The pooled columns are kept
+  # beside it.
+  pip_cal        <- .pip_calibration_per_region(valid, n_pip_cal_bins)
+  pip_cal_pooled <- .pip_calibration(pip_vals, is_causal, n_pip_cal_bins)
+  if (!is.null(pip_cal) && !is.null(pip_cal_pooled) &&
+      nrow(pip_cal) == nrow(pip_cal_pooled)) {
+    # n / n_causal are totals over the stratum's regions, hence counts; they
+    # stay so the binning can be re-aggregated.
+    pip_cal$bin_mid            <- pip_cal_pooled$bin_mid
+    pip_cal$n                  <- pip_cal_pooled$n
+    pip_cal$n_causal           <- pip_cal_pooled$n_causal
+    pip_cal$mean_pip_pooled    <- pip_cal_pooled$mean_pip
+    pip_cal$frac_causal_pooled <- pip_cal_pooled$frac_causal
+  } else if (is.null(pip_cal)) {
+    pip_cal <- pip_cal_pooled
+  }
 
   # Credible set metrics
   cs <- .cs_metrics(valid)
@@ -547,7 +588,14 @@ evaluate_methods <- function(simulation,
 # Internal: power / FDR curve
 #
 # Uses a sort + cumsum approach: O(N log N + T) rather than O(N * T).
-# Pools all variants across all fits in the supplied collection.
+#
+# This computes the CALL-WEIGHTED curve over whatever (pip, is_causal) pairs it
+# is given. .fdr_power_curve_per_region() below calls it once per region and
+# averages, which is the REGION-WEIGHTED curve - the one reported, because the
+# practitioner's question is "I fine-mapped my region; how trustworthy are
+# these calls?", not "across every call made anywhere in the benchmark, what
+# fraction were wrong". A region that makes many calls dominates the
+# call-weighted rate; under the region-weighted one every region counts once.
 # =============================================================================
 
 .fdr_power_curve <- function(pip_vals, is_causal, thresholds) {
@@ -591,6 +639,96 @@ evaluate_methods <- function(simulation,
     precision = ifelse(n_sel > 0L, tp / n_sel,          1),
     recall    = tp / total_causal
   )
+}
+
+
+# =============================================================================
+# Internal: REGION-WEIGHTED power / FDR curve
+#
+# One curve per region, then averaged pointwise. Two conventions matter:
+#
+#   - FDR and precision are NA for a region that selected nothing at that
+#     threshold, not 0 and 1. The "FDR is 0 when nothing is selected"
+#     convention is harmless when pooling (it contributes no calls), but under
+#     averaging it REWARDS ABSTENTION: a method selecting nothing anywhere
+#     would average to a perfect FDR of 0. So such regions are excluded from
+#     the mean and counted in `n_regions`, which must be read alongside it.
+#
+#   - power and recall are defined for any region with a causal variant, so
+#     they average over all such regions.
+# =============================================================================
+
+.fdr_power_curve_per_region <- function(fits, thresholds) {
+  n_t <- length(thresholds)
+  if (!length(fits)) return(NULL)
+
+  acc <- lapply(fits, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    if (sum(y) == 0L || !all(is.finite(f$pip))) return(NULL)
+    cur <- .fdr_power_curve(f$pip, y, thresholds)
+    n_sel <- cur$tp + cur$fp
+    cur$fdr[n_sel == 0L]       <- NA_real_
+    cur$precision[n_sel == 0L] <- NA_real_
+    cur
+  })
+  acc <- Filter(Negate(is.null), acc)
+  if (!length(acc)) return(NULL)
+
+  grab <- function(col) vapply(acc, function(d) d[[col]], numeric(n_t))
+  mrow <- function(m) rowMeans(m, na.rm = TRUE)
+  nrow_def <- function(m) rowSums(!is.na(m))
+
+  fdr_m  <- grab("fdr")
+  prec_m <- grab("precision")
+  out <- data.frame(
+    threshold  = thresholds,
+    # Region-weighted: the mean over regions, which is what gets reported.
+    fdr        = mrow(fdr_m),
+    precision  = mrow(prec_m),
+    power      = mrow(grab("power")),
+    recall     = mrow(grab("recall")),
+    # How many regions the fdr/precision means rest on. Never report the rate
+    # without this: at a high threshold most regions select nothing.
+    n_regions          = nrow_def(fdr_m),
+    n_regions_with_causal = length(acc)
+  )
+  out$fdr[out$n_regions == 0L]       <- NA_real_
+  out$precision[out$n_regions == 0L] <- NA_real_
+  out
+}
+
+
+# =============================================================================
+# Internal: REGION-WEIGHTED PIP calibration
+#
+# Per-bin observed frequency computed within each region, then averaged over
+# the regions that have any variant in that bin. `n_regions` per bin is part of
+# the answer: the top bin is usually populated in only a minority of regions.
+# =============================================================================
+
+.pip_calibration_per_region <- function(fits, n_bins) {
+  if (!length(fits)) return(NULL)
+  acc <- lapply(fits, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    if (!all(is.finite(f$pip)) || !length(f$pip)) return(NULL)
+    .pip_calibration(f$pip, y, n_bins)
+  })
+  acc <- Filter(function(d) !is.null(d) && nrow(d) > 0L, acc)
+  if (!length(acc)) return(NULL)
+
+  base <- acc[[1L]][, c("bin", "bin_lower", "bin_upper")]
+  n_b  <- nrow(base)
+  grab <- function(col) vapply(acc, function(d) d[[col]], numeric(n_b))
+
+  frac <- grab("frac_causal")
+  base$mean_pip    <- rowMeans(grab("mean_pip"),  na.rm = TRUE)
+  base$frac_causal <- rowMeans(frac,              na.rm = TRUE)
+  base$n_regions   <- rowSums(!is.na(frac))
+  base$mean_pip[base$n_regions == 0L]    <- NA_real_
+  base$frac_causal[base$n_regions == 0L] <- NA_real_
+  base
 }
 
 

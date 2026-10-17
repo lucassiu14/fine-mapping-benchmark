@@ -248,7 +248,7 @@ project root.
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
 | **Functional BEATRICE** | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice |
-| **FB joint** (`fb_pooled`, `fb_xregion`) | 3 | Python script | Same as Functional BEATRICE; one prior head shared across a scenario's regions |
+| **FB joint** (`fb_xregion`) | 3 | Python script | Same as Functional BEATRICE; one prior head shared across a scenario's regions. `prior_head` picks `lassonet` (default) or `linear`; `lambda_l1` sets the L1 penalty |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.
@@ -649,11 +649,17 @@ answer, not just its precision:
 - **Average precision is per region.** The AP of two regions' merged ranked
   list is not the mean of their APs: merging lets one region's false positives
   outrank the other's true positive. So `ap` is averaged, never pooled.
-- **FDR, power, coverage and calibration are rates.** A rate on the 0–2
-  selections a single region carries is unestimable, so the table stores their
-  ingredients as counts (`nsel_at_*`, `tp_at_*`, `n_cs`, `n_cs_with_causal`,
-  `n_causal_captured`, `n_band_*`, `c_band_*`). Sum those over the regions you
-  are aggregating, then form the rate.
+- **FDR, power and calibration are per region too.** Fine-mapping is applied
+  to a locus, so the reported rate is the mean over regions of each region's
+  own rate — "how trustworthy are the calls in a region". The call-weighted
+  rate, in which a region making many calls dominates, is a different
+  quantity and sits beside it as `*_pooled`. The counts are kept
+  (`nsel_at_*`, `tp_at_*`, `n_band_*`, `c_band_*`, `n_cs`,
+  `n_cs_with_causal`, `n_causal_captured`), so either can be re-formed.
+- **A region that selects nothing is excluded from the FDR mean, not scored
+  0.** The "FDR is 0 when nothing is selected" convention is harmless when
+  pooling but rewards abstention under averaging, so `*_n` reports how many
+  regions each mean rests on. Always read the rate with it.
 
 A failed fit contributes an all-`NA` row rather than vanishing — a method that
 cannot run on part of the grid is not missing at random.
@@ -665,10 +671,18 @@ cannot run on part of the grid is not missing at random.
 
 - **`ap`** — mean of the per-region average precisions. **This is the one to
   report.**
-- **CS coverage** — share of credible sets containing at least one causal variant
+- **`fdr_power_curve`** — `fdr`, `precision`, `power` and `recall` are means
+  over regions, with `n_regions` giving how many contributed at each
+  threshold; `*_pooled` carries the call-weighted values and `tp`/`fp`/`fn`
+  the totals.
+- **`pip_calibration`** — `mean_pip` vs `frac_causal` averaged over regions,
+  with `n_regions` per bin; `*_pooled` and the `n`/`n_causal` counts beside
+  them.
+- **CS coverage** — share of credible sets containing at least one causal
+  variant. Left pooled over sets: that is what a "95% credible set" claim
+  refers to. The per-region version is in `$per_region`.
 - **CS power** — share of causal variants captured by any credible set
 - **Median CS size** — median variants per credible set
-- **PIP calibration** — binned mean PIP vs observed fraction causal
 - **`auprc`, `ap_pooled_grid`** — computed on the ranking *pooled* across the
   stratum's regions, and kept only for continuity with results produced before
   `ap` was separated out. The error they carry is method-dependent in sign, so

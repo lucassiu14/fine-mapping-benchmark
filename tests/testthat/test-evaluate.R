@@ -1127,17 +1127,20 @@ test_that("[M] aggregate_region_metrics sums counts and averages scalars", {
   }
 })
 
-test_that("[M] aggregate_region_metrics reproduces the pooled CS rates", {
+test_that("[M] the _pooled CS rates reproduce evaluate_methods()", {
+  # evaluate_methods()'s cs_coverage is a per-SET rate pooled over regions,
+  # which is the quantity SuSiE's 95% claim refers to, so it is left pooled.
+  # The region-weighted version sits in the unsuffixed per-region column.
   pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
   ag <- aggregate_region_metrics(pr)
   for (m in ag$method) {
     cov_ref <- eval_A[[m]]$global$cs_coverage
     pow_ref <- eval_A[[m]]$global$cs_power
     if (!is.na(cov_ref))
-      expect_equal(ag$cs_coverage[ag$method == m], cov_ref,
+      expect_equal(ag$cs_coverage_pooled[ag$method == m], cov_ref,
                    tolerance = 1e-12, info = m)
     if (!is.na(pow_ref))
-      expect_equal(ag$cs_power[ag$method == m], pow_ref,
+      expect_equal(ag$cs_power_pooled[ag$method == m], pow_ref,
                    tolerance = 1e-12, info = m)
   }
 })
@@ -1197,4 +1200,110 @@ test_that("[M] evaluate_methods(per_region = FALSE) omits the table", {
   expect_null(ev$per_region)
   ev2 <- evaluate_methods(sim_A, res_A, verbose = FALSE)
   expect_s3_class(ev2$per_region, "data.frame")
+})
+
+
+# =============================================================================
+# [N] FDR and calibration are region-weighted, not call-weighted
+#
+# Fine-mapping is applied to a region, so the question is "how trustworthy are
+# the calls in a region", not "what fraction of all calls made anywhere were
+# wrong". The two differ whenever regions make unequal numbers of calls.
+# =============================================================================
+
+test_that("[N] the curve carries both weightings plus the region count", {
+  d <- eval_A$susie$global$fdr_power_curve
+  for (col in c("threshold", "fdr", "precision", "power", "recall",
+                "n_regions", "n_regions_with_causal",
+                "fdr_pooled", "precision_pooled", "power_pooled",
+                "recall_pooled", "tp", "fp", "fn"))
+    expect_true(col %in% names(d), info = col)
+  expect_true(all(d$fdr   >= 0 & d$fdr   <= 1, na.rm = TRUE))
+  expect_true(all(d$power >= 0 & d$power <= 1, na.rm = TRUE))
+  # n_regions can only fall as the threshold rises.
+  d2 <- d[order(d$threshold), ]
+  expect_true(all(diff(d2$n_regions) <= 0))
+})
+
+test_that("[N] a region that selects nothing is excluded, not scored FDR 0", {
+  d <- eval_A$susie$global$fdr_power_curve
+  # Wherever no region selected anything, the region-weighted FDR is NA while
+  # the pooled convention reports 0. That convention is why averaging it would
+  # reward abstention.
+  none <- d$n_regions == 0L
+  if (any(none)) {
+    expect_true(all(is.na(d$fdr[none])))
+    expect_true(all(d$fdr_pooled[none] == 0))
+  }
+  expect_true(all(!is.na(d$fdr[d$n_regions > 0L])))
+})
+
+test_that("[N] the region-weighted FDR is the mean of the per-region FDRs", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ag <- aggregate_region_metrics(pr)
+  for (m in ag$method) {
+    v <- pr$fdr_at_095[pr$method == m]
+    v <- v[is.finite(v)]
+    if (!length(v)) {
+      expect_true(is.na(ag$fdr_at_095[ag$method == m]), info = m)
+      expect_equal(ag$fdr_at_095_n[ag$method == m], 0L, info = m)
+    } else {
+      expect_equal(ag$fdr_at_095[ag$method == m], mean(v),
+                   tolerance = 1e-12, info = m)
+      expect_equal(ag$fdr_at_095_n[ag$method == m], length(v), info = m)
+    }
+  }
+})
+
+test_that("[N] the two weightings genuinely differ on unequal call counts", {
+  # Two regions: one makes 1 correct call, the other 3 calls of which 1 is
+  # correct. Region-weighted FDR = mean(0, 2/3) = 1/3. Call-weighted FDR =
+  # 2 false of 4 calls = 1/2. Neither is a noisy version of the other.
+  mk <- function(pip, causal) list(
+    pip = pip, credible_sets = list(), method = "t", scenario_id = 1L,
+    region_id = 1L, n_variants = length(pip), causal_indices = causal,
+    runtime_seconds = 0)
+  f1 <- mk(c(0.99, 0.01, 0.01, 0.01), 1L)            # 1 call, correct
+  f2 <- mk(c(0.99, 0.99, 0.99, 0.01), 1L)            # 3 calls, 1 correct
+  per_fdr <- vapply(list(f1, f2), function(f) {
+    sel <- f$pip >= 0.95
+    tp  <- sum(seq_along(f$pip)[sel] %in% f$causal_indices)
+    (sum(sel) - tp) / sum(sel)
+  }, numeric(1))
+  expect_equal(mean(per_fdr), 1 / 3)
+  pooled <- (sum(c(1, 3)) - sum(c(1, 1))) / sum(c(1, 3))
+  expect_equal(pooled, 1 / 2)
+  expect_false(isTRUE(all.equal(mean(per_fdr), pooled)))
+})
+
+test_that("[N] calibration is region-weighted and reports its region count", {
+  pc <- eval_A$susie$global$pip_calibration
+  for (col in c("bin", "bin_lower", "bin_upper", "mean_pip", "frac_causal",
+                "n_regions", "mean_pip_pooled", "frac_causal_pooled",
+                "n", "n_causal"))
+    expect_true(col %in% names(pc), info = col)
+  expect_true(all(pc$frac_causal >= 0 & pc$frac_causal <= 1, na.rm = TRUE))
+  # A bin populated in no region is NA, never 0.
+  expect_true(all(is.na(pc$frac_causal[pc$n_regions == 0L])))
+  # The counts still total every variant of every valid fit.
+  valid <- Filter(function(f) is.null(f$error), res_A$susie$results)
+  expect_equal(sum(pc$n), sum(vapply(valid, function(f) length(f$pip),
+                                     numeric(1))))
+})
+
+test_that("[N] per-region rates are NA where undefined, never 0", {
+  pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
+  ok <- !pr$failed & !pr$bad_pip
+  # No selections at a threshold -> FDR and precision undefined for that region.
+  empty <- ok & pr$nsel_at_099 == 0L
+  if (any(empty)) {
+    expect_true(all(is.na(pr$fdr_at_099[empty])))
+    expect_true(all(is.na(pr$precision_at_099[empty])))
+    # Power is still defined: zero of the causal variants were found.
+    expect_true(all(pr$power_at_099[empty] == 0))
+  }
+  # A band with no variant in this region is NA, not 0.
+  empty_band <- ok & pr$n_band_top == 0L
+  if (any(empty_band))
+    expect_true(all(is.na(pr$frac_causal_band_top[empty_band])))
 })

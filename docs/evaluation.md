@@ -131,15 +131,39 @@ before the formulas:
   pooled estimator separated them by a factor of 3.5, because it was partly
   measuring their PIP scale rather than their ranking.
 
-- **FDR, power, coverage and calibration are properties of a population of
-  calls**, so their ingredients are pooled as counts and the rate is formed
-  afterwards. A rate computed on one region is unestimable: a region typically
-  carries 0–2 selections, and a method that selects nothing has an FDR of 0 by
-  convention.
+- **FDR, power and calibration are also reported per region**, because
+  fine-mapping is applied to a region: the question a practitioner asks is "I
+  fine-mapped my locus — how trustworthy are these calls?", not "across every
+  call made anywhere in the benchmark, what fraction were wrong". Those are
+  different estimands, not a precise and an imprecise version of one. The
+  call-weighted rate lets a region that makes many calls dominate; under the
+  region-weighted one every region counts once.
+
+  So `fdr`, `precision`, `power` and `frac_causal` are the **means over
+  regions** of each region's own rate, and the call-weighted values sit beside
+  them with a `_pooled` suffix. The underlying counts (`tp`, `fp`, `fn`, `n`,
+  `n_causal`) are kept, so either rate can be re-formed at any granularity.
+
+  **One convention has to change when averaging.** FDR is 0 by convention for
+  a region that selects nothing. That is harmless when pooling — such a region
+  contributes no calls — but under averaging it *rewards abstention*: a method
+  selecting nothing anywhere would average to a perfect FDR of 0. So those
+  regions are excluded from the mean, and `n_regions` reports how many
+  contributed. Never read the rate without it: at a high PIP threshold, most
+  regions select nothing. In a test fixture, `marginal_z` selected nothing
+  anywhere at PIP 0.95 — the pooled convention scored it a flawless FDR of
+  0.0000, while the region-weighted version correctly returned `NA` on 0
+  regions.
 
 `auprc` and `ap_pooled_grid` are both computed on the pooled ranking and are
 retained only for continuity with results produced before `ap` was separated
 out. Report `ap`.
+
+Credible-set coverage is the one rate left pooled in `evaluate_methods()`: it
+is a per-*set* quantity, which is what a method's "95% credible set" claim
+refers to, so pooling over sets is the matching estimand. The per-region
+version is in the per-region table as `cs_coverage`, with the pooled one as
+`cs_coverage_pooled`.
 
 ### The per-region table
 
