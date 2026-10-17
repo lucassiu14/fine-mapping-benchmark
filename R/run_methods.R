@@ -44,7 +44,13 @@
   funmap    = "run_funmap_region",
   paintor   = "run_paintor_region",
   beatrice              = "run_beatrice_region",
-  functional_beatrice   = "run_functional_beatrice_region",
+  # functional_beatrice - single-locus Functional BEATRICE - is no longer
+  # registered as a benchmarked method: fb_xregion supersedes it, learning the
+  # same annotation prior but sharing one head across a scenario's regions.
+  # run_functional_beatrice_region() REMAINS, and is not dead code: it is
+  # fb_xregion's fallback path, used when a scenario has no annotations or the
+  # joint trainer fails for a region (see R/wrapper_fb_joint.R). Register it
+  # here again to benchmark the single-locus model directly.
   carma                 = "run_carma_region",
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
@@ -56,29 +62,20 @@
   # Modern variational comparator (without annotations).
   sparsepro             = "run_sparsepro_region",
 
-  # --- Functional BEATRICE cross-region JOINT prior models -------------------
+  # --- Functional BEATRICE cross-region JOINT prior model --------------------
   # A shared annotation prior head trained JOINTLY across all regions of a
-  # scenario (not per-locus, not sequential). Each has a scenario_setup hook
-  # (run_<method>_scenario_setup) that runs the joint Python trainer once per
-  # scenario; the region fn looks up its region's result. See R/wrapper_fb_joint.R.
-  fb_pooled       = "run_fb_pooled_region",    # idea #1: shared logistic head
-  fb_xregion      = "run_fb_xregion_region",   # idea #2: shared LassoNet head
-  # The lambda_l1 sweep's arm names. The sweep compared a single-logit LassoNet
-  # head (fb_xregion_id*) with a two-logit one (fb_xregion); the two-logit head
-  # has since been removed, so fb_xregion_id is now identical to fb_xregion and
-  # the _lNN arms below differ from it only in lambda_l1.
-  fb_xregion_id   = "run_fb_xregion_id_region",
-  fb_xregion_id_l03 = "run_fb_xregion_id_l03_region",
-  fb_xregion_id_l06 = "run_fb_xregion_id_l06_region",
-  fb_xregion_id_l25 = "run_fb_xregion_id_l25_region",
-  # Larger penalties, to see how many annotations are driven to exactly zero and
-  # whether that changes fine-mapping accuracy. Full collapse (10 of 10 zeroed)
-  # was measured at lambda = 2.0; between production and 1.0 the count moves
-  # non-monotonically on a single fit, so the sparsity path needs the full grid
-  # to resolve.
-  fb_xregion_id_l50  = "run_fb_xregion_id_l50_region",
-  fb_xregion_id_l100 = "run_fb_xregion_id_l100_region",
-  fb_xregion_id_l200 = "run_fb_xregion_id_l200_region",
+  # scenario (not per-locus, not sequential). Its scenario_setup hook
+  # (run_fb_xregion_scenario_setup) runs the joint Python trainer once per
+  # scenario; the region fn looks up its region's result.
+  #
+  # The eight sibling entries that used to sit here - fb_pooled and the
+  # fb_xregion_id* arms of the lambda_l1 sweep - were variants reachable
+  # through method_args, not separate models, so they are gone:
+  #   fb_pooled           -> fb_xregion, prior_head = "linear"
+  #   fb_xregion_id       -> fb_xregion (they were already identical)
+  #   fb_xregion_id_lNN   -> fb_xregion, lambda_l1 = NN/100
+  # See R/wrapper_fb_joint.R.
+  fb_xregion      = "run_fb_xregion_region",
 
   # --- Further summary-statistic methods --------------------------------------
   # Chosen to target the constraint this benchmark identified as binding (LD

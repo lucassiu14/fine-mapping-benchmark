@@ -46,10 +46,12 @@ on simulated data with known ground truth. It supports:
   SuSiE, SuSiE-inf, FINEMAP, FINEMAP-inf, CAVIAR, FiniMOM, CARMA, ABF,
   PAINTOR, Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE and Functional
   BEATRICE, plus the `marginal_z` and `oracle_susie` baselines.
-- **Evaluation** via AUPRC, credible-set coverage/power/size, PIP calibration,
+- **Evaluation** via AP, credible-set coverage/power/size, PIP calibration,
   with stratification by S (causal count), φ (heritability), p_causal,
   causal-variant MAF, and the simulation's annotation regime.
-- **Plotting** of stratified results to a multi-page PDF.
+- **Per-region output** — every metric is computed for one method on one
+  region of one iteration, so results can be summarised along any axis rather
+  than a fixed set of strata.
 
 This vignette walks you through a small end-to-end run that uses only Tier 1
 (pure R) methods and the sim1000G example VCF bundled with the
@@ -71,8 +73,7 @@ binaries.
 library(fmbenchmark)
 ```
 
-The Tier 1 dependencies (`susieR`, `sim1000G`, `ggplot2`, `gridExtra`,
-`CARMA`) are declared in the package's `Imports`/`Suggests` and install with
+The Tier 1 dependencies (`susieR`, `sim1000G`, `CARMA`) are declared in the package's `Imports`/`Suggests` and install with
 it. If you are working from a source checkout managed by `renv`, run
 `renv::restore()` first. See
 [README §Installation](../README.md#installation) for the external-method
@@ -263,7 +264,7 @@ fit$additional$n_iter_run
 
 # 7. Evaluate
 
-`evaluate_methods()` computes AUPRC, credible-set coverage/power/size, PIP
+`evaluate_methods()` computes AP, credible-set coverage/power/size, PIP
 calibration, and runtime — pooled globally and stratified along several
 axes.
 
@@ -292,7 +293,7 @@ do.call(rbind, lapply(eval$methods_evaluated, function(m) {
   g <- eval[[m]]$global
   data.frame(
     method        = m,
-    auprc         = fmt(g$auprc),
+    ap         = fmt(g$ap),
     cs_coverage   = fmt(g$cs_coverage),
     cs_power      = fmt(g$cs_power),
     cs_size_med   = fmt(g$cs_size_median, 1),
@@ -305,59 +306,69 @@ do.call(rbind, lapply(eval$methods_evaluated, function(m) {
 You should see SuSiE and ABF appreciably above `marginal_z` — that's the
 expected ordering, since `marginal_z` does no modelling at all.
 
-### Stratified metrics
+### Per-region metrics — summarise on any axis
 
-Several axes are computed automatically. By number of causal variants:
+`evaluate_methods()` does not pre-compute a fixed set of strata. It returns one
+row per **(method, region, iteration)** in `$per_region`, with the design
+factors beside the metrics, so you choose the axes.
 
-```{r eval-by-S}
-names(eval$susie$by_S)
-cat("\nAUPRC by S, SuSiE:\n")
-sapply(eval$susie$by_S, function(x) round(x$auprc, 3))
+```{r eval-per-region}
+pr <- eval$per_region
+dim(pr)
+# One method fitted to one region of one iteration:
+pr[1, c("method", "iter", "S", "phi", "region_id", "region_size",
+        "n_variants", "n_causal", "ap")]
 ```
 
-By minimum causal MAF:
+By number of causal variants, then by minimum causal MAF:
 
-```{r eval-by-maf}
-names(eval$susie$by_causal_maf)
-cat("\nAUPRC by causal MAF bin, SuSiE:\n")
-sapply(eval$susie$by_causal_maf, function(x) round(x$auprc, 3))
+```{r eval-axes}
+aggregate(ap ~ S, data = pr[pr$method == "susie", ], FUN = mean)
+aggregate(ap ~ causal_maf_bin, data = pr[pr$method == "susie", ], FUN = mean)
 ```
 
-> **Why only one bin here?** The bundled `sim1000G` VCF contains only common
-> variants (MAF > 0.05), so all causals fall in the `"common"` bin. With the
-> real 1000G windows downloaded by `inst/scripts/prepare_vcfs.R` (or your own
-> VCFs), the `"rare"` and `"low"` bins start to appear.
+> **Why only one MAF bin here?** The bundled `sim1000G` VCF contains only
+> common variants (MAF > 0.05), so all causals fall in the `"common"` bin. With
+> the real 1000G windows downloaded by `inst/scripts/prepare_vcfs.R` (or your
+> own VCFs), the `"rare"` and `"low"` bins start to appear.
 
-Other axes available: `by_phi`, `by_p_causal` (sparse_inf simulations only),
-`by_true_annotation_type` (when comparing across annotation regimes).
+Any other column works the same way: `phi`, `p_causal`,
+`true_annotation_type`, `region_size`, or combinations of them.
 
----
+### Three rules when you aggregate
 
-# 8. Plot
+**Counts are summed; rates and scalars are averaged.** `ap` is already a
+per-region number, so average it. `fdr_at_*`, `power_at_*` and the calibration
+bands are per-region rates — average those too, over the regions where they are
+defined. The counts they are built from (`nsel_at_*`, `tp_at_*`, `n_band_*`,
+`c_band_*`) are also in the table, for the call-weighted rate instead.
 
-`plot_results()` writes a multi-page PDF with PR curves, PIP calibration
-plots, summary tables, and stratified-metric panels.
+**A rate is `NA` where undefined, never 0.** A region that selected nothing has
+no FDR, and scoring it 0 would reward abstention. So count the contributing
+regions alongside the mean:
 
-```{r plot, eval = FALSE}
-plot_results(eval, output_file = "getting-started-results.pdf",
-             save = TRUE, verbose = FALSE)
+```{r eval-fdr}
+v <- pr$fdr_at_095[pr$method == "susie"]
+c(fdr = mean(v, na.rm = TRUE), n_regions = sum(!is.na(v)))
 ```
 
-The PDF has, in order:
+**For a standard error, the unit is the iteration, not the region.** A region's
+genotypes, LD matrix and annotation matrix are drawn once and reused by every
+iteration; only the causal variants, effect sizes and noise are redrawn. So
+collapse to one value per iteration first:
 
-1. **Global PR curves** for all methods on one panel
-2. **Global PIP calibration** faceted by method
-3. **Global summary table** with means ± SE across replicates
-4. **By-S grids** — PR curves, calibration, and metric line plots vs S
-5. **By-φ grids** — same structure
-6. **By-p_causal grids** (if `model = "sparse_inf"`)
+```{r eval-se}
+per_iter <- aggregate(ap ~ method + iter, data = pr, FUN = mean)
+aggregate(ap ~ method, data = per_iter,
+          FUN = function(v) sd(v) / sqrt(length(v)))
+```
 
 See [`docs/evaluation.md`](../docs/evaluation.md) for the precise formula for
-every metric and the structure of every plot.
+every metric.
 
 ---
 
-# 9. Where to go next
+# 8. Where to go next
 
 You now have a working end-to-end pipeline. Common next steps:
 
@@ -368,7 +379,7 @@ You now have a working end-to-end pipeline. Common next steps:
   adds the Python-based methods (Funmap, BEATRICE, Functional BEATRICE).
   See [README §Installation](../README.md#installation).
 - **Annotation-aware methods.** Re-run with `annotations = "binary"` and add
-  `polyfun_susie`, `sbayesrc`, `funmap`, `paintor` or `functional_beatrice` to
+  `polyfun_susie`, `sbayesrc`, `funmap`, `paintor` or `fb_xregion` to
   the methods list; `oracle_susie` gives the ceiling, being SuSiE handed the
   true prior. See [`docs/methods.md`](../docs/methods.md) for per-method
   details.

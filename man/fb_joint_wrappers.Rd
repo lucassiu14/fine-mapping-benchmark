@@ -2,61 +2,13 @@
 % Please edit documentation in R/wrapper_fb_joint.R
 \name{fb_joint_wrappers}
 \alias{fb_joint_wrappers}
-\alias{run_fb_pooled_scenario_setup}
 \alias{run_fb_xregion_scenario_setup}
-\alias{run_fb_xregion_id_scenario_setup}
-\alias{run_fb_xregion_id_l03_scenario_setup}
-\alias{run_fb_xregion_id_l06_scenario_setup}
-\alias{run_fb_xregion_id_l25_scenario_setup}
-\alias{run_fb_xregion_id_l50_scenario_setup}
-\alias{run_fb_xregion_id_l100_scenario_setup}
-\alias{run_fb_xregion_id_l200_scenario_setup}
-\alias{run_fb_pooled_region}
 \alias{run_fb_xregion_region}
-\alias{run_fb_xregion_id_region}
-\alias{run_fb_xregion_id_l03_region}
-\alias{run_fb_xregion_id_l06_region}
-\alias{run_fb_xregion_id_l25_region}
-\alias{run_fb_xregion_id_l50_region}
-\alias{run_fb_xregion_id_l100_region}
-\alias{run_fb_xregion_id_l200_region}
 \title{Cross-region joint (Functional) BEATRICE wrappers}
 \usage{
-run_fb_pooled_scenario_setup(genotypes, regions, user_args)
-
 run_fb_xregion_scenario_setup(genotypes, regions, user_args)
 
-run_fb_xregion_id_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l03_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l06_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l25_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l50_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l100_scenario_setup(genotypes, regions, user_args)
-
-run_fb_xregion_id_l200_scenario_setup(genotypes, regions, user_args)
-
-run_fb_pooled_region(region_geno, region_pheno, ...)
-
 run_fb_xregion_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l03_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l06_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l25_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l50_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l100_region(region_geno, region_pheno, ...)
-
-run_fb_xregion_id_l200_region(region_geno, region_pheno, ...)
 }
 \arguments{
 \item{genotypes}{List. \code{simulation$genotypes} for the whole scenario.}
@@ -65,7 +17,8 @@ run_fb_xregion_id_l200_region(region_geno, region_pheno, ...)
 the scenario, used to write the joint trainer's manifest.}
 
 \item{user_args}{List. Method arguments from \code{run_methods}, forwarded
-to the Python trainer.}
+to the Python trainer. \code{prior_head} and \code{lambda_l1} are read
+from here.}
 
 \item{region_geno}{List. One element of \code{simulation$genotypes}.}
 
@@ -76,27 +29,32 @@ to the Python trainer.}
 per-region fallback path.}
 }
 \value{
-A \code{_scenario_setup} hook returns a list of arguments merged
+The \code{_scenario_setup} hook returns a list of arguments merged
 into every region's call (the fingerprint-keyed cache, the prior head and
-whether annotations were available). A \code{_region} function returns the
-standardised fine-mapping output, with
+whether annotations were available). The \code{_region} function returns
+the standardised fine-mapping output, with
 \code{additional$joint_fallback = TRUE} when the joint result was
 unavailable and the region was fitted on its own.
 }
 \description{
-Method wrappers registered with \code{\link{run_methods}} for the joint
-models, which train one annotation prior head across every region of a
-scenario. Each method comes as a pair: a \code{_scenario_setup} hook, called
-once per scenario with all regions visible, which runs the joint Python
-trainer and returns a result cache; and a \code{_region} function, which
-looks that region's result up in the cache. They are called by name by
-\code{run_methods} rather than directly.
+The \code{fb_xregion} method, registered with \code{\link{run_methods}}.
+It trains ONE annotation prior head across every region of a scenario. It
+comes as a pair: a \code{_scenario_setup} hook, called once per scenario
+with all regions visible, which runs the joint Python trainer and returns a
+result cache; and a \code{_region} function, which looks that region's
+result up in the cache. Both are called by name by \code{run_methods}
+rather than directly.
 }
 \details{
-\code{fb_pooled} uses a prior head linear in the annotations;
-\code{fb_xregion} uses the LassoNet head. The \code{fb_xregion_id*} names
-come from the \code{lambda_l1} sweep: \code{fb_xregion_id} is identical to
-\code{fb_xregion}, and each \code{_lNN} arm differs from it only in
-\code{lambda_l1} (\code{l03} = 0.03 through \code{l200} = 2.00).
+Two arguments cover everything the method can do, and are passed through
+\code{method_args}:
+
+\describe{
+\item{\code{prior_head}}{\code{"lassonet"} (default) for the sparse
+non-linear prior, or \code{"linear"} for a plain logistic map on the
+annotations.}
+\item{\code{lambda_l1}}{the L1 penalty on the LassoNet skip connections,
+which decides how many annotations the prior may use. Default 0.1223.}
+}
 }
 \keyword{internal}

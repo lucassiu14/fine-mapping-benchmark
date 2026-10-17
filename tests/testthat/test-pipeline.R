@@ -2,7 +2,7 @@
 # test-pipeline.R
 #
 # End-to-end smoke test of the full benchmark pipeline:
-#   simulate -> run_methods -> evaluate -> plot
+#   simulate -> run_methods -> evaluate
 #
 # Translated from the former scripts/test_pipeline.R, which was removed
 # once this testthat version superseded it.
@@ -21,6 +21,7 @@
 #   interactively as a script.
 # - Replaces `stopifnot(...)` sanity checks with `expect_*()` calls.
 # =============================================================================
+
 
 test_that("end-to-end pipeline runs and produces the expected structure", {
   skip_on_cran()  # sim1000G may download a genetic map on first run
@@ -53,9 +54,9 @@ test_that("end-to-end pipeline runs and produces the expected structure", {
   expect_false(is.null(sim$scenarios[[1]]$regions[[1]]$truth))
 
   # --- 2. Run methods --------------------------------------------------------
-  # Only the Tier 1 pure-R methods that are always available. External
-  # methods (FINEMAP, PAINTOR, BEATRICE, Funmap) get their own
-  # graceful-failure test below so we do not gate this on installs.
+  # Only the Tier 1 pure-R methods that are always available. External methods
+  # (FINEMAP, PAINTOR, BEATRICE, Funmap) get their own graceful-failure test
+  # below, so this is not gated on installs.
 
   pure_r_methods <- c("susie", "abf", "marginal_z")
 
@@ -91,24 +92,39 @@ test_that("end-to-end pipeline runs and produces the expected structure", {
 
   for (m in pure_r_methods) {
     g <- eval_out[[m]]$global
-    expect_false(is.na(g$auprc),
-                 info = sprintf("%s global AUPRC is NA", m))
-    expect_gte(g$auprc, 0)
-    expect_lte(g$auprc, 1)
+    expect_false(is.na(g$ap), info = sprintf("%s global AP is NA", m))
+    expect_gte(g$ap, 0)
+    expect_lte(g$ap, 1)
   }
 
-  # Sanity: marginal_z (the model-free floor) should not beat susie or abf
-  # on a setting where they have signal to work with.
-  expect_lte(eval_out$marginal_z$global$auprc, eval_out$susie$global$auprc)
-  expect_lte(eval_out$marginal_z$global$auprc, eval_out$abf$global$auprc)
+  # Sanity: marginal_z (the model-free floor) should not beat susie or abf on a
+  # setting where they have signal to work with.
+  expect_lte(eval_out$marginal_z$global$ap, eval_out$susie$global$ap)
+  expect_lte(eval_out$marginal_z$global$ap, eval_out$abf$global$ap)
 
-  # --- 4. Plot ---------------------------------------------------------------
+  # --- 4. The per-region table is the evaluation output ----------------------
 
-  pdf_path <- file.path(out_dir, "results.pdf")
-  plot_results(eval_out, output_file = pdf_path, save = TRUE, verbose = FALSE)
+  pr <- eval_out$per_region
+  expect_s3_class(pr, "data.frame")
+  expect_equal(nrow(pr),
+               3L * length(sim$scenarios) * length(pure_r_methods))
+  expect_setequal(unique(pr$method), pure_r_methods)
+  expect_false(anyNA(pr$iter))
+  # Both keys name the same unit: one method, one region, one iteration.
+  expect_equal(nrow(pr),
+               nrow(unique(pr[c("method", "scenario_id", "region_id")])))
+  expect_equal(nrow(pr),
+               nrow(unique(pr[c("method", "S", "phi", "iter", "region_id")])))
 
-  expect_true(file.exists(pdf_path))
-  expect_gt(file.info(pdf_path)$size, 0L)
+  # --- 5. Saved artefacts ----------------------------------------------------
+
+  expect_true(file.exists(file.path(out_dir, "evaluation.rds")))
+  expect_true(file.exists(file.path(out_dir, "evaluation_summary.csv")))
+  csv <- read.csv(file.path(out_dir, "evaluation_summary.csv"))
+  expect_setequal(csv$method, pure_r_methods)
+  for (m in pure_r_methods)
+    expect_equal(csv$ap[csv$method == m], eval_out[[m]]$global$ap,
+                 tolerance = 1e-10, info = m)
 })
 
 

@@ -169,20 +169,63 @@ setup_functional_beatrice <- function(beatrice_dir, python = "python") {
 #'   \code{beatrice_annot.py}.
 #' @param python Character. Path to the Python executable. Default:
 #'   \code{"python"}.
-#' @param max_iter Integer. Training iterations. Default: 2000.
+#' @param max_iter Integer. Training iterations. Default: 2000. The tuning
+#'   study below ran every trial at 2000, so the other defaults are optimal
+#'   for that budget; running them at a smaller one judges the configuration
+#'   under a different model.
 #' @param n_caus Integer. Expected maximum number of causal variants.
-#'   Default: 5.
-#' @param sigma_sq Numeric. Prior variance on effect sizes. Default: 0.05.
+#'   Default: 10.
+#' @param sigma_sq Numeric. Prior variance on effect sizes. Default: 0.0899.
 #' @param gamma_coverage Numeric. Coverage threshold for credible sets.
 #'   Default: 0.95.
 #' @param sparse_concrete Integer. Sparsity of Binary Concrete samples per
-#'   iteration. Default: 50.
+#'   iteration. Default: 51. This is a likelihood TRUNCATION, not a prior - the
+#'   working set retained per Monte Carlo configuration - so it trades bias
+#'   against cost. Average precision saturates by about 40, so 51 sits on the
+#'   flat part of that curve.
 #' @param prior_regularisation Numeric. L2 regularisation weight on the
-#'   prior network outputs. Default: 1.0.
-#' @param lambda_l1 Numeric. L1 penalty on LassoNet skip connections.
-#'   Controls annotation sparsity. Default: 0.01.
+#'   prior network outputs. Default: 0.1255.
+#' @param lambda_l1 Numeric. L1 penalty on LassoNet skip connections, which
+#'   decides how many annotations the prior may use. Default: 0.1223. A sweep
+#'   of this penalty found that value best: at its lower arms the prior
+#'   selects annotations no better than chance, and above about 0.5 average
+#'   precision falls away in every stratum.
 #' @param hierarchy_M Numeric. LassoNet hierarchy constraint multiplier
-#'   (\code{||W_j^(1)||} ≤ M·|θ_j|). Default: 10.0.
+#'   (\code{||W_j^(1)||} ≤ M·|θ_j|). Default: 10.15.
+#'
+#' @section Where the defaults come from:
+#' \code{n_caus}, \code{sigma_sq}, \code{sparse_concrete} and
+#' \code{prior_regularisation} are trial 401 of an Optuna study on this
+#' benchmark's simulated data, picked from 962 completed trials as the
+#' highest-AP configuration among those reaching a defensible posterior-mass
+#' ratio. On the tuning simulation it gave AP 0.7702, mass ratio 1.73, high-PIP
+#' reliability 1.00 and FDR 0 at the 0.95 threshold. The Pareto front's
+#' best-AP point scored higher (AP 0.8109) but carried a mass ratio of 8.62 and
+#' reliability 0.90 - a 5\% AP loss buys a fivefold reduction in posterior-mass
+#' inflation and no incorrect high-PIP calls, which is the better trade for a
+#' method whose PIPs are meant to be believed.
+#'
+#' \code{hierarchy_M} and \code{lambda_l1} were held fixed during that search,
+#' an earlier fANOVA having attributed 0.002 and 0.001 of AP variance to them;
+#' \code{lambda_l1} was later swept separately, which is where its value comes
+#' from.
+#'
+#' These were selected on simulated data with in-sample LD, so treat them as a
+#' starting point rather than universal: on real data, and especially on a locus
+#' whose causal count is known to differ from \code{n_caus}, they are worth
+#' revisiting.
+#'
+#' \code{\link{run_beatrice}} deliberately shares \code{n_caus},
+#' \code{sigma_sq}, \code{sparse_concrete} and \code{max_iter} with this
+#' function. The two share a likelihood, a variational family and the meaning
+#' of those parameters, and differ only in the prior - BEATRICE fixes
+#' p0 = 1/p uniform, this learns p0 = G(v; psi) from annotations - so holding
+#' everything else equal is what makes a gap between them attributable to the
+#' annotation prior rather than to one arm being tuned and the other not. The
+#' values were chosen against this method's objective, so they may be
+#' suboptimal for BEATRICE and could understate it; the alternative, BEATRICE
+#' at its published defaults, confounds the prior with the tuning, which is
+#' worse for an ablation.
 #'
 #' @return A list with the standardised fine-mapping output:
 #' \describe{
@@ -213,13 +256,13 @@ run_functional_beatrice <- function(z,
                                     beatrice_dir,
                                     python               = "python",
                                     max_iter             = 2000,
-                                    n_caus               = 5,
-                                    sigma_sq             = 0.05,
+                                    n_caus               = 10,
+                                    sigma_sq             = 0.0899,
                                     gamma_coverage       = 0.95,
-                                    sparse_concrete      = 50,
-                                    prior_regularisation = 1.0,
-                                    lambda_l1            = 0.01,
-                                    hierarchy_M          = 10.0) {
+                                    sparse_concrete      = 51,
+                                    prior_regularisation = 0.1255,
+                                    lambda_l1            = 0.1223,
+                                    hierarchy_M          = 10.15) {
 
   # --- Validate inputs --------------------------------------------------------
 
