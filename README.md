@@ -98,7 +98,7 @@ pp <- setup_paintor()   # finds PAINTOR on PATH
 
 ### Tier 3 — Adds Python methods (~1 hour more)
 
-Funmap, BEATRICE, and Functional BEATRICE all require Python. A single conda
+Funmap, BEATRICE and Functional BEATRICE all require Python. A single conda
 environment covers all three; an `environment.yml` is included in the repo:
 
 ```bash
@@ -118,8 +118,8 @@ package):
 git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 ```
 
-**Functional BEATRICE** is a separate repository and needs its own clone. It
-uses the same conda env as BEATRICE:
+**Functional BEATRICE** (`fb_xregion`) is a separate repository and needs its
+own clone. It uses the same conda env as BEATRICE:
 
 ```bash
 git clone https://github.com/lucassiu14/functional-beatrice ~/functional-beatrice
@@ -138,11 +138,11 @@ PYTHON <- "/path/to/envs/finemapping-python/bin/python"   # from above
 
 results <- run_methods(
   simulation  = sim,
-  methods     = c("funmap", "beatrice", "functional_beatrice"),
+  methods     = c("funmap", "beatrice", "fb_xregion"),
   method_args = list(
     funmap              = list(python = PYTHON, L = 10),
     beatrice            = list(python = PYTHON, beatrice_dir = "~/Beatrice-Finemapping"),
-    functional_beatrice = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
+    fb_xregion          = list(python = PYTHON, beatrice_dir = "~/functional-beatrice")
   )
 )
 ```
@@ -247,8 +247,7 @@ project root.
 | **FINEMAP-inf** | 3 | Python script | Clone FinucaneLab/fine-mapping-inf |
 | **Funmap** | 3 | Python package | `conda env create -f environment.yml` |
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
-| **Functional BEATRICE** | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice |
-| **FB joint** (`fb_xregion`) | 3 | Python script | Same as Functional BEATRICE; one prior head shared across a scenario's regions. `prior_head` picks `lassonet` (default) or `linear`; `lambda_l1` sets the L1 penalty |
+| **Functional BEATRICE** (`fb_xregion`) | 3 | Python script | Same conda env as BEATRICE; clone https://github.com/lucassiu14/functional-beatrice. One annotation prior head shared across a scenario's regions. `prior_head` picks `lassonet` (default) or `linear`; `lambda_l1` sets the L1 penalty |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.

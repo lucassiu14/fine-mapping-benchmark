@@ -44,7 +44,13 @@
   funmap    = "run_funmap_region",
   paintor   = "run_paintor_region",
   beatrice              = "run_beatrice_region",
-  functional_beatrice   = "run_functional_beatrice_region",
+  # functional_beatrice - single-locus Functional BEATRICE - is no longer
+  # registered as a benchmarked method: fb_xregion supersedes it, learning the
+  # same annotation prior but sharing one head across a scenario's regions.
+  # run_functional_beatrice_region() REMAINS, and is not dead code: it is
+  # fb_xregion's fallback path, used when a scenario has no annotations or the
+  # joint trainer fails for a region (see R/wrapper_fb_joint.R). Register it
+  # here again to benchmark the single-locus model directly.
   carma                 = "run_carma_region",
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
