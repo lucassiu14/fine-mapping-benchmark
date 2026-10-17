@@ -43,9 +43,9 @@ on simulated data with known ground truth. It supports:
   under sparse or sparse+infinitesimal genetic architectures, optionally with
   functional annotations.
 - **A catalogue of methods** with a standardised input/output interface —
-  SuSiE, SuSiE-inf, FINEMAP, CARMA, ABF, PAINTOR, Funmap, BEATRICE, Functional
-  BEATRICE, plus baselines (`marginal_z`) and PolyFun-style comparators
-  (`polyfun_oracle`, `polyfun_est`).
+  SuSiE, SuSiE-inf, FINEMAP, FINEMAP-inf, CAVIAR, FiniMOM, CARMA, ABF,
+  PAINTOR, Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE and Functional
+  BEATRICE, plus the `marginal_z` and `oracle_susie` baselines.
 - **Evaluation** via AUPRC, credible-set coverage/power/size, PIP calibration,
   with stratification by S (causal count), φ (heritability), p_causal,
   causal-variant MAF, and the simulation's annotation regime.
@@ -367,14 +367,15 @@ You now have a working end-to-end pipeline. Common next steps:
 - **More methods.** Tier 2 adds FINEMAP and PAINTOR (C++ binaries); Tier 3
   adds the Python-based methods (Funmap, BEATRICE, Functional BEATRICE).
   See [README §Installation](../README.md#installation).
-- **Annotation-aware methods.** Re-run with `annotations = "binary"` and
-  add `polyfun_oracle`, `polyfun_est`, `funmap`, or `paintor` to the methods
-  list. See [`docs/methods.md`](../docs/methods.md) for per-method details.
+- **Annotation-aware methods.** Re-run with `annotations = "binary"` and add
+  `polyfun_susie`, `sbayesrc`, `funmap`, `paintor` or `functional_beatrice` to
+  the methods list; `oracle_susie` gives the ceiling, being SuSiE handed the
+  true prior. See [`docs/methods.md`](../docs/methods.md) for per-method
+  details.
 - **Genome-wide simulation.** For a more realistic experiment (single shared
   phenotype across many regions, polygenic causal assignment), use
   `simulate_gwfm_data()` instead of `run_simulation()`. See
   [`docs/gw_simulation_documentation.md`](../docs/gw_simulation_documentation.md).
-  [README §Running on an HPC cluster](../README.md#running-on-an-hpc-cluster).
 - **Evaluation internals.** For the precise definition of every metric and
   the SE-across-replicates machinery, see
   [`docs/evaluation.md`](../docs/evaluation.md).
