@@ -3,8 +3,10 @@
 #
 # Dependency notes (why this isn't the vanilla r-lib template):
 #   - sim1000G (Imports) is archived on CRAN and susieR (Imports) is a
-#     GitHub package; both are pinned via the Remotes: field in DESCRIPTION,
-#     which setup-r-dependencies (pak) reads.
+#     GitHub package; both are installed as explicit extra-packages refs
+#     below, not via a DESCRIPTION Remotes: field (that field was dropped).
+#   - Ckmeans.1d.dp (Suggests) is installed because without it the two
+#     polyfun_susie prior tests skip, and PolyFun is a headline comparator.
 #   - CARMA (Suggests) is GitHub-only and LinkingTo RcppGSL (needs the GSL
 #     system library). It is an optional fine-mapping method whose tests
 #     skip when it is absent (skip_if_not_installed("CARMA")), so CI does
@@ -12,7 +14,7 @@
 #     and the few Suggests actually needed for check/test/vignette are
 #     listed explicitly under extra-packages.
 #   - _R_CHECK_FORCE_SUGGESTS_=false so the uninstalled Suggests (CARMA,
-#     reticulate, yaml) downgrade from an error to a NOTE.
+#     finimom, reticulate, yaml) downgrade from an error to a NOTE.
 #   - pandoc is provided by setup-pandoc so the HTML vignette builds.
 #   - The test suite downloads a ~1 MB HapMap genetic map from GitHub on
 #     first use (sim1000G); GitHub Actions runners have network access.
@@ -77,6 +79,7 @@ jobs:
             any::testthat
             any::knitr
             any::rmarkdown
+            any::Ckmeans.1d.dp
 
       - uses: r-lib/actions/check-r-package@v2
         with:
