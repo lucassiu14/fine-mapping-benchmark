@@ -12,8 +12,6 @@ run_oracle_susie(
   enrichment = NULL,
   causal_probs = NULL,
   L = 10,
-  hess = TRUE,
-  hess_iter = 100L,
   max_iter = 100L,
   ...
 )
@@ -37,17 +35,12 @@ selection probabilities; used in preference to \code{enrichment}.}
 
 \item{L}{Integer. Maximum number of single-effect components. Default: 10.}
 
-\item{hess}{Logical. Set the causal effect variance by PolyFun's modified
-HESS estimator. Default: TRUE.}
-
-\item{hess_iter}{Integer. HESS draws to average. Default: 100.}
-
 \item{max_iter}{Integer. Maximum IBSS iterations. Default: 100.}
 
 \item{...}{Ignored (for wrapper compatibility).
 
-The fine-mapping step is \code{\link{run_susie}}'s, so that
-oracle_susie and polyfun_susie differ only in the prior.}
+The fine-mapping step is \code{\link{run_susie}}'s, so that \code{susie}
+and \code{oracle_susie} differ in the prior and in nothing else.}
 }
 \value{
 A list with the standardised fine-mapping output. The

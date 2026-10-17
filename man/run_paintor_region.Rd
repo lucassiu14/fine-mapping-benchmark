@@ -4,7 +4,7 @@
 \alias{run_paintor_region}
 \title{Run PAINTOR on a single region from simulation data structures}
 \usage{
-run_paintor_region(region_geno, region_pheno, ...)
+run_paintor_region(region_geno, region_pheno, .paintor_cache = NULL, ...)
 }
 \arguments{
 \item{region_geno}{List. One element of \code{simulation$genotypes},

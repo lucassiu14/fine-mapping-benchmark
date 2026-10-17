@@ -14,6 +14,7 @@ run_susie(
   estimate_residual_variance = TRUE,
   estimate_prior_variance = TRUE,
   prior_variance = NULL,
+  prior_weights = NULL,
   coverage = 0.95,
   min_abs_corr = 0.5,
   max_iter = 100,
@@ -41,6 +42,10 @@ data (\code{susie}) rather than summary statistics (\code{susie_rss}).}
 
 \item{prior_variance}{Numeric or NULL. Prior effect variance. If NULL,
 set to \code{0.1 * var(y)} (individual-level) or 0.1 (summary stats).}
+
+\item{prior_weights}{Numeric or NULL. Per-variant prior probability of
+being causal, length p, passed to SuSiE. NULL leaves SuSiE's uniform
+prior in place. Used by \code{oracle_susie} to supply a known prior.}
 
 \item{coverage}{Numeric. Coverage level for credible sets. Default: 0.95.}
 

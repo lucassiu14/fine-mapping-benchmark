@@ -49,7 +49,7 @@
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
   oracle_susie          = "run_oracle_susie_region",
-  polyfun_susie          = "run_polyfun_susie_region",
+  polyfun_susie         = "run_polyfun_susie_region",
   # SBayesRC-style Bayesian regression with annotation-informed mixture prior
   # pooled across regions (§0.1 of the auto-research plan).
   sbayesrc              = "run_sbayesrc_region",

@@ -17,7 +17,7 @@ containing at minimum \code{z} and (when annotations are simulated)
 accepted as a fallback location for the matrix.}
 
 \item{...}{Additional arguments passed to \code{\link{run_oracle_susie}}
-(e.g. \code{L}, \code{hess}).}
+(e.g. \code{L}).}
 }
 \value{
 The output of \code{\link{run_oracle_susie}}.

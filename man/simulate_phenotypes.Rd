@@ -11,6 +11,8 @@ simulate_phenotypes(
   model = "sparse",
   p_causal = 0.5,
   inf_model = "beatrice",
+  relationship = "additive",
+  n_informative = NULL,
   effect_distribution = "normal",
   effect_variance = 0.36,
   annotations = "none",

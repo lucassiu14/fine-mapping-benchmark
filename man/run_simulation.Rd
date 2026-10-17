@@ -14,6 +14,8 @@ run_simulation(
   model = "sparse",
   p_causal = c(0.1, 0.2, 0.4),
   inf_model = "beatrice",
+  relationship = "additive",
+  n_informative = NULL,
   effect_distribution = "normal",
   effect_variance = 0.36,
   annotations = "none",
