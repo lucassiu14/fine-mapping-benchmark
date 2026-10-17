@@ -66,7 +66,7 @@
 }
 
 .METRIC_LABELS <- c(
-  auprc          = "AUPRC",
+  ap             = "AP",
   cs_coverage    = "CS Coverage",
   cs_power       = "CS Power",
   cs_size_median = "Median CS Size",
@@ -355,7 +355,7 @@
     g <- eval_out[[m]]$global
     data.frame(
       Method          = m,
-      AUPRC           = fmt(g$auprc,          g$auprc_se),
+      AP              = fmt(g$ap,             g$ap_se),
       `CS Coverage`   = fmt(g$cs_coverage,    g$cs_coverage_se),
       `CS Power`      = fmt(g$cs_power,       g$cs_power_se),
       `Med CS Size`   = fmt(g$cs_size_median, g$cs_size_median_se, digits = 1L),

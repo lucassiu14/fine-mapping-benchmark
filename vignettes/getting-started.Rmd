@@ -46,7 +46,7 @@ on simulated data with known ground truth. It supports:
   SuSiE, SuSiE-inf, FINEMAP, FINEMAP-inf, CAVIAR, FiniMOM, CARMA, ABF,
   PAINTOR, Funmap, PolyFun, SBayesRC, SparsePro, BEATRICE and Functional
   BEATRICE, plus the `marginal_z` and `oracle_susie` baselines.
-- **Evaluation** via AUPRC, credible-set coverage/power/size, PIP calibration,
+- **Evaluation** via AP, credible-set coverage/power/size, PIP calibration,
   with stratification by S (causal count), φ (heritability), p_causal,
   causal-variant MAF, and the simulation's annotation regime.
 - **Plotting** of stratified results to a multi-page PDF.
@@ -263,7 +263,7 @@ fit$additional$n_iter_run
 
 # 7. Evaluate
 
-`evaluate_methods()` computes AUPRC, credible-set coverage/power/size, PIP
+`evaluate_methods()` computes AP, credible-set coverage/power/size, PIP
 calibration, and runtime — pooled globally and stratified along several
 axes.
 
@@ -292,7 +292,7 @@ do.call(rbind, lapply(eval$methods_evaluated, function(m) {
   g <- eval[[m]]$global
   data.frame(
     method        = m,
-    auprc         = fmt(g$auprc),
+    ap         = fmt(g$ap),
     cs_coverage   = fmt(g$cs_coverage),
     cs_power      = fmt(g$cs_power),
     cs_size_med   = fmt(g$cs_size_median, 1),
@@ -311,16 +311,16 @@ Several axes are computed automatically. By number of causal variants:
 
 ```{r eval-by-S}
 names(eval$susie$by_S)
-cat("\nAUPRC by S, SuSiE:\n")
-sapply(eval$susie$by_S, function(x) round(x$auprc, 3))
+cat("\nAP by S, SuSiE:\n")
+sapply(eval$susie$by_S, function(x) round(x$ap, 3))
 ```
 
 By minimum causal MAF:
 
 ```{r eval-by-maf}
 names(eval$susie$by_causal_maf)
-cat("\nAUPRC by causal MAF bin, SuSiE:\n")
-sapply(eval$susie$by_causal_maf, function(x) round(x$auprc, 3))
+cat("\nAP by causal MAF bin, SuSiE:\n")
+sapply(eval$susie$by_causal_maf, function(x) round(x$ap, 3))
 ```
 
 > **Why only one bin here?** The bundled `sim1000G` VCF contains only common

@@ -118,13 +118,13 @@ test_that("[A] eval_A: evaluate_methods output structure", {
 
   expect_true(has_names(
     eval_A$susie$global,
-    c("fdr_power_curve", "auprc", "pip_calibration", "cs_coverage",
+    c("fdr_power_curve", "ap", "pip_calibration", "cs_coverage",
       "cs_power", "cs_size_median", "cs_size_mean", "n_cs_reported",
       "runtime_mean", "runtime_sd", "n_fits", "n_failed")
   ))
 
   expect_equal(eval_A$susie$global$n_fits, 16L)
-  expect_true(in_range_or_na(eval_A$susie$global$auprc))
+  expect_true(in_range_or_na(eval_A$susie$global$ap))
   expect_true(in_range_or_na(eval_A$susie$global$cs_coverage))
   expect_true(in_range_or_na(eval_A$susie$global$cs_power))
 
@@ -192,7 +192,7 @@ test_that("[B] sim_B: binary annotations attached to genotypes and scenarios", {
 
 
 test_that("[B] eval_B: evaluation works on annotated simulation", {
-  expect_false(is.null(eval_B$susie$global$auprc))
+  expect_false(is.null(eval_B$susie$global$ap))
   expect_setequal(names(eval_B$susie$by_S), c("1", "2"))
 })
 
@@ -222,7 +222,7 @@ eval_C <- evaluate_methods(sim_C, res_C, verbose = FALSE)
 test_that("[C] continuous annotations: simulation + evaluation", {
   expect_false(is.null(sim_C$genotypes[[1]]$annotations_matrix))
   expect_equal(ncol(sim_C$genotypes[[1]]$annotations_matrix), 2L)
-  expect_false(is.null(eval_C$abf$global$auprc))
+  expect_false(is.null(eval_C$abf$global$ap))
 })
 
 
@@ -270,9 +270,9 @@ test_that("[D] eval_D: stratified by_S and by_phi populated", {
   # Global: 3 S * 3 phi * 2 iter * 2 regions = 36
   expect_equal(eval_D$susie$global$n_fits, 36L)
 
-  # ABF AUPRC in [0,1] across phi strata.
+  # ABF AP in [0,1] across phi strata.
   expect_true(all(sapply(eval_D$abf$by_phi,
-                         function(s) in_range_or_na(s$auprc))))
+                         function(s) in_range_or_na(s$ap))))
 })
 
 
@@ -324,7 +324,7 @@ test_that("[E] eval_E: by_p_causal stratification populated for sparse_inf", {
                          function(s) s$n_fits == 16L)))
 
   expect_true(all(sapply(eval_E$susie_inf$by_p_causal,
-                         function(s) in_range_or_na(s$auprc))))
+                         function(s) in_range_or_na(s$ap))))
 
   # Global: 2 * 2 * 2 * 2 * 2 = 32 fits
   expect_equal(eval_E$susie_inf$global$n_fits, 32L)
@@ -375,7 +375,7 @@ test_that("[F1] equal effect distribution: |effects| constant within a region", 
   eff <- abs(sim_F1$scenarios[[1]]$regions[[1]]$truth$causal_effects)
   expect_length(eff, 2L)
   expect_lt(diff(range(eff)), 1e-10)
-  expect_false(is.null(eval_F1$susie$global$auprc))
+  expect_false(is.null(eval_F1$susie$global$ap))
 })
 
 
@@ -385,7 +385,7 @@ test_that("[F2] per-region p vector produces matching region sizes", {
   expect_equal(sim_F2$genotypes[[2]]$p,  80L)
   expect_equal(sim_F2$genotypes[[3]]$p, 100L)
 
-  expect_true(in_range_or_na(eval_F2$abf$global$auprc))
+  expect_true(in_range_or_na(eval_F2$abf$global$ap))
 })
 
 
@@ -445,7 +445,7 @@ test_that("[G-finemap] missing finemap binary: graceful per-fit failure", {
   expect_true(all(is.na(res$finemap$results[[1]]$pip)))
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(is.na(ev$finemap$global$auprc))
+  expect_true(is.na(ev$finemap$global$ap))
   expect_true(is.na(ev$finemap$global$cs_coverage))
 })
 
@@ -460,7 +460,7 @@ test_that("[G-paintor] missing PAINTOR binary: graceful per-fit failure", {
   expect_equal(res$paintor$n_failed, 1L)
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(is.na(ev$paintor$global$auprc))
+  expect_true(is.na(ev$paintor$global$ap))
 })
 
 
@@ -493,7 +493,7 @@ test_that("[G-funmap] missing python: graceful per-fit failure", {
 # binary / Python env is not available on the current machine. They are
 # the same checks the original script ran via tryCatch + setup_*().
 
-test_that("[G-finemap-real] real FINEMAP binary: pip length, AUPRC in [0,1]", {
+test_that("[G-finemap-real] real FINEMAP binary: pip length, AP in [0,1]", {
   fp <- tryCatch(setup_finemap(download = FALSE),
                  error = function(e) NULL)
   skip_if(is.null(fp), "FINEMAP binary not available on this machine")
@@ -507,11 +507,11 @@ test_that("[G-finemap-real] real FINEMAP binary: pip length, AUPRC in [0,1]", {
   expect_length(res$finemap$results[[1]]$pip, 50L)
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(in_range_or_na(ev$finemap$global$auprc))
+  expect_true(in_range_or_na(ev$finemap$global$ap))
 })
 
 
-test_that("[G-paintor-real] real PAINTOR binary: pip length, AUPRC in [0,1]", {
+test_that("[G-paintor-real] real PAINTOR binary: pip length, AP in [0,1]", {
   pp <- tryCatch(setup_paintor(), error = function(e) NULL)
   skip_if(is.null(pp), "PAINTOR binary not available on this machine")
 
@@ -524,11 +524,11 @@ test_that("[G-paintor-real] real PAINTOR binary: pip length, AUPRC in [0,1]", {
   expect_length(res$paintor$results[[1]]$pip, 50L)
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(in_range_or_na(ev$paintor$global$auprc))
+  expect_true(in_range_or_na(ev$paintor$global$ap))
 })
 
 
-test_that("[G-beatrice-real] real BEATRICE: pip length, AUPRC in [0,1]", {
+test_that("[G-beatrice-real] real BEATRICE: pip length, AP in [0,1]", {
   ok <- tryCatch(
     setup_beatrice(
       beatrice_dir = "~/Beatrice-Finemapping",
@@ -552,11 +552,11 @@ test_that("[G-beatrice-real] real BEATRICE: pip length, AUPRC in [0,1]", {
   expect_length(res$beatrice$results[[1]]$pip, 50L)
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(in_range_or_na(ev$beatrice$global$auprc))
+  expect_true(in_range_or_na(ev$beatrice$global$ap))
 })
 
 
-test_that("[G-funmap-real] real Funmap: pip length, AUPRC in [0,1]", {
+test_that("[G-funmap-real] real Funmap: pip length, AP in [0,1]", {
   funmap_python <- "/opt/anaconda3/bin/python3"
   ok <- isTRUE(tryCatch(setup_funmap(python = funmap_python),
                          error = function(e) FALSE))
@@ -571,7 +571,7 @@ test_that("[G-funmap-real] real Funmap: pip length, AUPRC in [0,1]", {
   expect_length(res$funmap$results[[1]]$pip, 50L)
 
   ev <- evaluate_methods(sim_G, res, verbose = FALSE)
-  expect_true(in_range_or_na(ev$funmap$global$auprc))
+  expect_true(in_range_or_na(ev$funmap$global$ap))
 })
 
 
@@ -709,7 +709,7 @@ test_that("[I2] low-signal SuSiE: evaluate completes; CS metrics NA-safe", {
 })
 
 
-test_that("[I3] all-fits-failed method: NA AUPRC, n_failed correct, others unaffected", {
+test_that("[I3] all-fits-failed method: NA AP, n_failed correct, others unaffected", {
   # Inject a fake fully-failed method into res_A and register it so
   # evaluate_methods will descend into it. Restore .FM_REGISTRY on exit.
   old_registry <- .FM_REGISTRY
@@ -746,12 +746,12 @@ test_that("[I3] all-fits-failed method: NA AUPRC, n_failed correct, others unaff
 
   ev <- evaluate_methods(sim_A, res_with_bad, verbose = FALSE)
 
-  expect_true(is.na(ev$badmeth$global$auprc))
+  expect_true(is.na(ev$badmeth$global$ap))
   expect_equal(ev$badmeth$global$n_failed, 16L)
   expect_null(ev$badmeth$global$fdr_power_curve)
 
   # Other methods unaffected by the failed one
-  expect_false(is.na(ev$susie$global$auprc))
+  expect_false(is.na(ev$susie$global$ap))
 })
 
 
@@ -759,7 +759,7 @@ test_that("[I3] all-fits-failed method: NA AUPRC, n_failed correct, others unaff
 # [J] Standard error fields - presence, validity, n_iter behaviour
 # =============================================================================
 
-SE_SCALAR_FIELDS <- c("auprc_se", "cs_coverage_se", "cs_power_se",
+SE_SCALAR_FIELDS <- c("ap_se", "cs_coverage_se", "cs_power_se",
                       "cs_size_median_se", "cs_size_mean_se", "runtime_mean_se")
 
 
@@ -786,8 +786,8 @@ test_that("[J2] all scalar SE values are non-negative or NA across methods and s
 
 
 test_that("[J3] SE values are numeric (not NA) when n_iter=2 and fits succeed", {
-  expect_true(is.numeric(eval_A$susie$global$auprc_se) &&
-              !is.na(eval_A$susie$global$auprc_se))
+  expect_true(is.numeric(eval_A$susie$global$ap_se) &&
+              !is.na(eval_A$susie$global$ap_se))
   expect_true(is.numeric(eval_A$abf$global$cs_coverage_se) &&
               !is.na(eval_A$abf$global$cs_coverage_se))
 })
@@ -836,11 +836,11 @@ test_that("[J7] SE is non-NA for n_iter=2 and n_iter=4 (LLN sanity)", {
   ev_n2  <- evaluate_methods(sim_n2, res_n2, verbose=FALSE)
   ev_n4  <- evaluate_methods(sim_n4, res_n4, verbose=FALSE)
 
-  expect_false(is.na(ev_n2$abf$global$auprc_se))
-  expect_false(is.na(ev_n4$abf$global$auprc_se))
+  expect_false(is.na(ev_n2$abf$global$ap_se))
+  expect_false(is.na(ev_n4$abf$global$ap_se))
 
-  s2 <- ev_n2$abf$by_S[["1"]]$auprc_se
-  s4 <- ev_n4$abf$by_S[["1"]]$auprc_se
+  s2 <- ev_n2$abf$by_S[["1"]]$ap_se
+  s4 <- ev_n4$abf$by_S[["1"]]$ap_se
   expect_true(is.na(s2) || s2 >= 0)
   expect_true(is.na(s4) || s4 >= 0)
 })
@@ -1002,7 +1002,7 @@ test_that("[L2] evaluation.rds round-trips with metric and SE fields intact", {
                           save = TRUE, output_dir = out_dir, verbose = FALSE)
   ev2 <- readRDS(file.path(out_dir, "evaluation.rds"))
 
-  expect_identical(ev$susie$global$auprc, ev2$susie$global$auprc)
+  expect_identical(ev$susie$global$ap, ev2$susie$global$ap)
   expect_true(has_names(ev2$susie$global, SE_SCALAR_FIELDS))
 })
 
@@ -1018,12 +1018,12 @@ test_that("[L3] evaluation_summary.csv has correct rows, SE columns, matching va
 
   expect_setequal(csv$method, ev$methods_evaluated)
   expect_true(has_names(csv,
-                         c("auprc_se", "cs_coverage_se", "cs_power_se",
+                         c("ap_se", "cs_coverage_se", "cs_power_se",
                            "cs_size_median_se", "runtime_mean_se")))
 
   for (m in ev$methods_evaluated) {
-    csv_val <- csv$auprc[csv$method == m]
-    ev_val  <- ev[[m]]$global$auprc
+    csv_val <- csv$ap[csv$method == m]
+    ev_val  <- ev[[m]]$global$ap
     if (is.na(csv_val)) {
       expect_true(is.na(ev_val), info = sprintf("method=%s", m))
     } else {
@@ -1127,21 +1127,21 @@ test_that("[M] aggregate_region_metrics sums counts and averages scalars", {
   }
 })
 
-test_that("[M] the _pooled CS rates reproduce evaluate_methods()", {
-  # evaluate_methods()'s cs_coverage is a per-SET rate pooled over regions,
-  # which is the quantity SuSiE's 95% claim refers to, so it is left pooled.
-  # The region-weighted version sits in the unsuffixed per-region column.
+test_that("[M] the CS rates agree between the two paths, both weightings", {
+  # Both paths are region-weighted now, so the unsuffixed columns must match,
+  # and the _pooled columns must match each other too.
   pr <- per_region_metrics(sim_A, res_A, verbose = FALSE)
   ag <- aggregate_region_metrics(pr)
   for (m in ag$method) {
-    cov_ref <- eval_A[[m]]$global$cs_coverage
-    pow_ref <- eval_A[[m]]$global$cs_power
-    if (!is.na(cov_ref))
-      expect_equal(ag$cs_coverage_pooled[ag$method == m], cov_ref,
-                   tolerance = 1e-12, info = m)
-    if (!is.na(pow_ref))
-      expect_equal(ag$cs_power_pooled[ag$method == m], pow_ref,
-                   tolerance = 1e-12, info = m)
+    g <- eval_A[[m]]$global
+    for (fld in c("cs_coverage", "cs_power", "cs_size_mean",
+                  "cs_coverage_pooled", "cs_power_pooled",
+                  "cs_size_mean_pooled")) {
+      ref <- g[[fld]]
+      if (is.null(ref) || is.na(ref)) next
+      expect_equal(ag[[fld]][ag$method == m], ref, tolerance = 1e-12,
+                   info = paste(m, fld))
+    }
   }
 })
 
@@ -1183,15 +1183,18 @@ test_that("[M] compute_ap_exact scores ties as a block and guards non-finites", 
   expect_true(is.na(compute_ap_exact(c(1, Inf, 0.5), c(TRUE, FALSE, FALSE))))
 })
 
-test_that("[M] the pooled-ranking estimator is kept but differs from ap", {
-  # ap_pooled_grid is retained for continuity with older results. It is NOT the
-  # same quantity: it reads AP off the threshold grid of the ranking pooled
-  # across the stratum's regions. The difference is method-dependent in sign,
-  # which is why it cannot be used to rank methods.
+test_that("[M] the pooled-ranking AP estimators are gone", {
+  # auprc (trapezoid on the pooled ranking) and ap_pooled_grid (step integral
+  # on the same) both estimated the area under the PR curve, but on the wrong
+  # population - and auprc with an interpolation that is invalid in PR space.
+  # They disagreed with `ap` about which method was best, so keeping them as
+  # alternatives meant shipping two answers to one question.
   for (m in res_A$methods_run) {
     g <- eval_A[[m]]$global
-    expect_true(is.numeric(g$ap_pooled_grid))
-    expect_true(is.numeric(g$auprc))
+    expect_null(g$auprc)
+    expect_null(g$ap_pooled_grid)
+    expect_true(is.numeric(g$ap))
+    expect_true(is.numeric(g$ap_se) || is.na(g$ap_se))
   }
 })
 

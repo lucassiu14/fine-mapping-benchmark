@@ -14,7 +14,7 @@ results are stratified, and what each plot shows.
 3. [Stratification](#stratification)
 4. [Metric computation](#metric-computation)
    - [Power / FDR curve](#power--fdr-curve)
-   - [AUPRC](#auprc)
+   - [Average precision](#average-precision-ap)
    - [PIP calibration](#pip-calibration)
    - [Credible-set metrics](#credible-set-metrics)
    - [Runtime](#runtime)
@@ -155,15 +155,29 @@ before the formulas:
   0.0000, while the region-weighted version correctly returned `NA` on 0
   regions.
 
-`auprc` and `ap_pooled_grid` are both computed on the pooled ranking and are
-retained only for continuity with results produced before `ap` was separated
-out. Report `ap`.
+- **Credible-set coverage, power and size are region-weighted too.**
+  `cs_coverage` is the mean over regions of the share of *that region's* sets
+  holding a causal variant; pooling over sets instead would weight a region
+  reporting five sets five times as heavily as one reporting a single set, and
+  `cs_power` pooled over causal variants weights a region with four causals
+  four times as heavily as one with a single causal. Measured with S varying
+  (1 and 4), `cs_power` came out 0.6500 pooled against 0.7812 region-weighted,
+  and `cs_size_median` 2.50 against 3.72.
 
-Credible-set coverage is the one rate left pooled in `evaluate_methods()`: it
-is a per-*set* quantity, which is what a method's "95% credible set" claim
-refers to, so pooling over sets is the matching estimand. The per-region
-version is in the per-region table as `cs_coverage`, with the pooled one as
-`cs_coverage_pooled`.
+  A region that reported no sets has *undefined* coverage and set size — there
+  is no set to be right or wrong about — so it is excluded from those means
+  and counted in `cs_coverage_n`. Its power is 0, which is defined: none of its
+  causal variants were captured.
+
+**There is no `auprc`.** It and `ap_pooled_grid` estimated the same quantity as
+`ap`, the area under the precision–recall curve, but on the pooled ranking —
+and `auprc` additionally used the trapezoidal rule, whose linear interpolation
+is not valid in PR space (Davis & Goadrich 2006; the segment between two PR
+points is not achievable by any classifier). The three disagreed about which
+method was best: on a four-method fixture `ap` ranked `susie_inf > susie`,
+while both pooled estimators reversed it. Keeping them as alternatives meant
+shipping two wrong answers alongside the right one, so they were removed and
+`ap` is the single PR-curve summary.
 
 ### The per-region table
 
@@ -242,37 +256,50 @@ After SE computation (see below), two additional columns are present:
 
 ---
 
-### AUPRC
+### Average precision (`ap`)
 
-The area under the precision-recall curve is computed from the
-`precision` and `recall` columns of the FDR/power curve data frame using
-the **trapezoidal rule**:
+`ap` is the **mean over regions** of each region's own average precision,
+computed by `compute_ap_exact()`:
 
 ```
-AUPRC = sum over adjacent threshold pairs of:
-        Δrecall × (precision_left + precision_right) / 2
+AP = sum over distinct observed PIP values of:
+     (recall_i - recall_{i-1}) x precision_i
 ```
 
-Before summation, rows are sorted by increasing `recall`. At ties in `recall`,
-the row with higher `precision` is placed first (so that precision is not
-artificially depressed at the same recall level).
+Three choices in that definition matter, and each was a defect in the estimator
+this replaced:
 
-The result is a single scalar in [0, 1]. A perfect method would achieve
-AUPRC = 1 (all causal variants receive the highest PIPs). A method equivalent
-to a random PIP assignment would achieve AUPRC ≈ total_causal / N (the
-prevalence of causal variants), which is typically very small (< 0.05).
+1. **The step integral, not the trapezoid.** Linear interpolation between two
+   precision-recall points is not valid — the segment between them is not
+   achievable by any classifier (Davis & Goadrich 2006). The trapezoid
+   understated by roughly 29% in the weak-signal regime and roughly 0% at
+   strong signal, so its error was signal-dependent rather than a constant
+   offset.
 
-AUPRC is preferred over AUROC for fine-mapping because the class imbalance
-is extreme: in a typical region with 100–500 variants and S = 1–5 causal
-variants, the positive class constitutes < 5% of variants, and AUROC is
-insensitive to performance in this regime.
+2. **Evaluated at the distinct observed PIP values, not on a fixed grid.** A
+   grid treats every variant inside one band as entering the selection
+   together, so a causal variant is credited with the precision computed after
+   every non-causal in its band has also been admitted. A causal variant at
+   PIP 0.0032 with true rank 61 of 1000 has exact AP 1/61 = 0.0164 but grid AP
+   1/1000 = 0.001. The error grows as PIPs compress toward zero, making it a
+   heritability-dependent bias.
 
-**But AUPRC here is computed on the pooled ranking**, and it reads the curve
-off the threshold grid, which depresses AP by more at low heritability than at
-high — a bias in exactly the dependence one usually wants to measure. Use `ap`,
-the mean of the per-region average precisions, computed by `compute_ap_exact()`
-at the distinct observed PIP values rather than on a grid. `auprc` and
-`ap_pooled_grid` are kept for continuity with older results.
+3. **Per region, then averaged.** The AP of several regions' merged ranked list
+   is not the mean of their APs, because merging lets one region's false
+   positives outrank another region's true positive.
+
+Ties are scored as a block, which is the conservative convention: a method
+assigning the same PIP to a causal and a non-causal variant gets the precision
+of the whole block rather than the benefit of an arbitrary tie-break.
+
+AP is preferred over AUROC for fine-mapping because the class imbalance is
+extreme: in a typical region with 100-500 variants and S = 1-5 causal
+variants, the positive class is under 5% of variants, and AUROC is insensitive
+to performance in that regime.
+
+A perfect method scores 1. A random PIP assignment scores about
+`total_causal / N`, the prevalence of causal variants, which is typically
+below 0.05.
 
 ---
 
@@ -393,7 +420,7 @@ If `K* < 2`, the SE is `NA` (cannot estimate from fewer than two replicates).
 
 | Metric field | SE field |
 |---|---|
-| `auprc` | `auprc_se` |
+| `ap` | `ap_se` |
 | `cs_coverage` | `cs_coverage_se` |
 | `cs_power` | `cs_power_se` |
 | `cs_size_median` | `cs_size_median_se` |
@@ -452,8 +479,8 @@ contains:
 | Field | Type | Description |
 |---|---|---|
 | `fdr_power_curve` | data.frame or NULL | 201 rows (one per threshold). Columns: `threshold`, `tp`, `fp`, `fn`, `fdr`, `power`, `precision`, `recall`, `power_se`, `precision_se`. NULL when no valid fits exist. |
-| `auprc` | numeric | Area under precision-recall curve. NA when no valid fits. |
-| `auprc_se` | numeric | SE of AUPRC across replicates. NA when n_iter < 2. |
+| `ap` | numeric | Mean over regions of the per-region average precision. NA when no valid fits. |
+| `ap_se` | numeric | SE of `ap` across replicates. NA when n_iter < 2. |
 | `pip_calibration` | data.frame or NULL | `n_pip_cal_bins` rows. Columns: `bin`, `bin_lower`, `bin_upper`, `bin_mid`, `n`, `n_causal`, `mean_pip`, `frac_causal`, `frac_causal_se`. NULL when no valid fits. |
 | `cs_coverage` | numeric | Proportion of CSs containing ≥1 causal variant. NA if no CSs reported. |
 | `cs_coverage_se` | numeric | SE of cs_coverage across replicates. |
@@ -483,7 +510,7 @@ Load with:
 
 ```r
 ev <- readRDS("results/my_run/evaluation.rds")
-ev$susie$global$auprc
+ev$susie$global$ap
 ev$susie$by_S[["1"]]$fdr_power_curve
 ```
 
@@ -495,8 +522,8 @@ are NA when `n_iter < 2`.
 | Column | Description |
 |---|---|
 | `method` | Method name |
-| `auprc` | Global AUPRC |
-| `auprc_se` | SE of AUPRC |
+| `ap` | Global AP |
+| `ap_se` | SE of AP |
 | `cs_coverage` | Global CS coverage |
 | `cs_coverage_se` | SE of CS coverage |
 | `cs_power` | Global CS power |
@@ -578,7 +605,7 @@ and `frac_causal`).
 ### Global summary table
 
 **Page 3.** A formatted table with one row per method (including failed methods).
-Columns: Method, AUPRC, CS Coverage, CS Power, Median CS Size, Runtime (s),
+Columns: Method, AP, CS Coverage, CS Power, Median CS Size, Runtime (s),
 n_fits, n_failed. Where n_iter ≥ 2, values are formatted as `mean ± SE`.
 Where n_iter < 2 or the method failed entirely, values are shown as `NA`.
 
@@ -612,7 +639,7 @@ y = `frac_causal` with ±1 SE error bars, dashed identity line.
 ### Metrics vs stratification variable
 
 **Pages 6, 9, (12).** One page per stratification variable. A `facet_wrap` of
-5 panels (one per metric: AUPRC, CS Coverage, CS Power, Median CS Size,
+5 panels (one per metric: AP, CS Coverage, CS Power, Median CS Size,
 Runtime). In each panel:
 
 - x-axis: the stratification variable value (e.g. S = 1, 2, 3)
@@ -637,8 +664,8 @@ or smaller sparse proportion).
 ```
 $fdr_power_curve         data.frame(threshold, tp, fp, fn, fdr, power,
                                     precision, recall, power_se, precision_se)
-$auprc                   numeric scalar
-$auprc_se                numeric scalar (NA if n_iter < 2)
+$ap                   numeric scalar
+$ap_se                numeric scalar (NA if n_iter < 2)
 $pip_calibration         data.frame(bin, bin_lower, bin_upper, bin_mid,
                                     n, n_causal, mean_pip, frac_causal,
                                     frac_causal_se)
@@ -664,18 +691,18 @@ $n_failed                integer scalar
 ev <- readRDS("results/my_run/evaluation.rds")
 
 # Global metrics for SuSiE
-ev$susie$global$auprc
-ev$susie$global$auprc_se
+ev$susie$global$ap
+ev$susie$global$ap_se
 
 # By S
-ev$susie$by_S[["1"]]$auprc          # AUPRC at S = 1
+ev$susie$by_S[["1"]]$ap          # AP at S = 1
 ev$susie$by_S[["2"]]$cs_coverage    # CS coverage at S = 2
 
 # By phi
 ev$abf$by_phi[["0.2"]]$cs_power
 
 # By p_causal (sparse_inf model only)
-ev$susie_inf$by_p_causal[["0.4"]]$auprc
+ev$susie_inf$by_p_causal[["0.4"]]$ap
 
 # PR curve at S = 1
 df <- ev$susie$by_S[["1"]]$fdr_power_curve

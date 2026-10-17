@@ -32,14 +32,28 @@
 #                                       are merged)
 #
 # Each stratum contains:
-#   fdr_power_curve  — data.frame: threshold, tp, fp, fn, fdr, power, precision, recall
-#   auprc            — scalar (area under precision-recall curve)
-#   pip_calibration  — data.frame: bin, bin_lower, bin_upper, bin_mid, n, n_causal,
-#                                  mean_pip, frac_causal
-#   cs_coverage      — proportion of reported CSs containing ≥1 true causal variant
-#   cs_power         — proportion of true causal variants captured by any CS
-#   cs_size_median   — median variants per CS
-#   cs_size_mean     — mean variants per CS
+# EVERY RATE IS REGION-WEIGHTED: computed within each region, then averaged
+# over regions. Fine-mapping is applied to a region, so the question is "how
+# trustworthy are the calls in a locus", not "what fraction of all calls made
+# anywhere were wrong". Each averaged rate ships with the count of regions it
+# rests on, and the call-weighted value under a _pooled suffix.
+#
+#   ap               — mean of the per-region average precisions
+#   ap_n_fits        — regions contributing to it
+#   fdr_power_curve  — data.frame: threshold, fdr, power, precision, recall
+#                                  (region means), n_regions, the _pooled
+#                                  variants, and the tp/fp/fn totals
+#   pip_calibration  — data.frame: bin, bin_lower, bin_upper, bin_mid,
+#                                  mean_pip, frac_causal (region means),
+#                                  n_regions, the _pooled variants, n, n_causal
+#   cs_coverage      — mean over regions of the share of that region's CSs
+#                      holding ≥1 true causal variant
+#   cs_power         — mean over regions of the share of that region's causal
+#                      variants captured by any CS
+#   cs_size_median   — mean over regions of the region's median CS size
+#   cs_size_mean     — mean over regions of the region's mean CS size
+#   cs_coverage_n    — regions reporting ≥1 CS (coverage and the sizes rest on
+#   cs_power_n         these; power rests on regions with ≥1 causal variant)
 #   n_cs_reported    — total CSs reported
 #   runtime_mean     — mean runtime in seconds (successful fits only)
 #   runtime_sd       — SD of runtime
@@ -74,17 +88,17 @@
 #'   fields in each), plus \code{$per_region}: a single data frame covering
 #'   every method, one row per region-fit.
 #'
-#'   \strong{Which number to use.} \code{ap} is the mean of the per-region
-#'   average precisions and is the one to report. \code{auprc} and
-#'   \code{ap_pooled_grid} are computed on the ranking POOLED across the
-#'   stratum's regions, which lets one region's false positives outrank
-#'   another's true positive; they are kept for continuity with older results.
-#'   \code{fdr_power_curve} and \code{pip_calibration} are correctly pooled,
-#'   because a rate on one region's handful of selections is unestimable.
+#'   \strong{Every rate is region-weighted}: computed within each region, then
+#'   averaged over regions, because fine-mapping is applied to a region. Each
+#'   comes with the number of regions it rests on - \code{ap_n_fits},
+#'   \code{cs_coverage_n}, \code{cs_power_n}, and \code{n_regions} on the
+#'   curve and calibration tables - which must be read alongside it: at a high
+#'   PIP threshold most regions select nothing. The call-weighted value, in
+#'   which a region making many calls dominates, sits beside each under a
+#'   \code{_pooled} suffix.
 #'
 #'   To aggregate on your own axes, work from \code{$per_region} with
-#'   \code{\link{aggregate_region_metrics}}, which sums the counts and
-#'   averages the per-region scalars.
+#'   \code{\link{aggregate_region_metrics}}.
 #'
 #' @seealso \code{\link{per_region_metrics}},
 #'   \code{\link{aggregate_region_metrics}}
@@ -158,8 +172,8 @@ evaluate_methods <- function(simulation,
       g <- output[[m]]$global
       data.frame(
         method              = m,
-        auprc               = g$auprc,
-        auprc_se            = g$auprc_se,
+        ap                  = g$ap,
+        ap_se               = g$ap_se,
         cs_coverage         = g$cs_coverage,
         cs_coverage_se      = g$cs_coverage_se,
         cs_power            = g$cs_power,
@@ -376,15 +390,19 @@ evaluate_methods <- function(simulation,
   if (length(valid) == 0) {
     return(list(
       fdr_power_curve = NULL,
-      auprc           = NA_real_,
       ap              = NA_real_,
       ap_n_fits       = 0L,
-      ap_pooled_grid  = NA_real_,
       pip_calibration = NULL,
       cs_coverage     = NA_real_,
       cs_power        = NA_real_,
       cs_size_median  = NA_real_,
       cs_size_mean    = NA_real_,
+      cs_coverage_n   = 0L,
+      cs_power_n      = 0L,
+      cs_coverage_pooled    = NA_real_,
+      cs_power_pooled       = NA_real_,
+      cs_size_median_pooled = NA_real_,
+      cs_size_mean_pooled   = NA_real_,
       n_cs_reported   = NA_integer_,
       runtime_mean    = NA_real_,
       runtime_sd      = NA_real_,
@@ -413,7 +431,8 @@ evaluate_methods <- function(simulation,
   fdr_power <- .fdr_power_curve_per_region(valid, pip_thresholds)
 
   # The call-weighted curve, kept because it is what most of the literature
-  # reports and what `auprc` below is computed from.
+  # reports, and because its tp/fp/fn totals are counts a reader can
+  # re-aggregate.
   fdr_power_pooled <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
   if (!is.null(fdr_power)) {
     # tp/fp/fn are TOTALS over the stratum's regions, so they are counts and
@@ -447,11 +466,6 @@ evaluate_methods <- function(simulation,
                  mean(ap_per_fit[is.finite(ap_per_fit)]) else NA_real_
   ap_n_fits <- sum(is.finite(ap_per_fit))
 
-  # auprc stays on the CALL-WEIGHTED curve, as a trapezoid, for continuity with
-  # results produced before `ap` was separated out. Prefer `ap`.
-  auprc <- .compute_auprc(fdr_power_pooled$precision, fdr_power_pooled$recall)
-  ap_pooled_grid <- .compute_ap(fdr_power_pooled$precision,
-                                fdr_power_pooled$recall)
 
   # PIP calibration, REGION-WEIGHTED for the same reason: "are this region's
   # PIPs trustworthy" is the question being asked. The pooled columns are kept
@@ -480,15 +494,19 @@ evaluate_methods <- function(simulation,
 
   list(
     fdr_power_curve = fdr_power,
-    auprc           = auprc,
     ap              = ap,
     ap_n_fits       = ap_n_fits,
-    ap_pooled_grid  = ap_pooled_grid,
     pip_calibration = pip_cal,
     cs_coverage     = cs$coverage,
     cs_power        = cs$power,
     cs_size_median  = cs$size_median,
     cs_size_mean    = cs$size_mean,
+    cs_coverage_n   = cs$coverage_n,
+    cs_power_n      = cs$power_n,
+    cs_coverage_pooled    = cs$coverage_pooled,
+    cs_power_pooled       = cs$power_pooled,
+    cs_size_median_pooled = cs$size_median_pooled,
+    cs_size_mean_pooled   = cs$size_mean_pooled,
     n_cs_reported   = cs$n_cs,
     runtime_mean    = if (length(rts) > 0) mean(rts) else NA_real_,
     runtime_sd      = if (length(rts) > 1) sd(rts)   else NA_real_,
@@ -519,7 +537,7 @@ evaluate_methods <- function(simulation,
     if (n > 1L) stats::sd(x, na.rm = TRUE) / sqrt(n) else NA_real_
   }
 
-  scalar_fields <- c("auprc", "cs_coverage", "cs_power",
+  scalar_fields <- c("ap", "cs_coverage", "cs_power",
                      "cs_size_median", "cs_size_mean", "runtime_mean")
 
   # Identify unique iter values present in these fits
@@ -733,51 +751,6 @@ evaluate_methods <- function(simulation,
 
 
 # =============================================================================
-# Internal: AUPRC via the trapezoidal rule
-# =============================================================================
-
-.compute_auprc <- function(precision, recall) {
-  if (length(recall) < 2) return(NA_real_)
-
-  # Sort by increasing recall; at recall ties keep the higher precision
-  ord   <- order(recall, -precision)
-  prec  <- precision[ord]
-  rec   <- recall[ord]
-
-  # Trapezoidal rule: sum of trapezoids.
-  # NOTE: linear interpolation in PR space is not valid (Davis & Goadrich
-  # 2006) - the segment between two PR points is not achievable by any
-  # classifier. This estimator is RETAINED for backwards comparability with
-  # earlier runs, but .compute_ap() below is the correct one and is what
-  # downstream analysis should use. Empirically the trapezoid understates by
-  # ~29% in the weak-signal regime and ~0% at strong signal, i.e. the error
-  # is signal-dependent, not a constant offset.
-  sum(diff(rec) * (head(prec, -1) + tail(prec, -1)) / 2)
-}
-
-
-#' Average precision (the correct PR-curve summary)
-#'
-#' Step-function integral of precision over recall - no interpolation, so it
-#' avoids the invalid linear interpolation the trapezoidal rule performs in
-#' PR space. Computed from the same (precision, recall) grid as
-#' \code{.compute_auprc}, which recovers the exact ranking-based AP to
-#' within ~1-5%.
-#'
-#' @param precision,recall Numeric vectors from the FDR/power curve.
-#' @return Scalar average precision, or NA if the curve is degenerate.
-#' @keywords internal
-.compute_ap <- function(precision, recall) {
-  if (length(recall) < 2) return(NA_real_)
-  ord  <- order(recall, -precision)
-  prec <- precision[ord]
-  rec  <- recall[ord]
-  # sum over steps: (R_i - R_{i-1}) * P_i, with R_0 = 0
-  sum(diff(c(0, rec)) * prec)
-}
-
-
-# =============================================================================
 # Internal: PIP calibration
 #
 # Bins all (pip, is_causal) pairs into n_bins equal-width intervals on [0,1].
@@ -826,40 +799,69 @@ evaluate_methods <- function(simulation,
 
 .cs_metrics <- function(valid_fits) {
 
-  cs_hits  <- logical(0)   # per-CS: did it contain a causal?
-  cs_sizes <- integer(0)   # per-CS: how many variants?
-  causal_captured <- logical(0)  # per-causal-variant: was it in any CS?
+  # Pooled accumulators: one entry per credible SET, one per CAUSAL VARIANT,
+  # across every region.
+  cs_hits  <- logical(0)
+  cs_sizes <- integer(0)
+  causal_captured <- logical(0)
+
+  # Region-weighted accumulators: one entry per REGION. These are the reported
+  # values, because fine-mapping is applied to a region and the question is "of
+  # the sets I got for my locus, how many hold a causal variant". Pooling over
+  # sets weights a region reporting five sets five times as heavily as one
+  # reporting a single set.
+  r_cov <- numeric(0); r_pow <- numeric(0)
+  r_sz_mean <- numeric(0); r_sz_med <- numeric(0)
 
   for (f in valid_fits) {
     n_causal <- length(f$causal_indices)
 
     if (length(f$credible_sets) == 0) {
-      # No CSs: no causal variants captured
+      # No sets reported: coverage and set size are UNDEFINED for this region
+      # rather than 0 - there is no set to be right or wrong about, and
+      # scoring it 0 would punish abstention as hard as a wrong call. Power IS
+      # defined: none of the causal variants were captured.
       causal_captured <- c(causal_captured, rep(FALSE, n_causal))
+      if (n_causal > 0L) r_pow <- c(r_pow, 0)
       next
     }
 
-    # Variants covered by any CS in this fit
     all_cs_variants <- unique(unlist(f$credible_sets))
+    sizes <- vapply(f$credible_sets, length, integer(1))
+    hits  <- vapply(f$credible_sets,
+                    function(cs) any(cs %in% f$causal_indices), logical(1))
 
-    for (cs in f$credible_sets) {
-      cs_hits  <- c(cs_hits,  any(cs %in% f$causal_indices))
-      cs_sizes <- c(cs_sizes, length(cs))
-    }
+    cs_hits         <- c(cs_hits,  hits)
+    cs_sizes        <- c(cs_sizes, sizes)
+    causal_captured <- c(causal_captured,
+                         f$causal_indices %in% all_cs_variants)
 
-    causal_captured <- c(
-      causal_captured,
-      f$causal_indices %in% all_cs_variants
-    )
+    r_cov     <- c(r_cov,     mean(hits))
+    r_sz_mean <- c(r_sz_mean, mean(sizes))
+    r_sz_med  <- c(r_sz_med,  stats::median(sizes))
+    if (n_causal > 0L)
+      r_pow <- c(r_pow, sum(f$causal_indices %in% all_cs_variants) / n_causal)
   }
 
   n_cs <- length(cs_hits)
+  mn   <- function(v) if (length(v)) mean(v) else NA_real_
 
   list(
-    coverage    = if (n_cs > 0L)                   mean(cs_hits)       else NA_real_,
-    power       = if (length(causal_captured) > 0L) mean(causal_captured) else NA_real_,
-    size_median = if (n_cs > 0L)                   median(cs_sizes)    else NA_real_,
-    size_mean   = if (n_cs > 0L)                   mean(cs_sizes)      else NA_real_,
+    # Region-weighted - reported.
+    coverage    = mn(r_cov),
+    power       = mn(r_pow),
+    size_median = mn(r_sz_med),
+    size_mean   = mn(r_sz_mean),
+    # Regions each mean rests on. coverage and the sizes count only regions
+    # that reported at least one set.
+    coverage_n  = length(r_cov),
+    power_n     = length(r_pow),
+    # Call-weighted, over sets and over causal variants respectively.
+    coverage_pooled    = if (n_cs > 0L) mean(cs_hits) else NA_real_,
+    power_pooled       = if (length(causal_captured) > 0L)
+                           mean(causal_captured) else NA_real_,
+    size_median_pooled = if (n_cs > 0L) stats::median(cs_sizes) else NA_real_,
+    size_mean_pooled   = if (n_cs > 0L) mean(cs_sizes) else NA_real_,
     n_cs        = n_cs
   )
 }

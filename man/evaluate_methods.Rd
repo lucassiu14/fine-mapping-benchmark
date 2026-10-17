@@ -48,17 +48,17 @@ A named list with one element per method, each containing
 fields in each), plus \code{$per_region}: a single data frame covering
 every method, one row per region-fit.
 
-\strong{Which number to use.} \code{ap} is the mean of the per-region
-average precisions and is the one to report. \code{auprc} and
-\code{ap_pooled_grid} are computed on the ranking POOLED across the
-stratum's regions, which lets one region's false positives outrank
-another's true positive; they are kept for continuity with older results.
-\code{fdr_power_curve} and \code{pip_calibration} are correctly pooled,
-because a rate on one region's handful of selections is unestimable.
+\strong{Every rate is region-weighted}: computed within each region, then
+averaged over regions, because fine-mapping is applied to a region. Each
+comes with the number of regions it rests on - \code{ap_n_fits},
+\code{cs_coverage_n}, \code{cs_power_n}, and \code{n_regions} on the
+curve and calibration tables - which must be read alongside it: at a high
+PIP threshold most regions select nothing. The call-weighted value, in
+which a region making many calls dominates, sits beside each under a
+\code{_pooled} suffix.
 
 To aggregate on your own axes, work from \code{$per_region} with
-\code{\link{aggregate_region_metrics}}, which sums the counts and
-averages the per-region scalars.
+\code{\link{aggregate_region_metrics}}.
 }
 \description{
 Evaluate fine-mapping methods against ground truth
