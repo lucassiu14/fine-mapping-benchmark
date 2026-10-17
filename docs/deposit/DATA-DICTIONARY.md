@@ -17,7 +17,7 @@ Every file is at the grain of a **fit** — one method, one region, one iteratio
 | `phi` | proportion of phenotypic variance explained, h²: 0.05 to 0.6. |
 | `iter` | replicate index, 1–10, within the (`S`, `phi`) combination. |
 | `region_id` | which of the scenario's ten regions, 1–10. Regions 1 and 2 hold 500 variants, 3 and 4 hold 750, and so on. |
-| `method` | one of the nineteen methods. |
+| `method` | one of the eighteen methods. |
 
 The first four identify the parameter row and **name the file** in
 `posterior-inclusion-probabilities/` and `credible-sets/`; the last five

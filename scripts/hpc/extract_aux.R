@@ -47,10 +47,21 @@ rt_rows  <- vector("list", length(scen_dirs) * 400L)   # per fit
 fi_rows  <- vector("list", length(scen_dirs) * 400L)   # per fit, FB family only
 kr <- 0L; kf <- 0L; n_read <- 0L
 
-n_supp_used <- 0L
+n_supp_used <- 0L; n_supp_only <- 0L
 for (sd in scen_dirs) {
   f <- file.path(sd, "results.rds")
-  if (!file.exists(f)) next
+  # A re-run that must leave an earlier iteration untouched writes
+  # results_supp.rds into a root of its own, with no unsuffixed file beside it.
+  # Reading only results.rds there skips every scenario and writes an empty
+  # extract - the blind spot collect_results.R had and 6a368cb fixed in
+  # qc_run.R. Fall back per scenario, so a mixed root still overlays below.
+  supp_only <- FALSE
+  if (!file.exists(f)) {
+    f <- file.path(sd, "results_supp.rds")
+    if (!file.exists(f)) next
+    supp_only <- TRUE
+    n_supp_only <- n_supp_only + 1L
+  }
   r <- tryCatch(readRDS(f), error = function(e) NULL)
   if (is.null(r)) next
   # Supplemental re-runs (FMB_METHODS=...) write results_supp.rds beside the
@@ -59,7 +70,7 @@ for (sd in scen_dirs) {
   # silently ignored here. Overlay per method, exactly as collect_results.R
   # does, so methods absent from the re-run keep their original records.
   fs <- file.path(sd, "results_supp.rds")
-  if (file.exists(fs)) {
+  if (!supp_only && file.exists(fs)) {
     rs <- tryCatch(readRDS(fs), error = function(e) NULL)
     if (!is.null(rs)) {
       for (sm in names(rs)) r[[sm]] <- rs[[sm]]
@@ -127,3 +138,5 @@ message(sprintf("  wrote %s  (%d scenarios, %d runtime records, %d importance re
                 basename(out), n_read, kr, kf, file.size(out) / 1024^2))
 if (n_supp_used) message(sprintf("  overlaid results_supp.rds in %d of %d scenarios",
                                  n_supp_used, n_read))
+if (n_supp_only) message(sprintf("  read results_supp.rds alone in %d of %d scenarios (no results.rds beside it)",
+                                 n_supp_only, n_read))

@@ -9,7 +9,7 @@
 #   run_methods, evaluate_methods, plot_results
 #
 # Plus per-method argument-passthrough tests for the pure-R wrappers
-# (susie, susie_inf, abf, carma, marginal_z, polyfun_oracle, polyfun_est)
+# (susie, susie_inf, abf, carma, marginal_z, oracle_susie)
 # and skip-if-not-available tests for the external wrappers (finemap,
 # paintor, beatrice, funmap, sparsepro).
 #
@@ -29,8 +29,7 @@
 #   10b carma with annotations (run_carma_annotated + scenario hook)
 #   11  External wrappers (finemap / paintor / beatrice / funmap)
 #   12  run_marginal_z
-#   13  run_polyfun_oracle
-#   14  run_polyfun_est (+ scenario_setup hook)
+#   13  run_oracle_susie
 #   15  MAF-stratified evaluation (by_causal_maf)
 #   16  Misspecification stratification (by_true_annotation_type)
 #   17  LD mismatch (n_ref independent reference panel)
@@ -75,7 +74,7 @@ SIM_MINI <- run_simulation(
   seed = 42, verbose = FALSE
 )
 
-# Annotated variant for polyfun_oracle / polyfun_est tests
+# Annotated variant for the oracle_susie tests
 SIM_MINI_ANNOT <- run_simulation(
   n_regions = 2, n = 100, p = 50,
   n_iter = 2, S = c(1, 2), phi = c(0.2, 0.4),
@@ -2080,43 +2079,43 @@ test_that("[12] marginal_z: returns exactly one credible set", {
 
 
 # =============================================================================
-# SECTION 13: run_polyfun_oracle / run_polyfun_oracle_region (oracle priors)
+# SECTION 13: run_oracle_susie / run_oracle_susie_region (oracle priors)
 # =============================================================================
 #
-# polyfun_oracle reads simulator truth, so it needs SIM_MINI_ANNOT (which
+# oracle_susie reads simulator truth, so it needs SIM_MINI_ANNOT (which
 # has annotations + enrichment in $truth).
 
 .rg_po <- SIM_MINI_ANNOT$genotypes[[1]]
 .rp_po <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
 
 
-test_that("[13] polyfun_oracle: output has all standard fields", {
-  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+test_that("[13] oracle_susie: output has all standard fields", {
+  fit <- run_oracle_susie_region(.rg_po, .rp_po)
   expect_true(all(c("pip", "credible_sets", "method", "input_type",
                     "params", "runtime_seconds", "additional") %in% names(fit)))
-  expect_equal(fit$method, "polyfun_oracle")
+  expect_equal(fit$method, "oracle_susie")
 })
 
-test_that("[13] polyfun_oracle: pip valid (length p, in [0, 1])", {
-  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+test_that("[13] oracle_susie: pip valid (length p, in [0, 1])", {
+  fit <- run_oracle_susie_region(.rg_po, .rp_po)
   expect_equal(length(fit$pip), .rg_po$p)
   expect_true(all(fit$pip >= 0, na.rm = TRUE))
   expect_true(all(fit$pip <= 1, na.rm = TRUE))
 })
 
-test_that("[13] polyfun_oracle: reports prior_weights of length p", {
-  fit <- run_polyfun_oracle_region(.rg_po, .rp_po)
+test_that("[13] oracle_susie: reports prior_weights of length p", {
+  fit <- run_oracle_susie_region(.rg_po, .rp_po)
   pw  <- fit$additional$prior_weights
   expect_false(is.null(pw))
   expect_equal(length(pw), .rg_po$p)
   expect_true(all(pw >= 0, na.rm = TRUE))
 })
 
-test_that("[13] polyfun_oracle: falls back to uniform prior when annotations absent", {
+test_that("[13] oracle_susie: falls back to uniform prior when annotations absent", {
   # SIM_MINI has annotations="none" so truth$enrichment is also absent.
   # The wrapper runs non-functional PolyFun + SuSiE with a uniform prior.
   # PolyFun's HESS step can legitimately fail on this tiny fixture.
-  fit <- run_polyfun_oracle_region(.rg, .rp)
+  fit <- run_oracle_susie_region(.rg, .rp)
   expect_identical(fit$params$prior_source, "uniform_fallback")
   expect_equal(length(fit$pip), .rg$p)
   if (is.null(fit$error)) {
@@ -2126,71 +2125,12 @@ test_that("[13] polyfun_oracle: falls back to uniform prior when annotations abs
   }
 })
 
-test_that("[13] polyfun_oracle: fine-maps exactly as polyfun_ldsc given the same prior", {
+test_that("[13] oracle_susie: fine-maps exactly as polyfun_ldsc given the same prior", {
   set.seed(8)
-  fit <- run_polyfun_oracle_region(.rg_po, .rp_po, hess = FALSE)
+  fit <- run_oracle_susie_region(.rg_po, .rp_po, hess = FALSE)
   ref <- run_polyfun_ldsc(.rp_po$z, .rg_po$LD, .rg_po$n,
                           prior = fit$additional$prior_weights, hess = FALSE)
   expect_equal(fit$pip, ref$pip)
-})
-
-
-# =============================================================================
-# SECTION 14: run_polyfun_est / run_polyfun_est_region / scenario_setup
-# =============================================================================
-
-.rg_pe <- SIM_MINI_ANNOT$genotypes[[1]]
-.rp_pe <- SIM_MINI_ANNOT$scenarios[[1]]$regions[[1]]
-
-
-test_that("[14] polyfun_est: output has all standard fields", {
-  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
-  expect_true(all(c("pip", "credible_sets", "method", "input_type",
-                    "params", "runtime_seconds", "additional") %in% names(fit)))
-  expect_equal(fit$method, "polyfun_est")
-})
-
-test_that("[14] polyfun_est: pip valid (length p, in [0, 1])", {
-  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
-  expect_equal(length(fit$pip), .rg_pe$p)
-  expect_true(all(fit$pip >= 0, na.rm = TRUE))
-  expect_true(all(fit$pip <= 1, na.rm = TRUE))
-})
-
-test_that("[14] polyfun_est: reports non-negative tau of length m + 1", {
-  fit <- run_polyfun_est_region(.rg_pe, .rp_pe)
-  tau <- fit$additional$tau
-  m   <- ncol(.rg_pe$annotations_matrix)
-  expect_false(is.null(tau))
-  expect_equal(length(tau), m + 1L)
-  expect_true(all(tau >= 0, na.rm = TRUE))
-})
-
-test_that("[14] polyfun_est: runs without scenario hook (per-region tau fallback)", {
-  fit <- run_polyfun_est_region(.rg_pe, .rp_pe, pooled_tau = NULL)
-  expect_equal(length(fit$pip), .rg_pe$p)
-  expect_false(is.null(fit$additional$tau))
-})
-
-test_that("[14] polyfun_est: scenario-setup hook returns pooled_tau when consistent", {
-  scen <- SIM_MINI_ANNOT$scenarios[[1]]
-  extra <- run_polyfun_est_scenario_setup(
-    genotypes = SIM_MINI_ANNOT$genotypes,
-    regions   = scen$regions,
-    user_args = list()
-  )
-  m <- ncol(SIM_MINI_ANNOT$genotypes[[1]]$annotations_matrix)
-  expect_true("pooled_tau" %in% names(extra))
-  expect_equal(length(extra$pooled_tau), m + 1L)
-  expect_true(all(extra$pooled_tau >= 0))
-})
-
-test_that("[14] polyfun_est: graceful behaviour on no-annotation fixture", {
-  fit <- run_polyfun_est_region(.rg, .rp)
-  # Either falls back to uniform priors or sets $error. We just want
-  # no crash and a length-p pip vector.
-  expect_false(is.null(fit))
-  expect_equal(length(fit$pip), .rg$p)
 })
 
 

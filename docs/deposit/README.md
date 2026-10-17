@@ -1,7 +1,7 @@
 # Main simulation: fine-mapping benchmark results
 
 Results of the main simulation study from `fine-mapping-benchmark`, in which
-nineteen statistical fine-mapping methods were run on identical simulated data
+eighteen statistical fine-mapping methods were run on identical simulated data
 and scored with identical metrics.
 
 Code: https://github.com/lucassiu14/fine-mapping-benchmark
@@ -78,7 +78,7 @@ in-sample throughout: no method was given a reference panel.
 
 45 parameter rows, each simulated 250 times, giving 11,250 scenarios. A scenario
 holds ten independent regions, so each method was fitted to 112,500 regions;
-across nineteen methods, 2,031,230 fits.
+across eighteen methods, 1,918,730 fits.
 
 | Factor | Levels |
 |---|---|
@@ -106,8 +106,8 @@ held fewer variants after filtering. `n_variants` is what each fit actually saw;
 
 `abf`, `beatrice`, `carma`, `fb_pooled`, `fb_xregion`, `finemap`, `finemap_inf`,
 `finimom`, `functional_beatrice`, `funmap`, `marginal_z`, `paintor`,
-`polyfun_est`, `polyfun_ldsc`, `polyfun_oracle`, `sbayesrc`, `sparsepro`,
-`susie`, `susie_inf`.
+`polyfun_ldsc`, `polyfun_oracle`, `sbayesrc`, `sparsepro`, `susie`,
+`susie_inf`.
 
 `carma` covers only part of the grid, having been stopped on cost. `funmap`
 requires annotations and is absent from the unannotated rows by construction.

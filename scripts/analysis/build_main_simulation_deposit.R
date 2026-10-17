@@ -46,11 +46,17 @@ stem <- function(model, p_causal, annotation_type, enrichment_fold) {
   paste(m, a, sep = "_")
 }
 
+# polyfun_est was an "LDSC-lite" prior on susieR defaults - non-canonical at
+# both stages, superseded by polyfun_ldsc, and removed from the package. It is
+# excluded here so the deposit matches the methods the package offers.
+EXCLUDE <- "polyfun_est"
+
 ROW_KEY <- c("model", "p_causal", "annotation_type", "enrichment_fold")
 FIT_KEY <- c("S", "phi", "iter", "region_id", "method")
 
 # --- the map from how it ran to what it is ----------------------------------
 L1 <- readRDS(file.path(SRC, "combined_fit_metrics.rds"))
+L1 <- L1[!L1$method %in% EXCLUDE, ]
 rows <- unique(L1[, c("job_dir", ROW_KEY)])
 rows$file <- vapply(seq_len(nrow(rows)), function(i)
   stem(rows$model[i], rows$p_causal[i], rows$annotation_type[i], rows$enrichment_fold[i]), "")
@@ -68,7 +74,8 @@ for (i in seq_len(45L)) {
 
   # --- posterior inclusion probabilities -> one row per retained variant -----
   p  <- readRDS(file.path(SRC, "piptail", paste0("piptail_", jd, ".rds")))
-  tl <- p$tail; n <- vapply(tl, function(r) length(r$pip), 0L)
+  tl <- p$tail[!fld(p$tail, "method", "") %in% EXCLUDE]
+  n <- vapply(tl, function(r) length(r$pip), 0L)
   sid <- rep(fld(tl, "scenario_id", 0L), n)
   pip <- cbind(resolve(sid), data.frame(
     region_id = rep(fld(tl, "region_id", 0L), n),
@@ -90,7 +97,8 @@ for (i in seq_len(45L)) {
 
   # --- credible sets -> one row per variant per reported set -----------------
   cs <- readRDS(file.path(SRC, "credsets", paste0("cs_", jd, ".rds")))
-  rw <- cs$rows; nset <- fld(rw, "n_sets", 0L); keep <- which(nset > 0L)
+  rw <- cs$rows[!fld(cs$rows, "method", "") %in% EXCLUDE]
+  nset <- fld(rw, "n_sets", 0L); keep <- which(nset > 0L)
   # Vectorised: building one data frame per fit and rbinding 42,000 of them is
   # quadratic and takes hours over the 45 rows.
   kr <- rw[keep]
@@ -124,7 +132,8 @@ for (i in seq_len(45L)) {
 
   # --- runtimes --------------------------------------------------------------
   a <- readRDS(file.path(SRC, "aux", paste0("aux_", jd, ".rds")))
-  rt <- a$runtime; scope <- fld(rt, "scope", "")
+  rt <- a$runtime[!fld(a$runtime, "method", "") %in% EXCLUDE]
+  scope <- fld(rt, "scope", "")
   fr <- rt[scope == "fit"]
   fit_rt[[i]] <- cbind(resolve(fld(fr, "scenario_id", 0L)), data.frame(
     region_id = fld(fr, "region_id", 0L), method = fld(fr, "method", ""),
@@ -198,7 +207,16 @@ UP <- file.path(dirname(DEST), "upload")
 unlink(UP, recursive = TRUE); dir.create(UP, recursive = TRUE)
 tar <- file.path(UP, paste0(basename(DEST), ".tar.gz"))
 system2("tar", c("-czf", shQuote(tar), "-C", shQuote(dirname(DEST)), shQuote(basename(DEST))))
-for (f in c("README.md", "DATA-DICTIONARY.md", "simulation-grid.csv", "fit-metrics.csv.gz"))
+# README.md and DATA-DICTIONARY.md are NOT copied out: they live inside the
+# archive, and their text goes in the Zenodo record's own Description field,
+# which renders on the record page. Copying them out as well made the upload set
+# look like it held two of everything.
+#
+# simulation-grid.csv is 9 KB and 45 rows, so a visitor can see the design
+# without downloading 1.4 GB. fit-metrics.csv.gz is for reading from code, not
+# for opening: 2,031,231 rows is nearly twice what a spreadsheet will load, and
+# pandas and readr both read .gz directly.
+for (f in c("simulation-grid.csv", "fit-metrics.csv.gz"))
   file.copy(file.path(DEST, f), file.path(UP, f), overwrite = TRUE)
 
 cat("\nupload set (", UP, "):\n", sep = "")

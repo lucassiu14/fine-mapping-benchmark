@@ -95,3 +95,4 @@ docs/testing_report.md
 # Root-anchored so it does NOT match scripts/tuning/ (the code).
 /tuning/
 zenodo/
+Rplots.pdf

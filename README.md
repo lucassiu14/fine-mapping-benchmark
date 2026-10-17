@@ -62,7 +62,7 @@ pkgload::load_all()        # load fmbenchmark from the source checkout
 **Tier 1 unlocks:**
 
 - Methods: **SuSiE**, **SuSiE-inf**, **ABF**, **CARMA**, **marginal_z**,
-  **polyfun_oracle**, **polyfun_est**
+  **oracle_susie**
 - All of `evaluate_methods()` (AUPRC, CS metrics, PIP calibration)
 - All of `plot_results()` (multi-page PDF output)
 - All simulation (`simulate_genotypes()`, `simulate_phenotypes()`,
@@ -238,8 +238,7 @@ project root.
 | **BEATRICE** | 3 | Python script | `conda env create -f environment.yml` + BEATRICE repo |
 | **Functional BEATRICE** | 3 | Python script (in this repo) | Same conda env as BEATRICE; code is bundled in `BEATRICE_annot_sparse/` |
 | **marginal_z** | 1 | R (built-in) | None |
-| **polyfun_oracle** | 1 | R package | susieR (already in renv) |
-| **polyfun_est** | 1 | R package | susieR (already in renv) |
+| **oracle_susie** | 1 | R package | susieR (already in renv) |
 | **SparsePro** | 3 | Python script (in cloned repo) | Same conda env as BEATRICE + `pip install pandas` if not present |
 
 See [Installation](#installation) for what each tier requires.
@@ -266,8 +265,8 @@ fine-mapping-benchmark/
 │                               #   wrapper_abf.R, wrapper_carma.R, wrapper_paintor.R,
 │                               #   wrapper_funmap.R, wrapper_beatrice.R,
 │                               #   wrapper_functional_beatrice.R, wrapper_susie_inf.R,
-│                               #   wrapper_marginal_z.R, wrapper_polyfun_oracle.R,
-│                               #   wrapper_polyfun_est.R, wrapper_sparsepro.R)
+│                               #   wrapper_marginal_z.R, wrapper_oracle_susie.R,
+│                               #   wrapper_sparsepro.R)
 ├── inst/
 │   ├── CITATION                # Package citation
 │   ├── extdata/                # Bundled region tables (ship with the package)

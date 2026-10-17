@@ -73,7 +73,7 @@ GENETIC_MAP_DIR <- "data/genetic_maps"
 # is used unchanged.
 ITER005_METHODS <- c(
   "susie", "beatrice",                                    # annotation-blind controls
-  "polyfun_oracle", "polyfun_est", "polyfun_ldsc",        # per-SNP prior, linear
+  "oracle_susie", "polyfun_ldsc",                       # per-SNP prior, linear
   "paintor", "sbayesrc", "funmap",                        # other annotation-aware
   "functional_beatrice", "fb_pooled", "fb_xregion"        # the focus
 )
@@ -82,6 +82,8 @@ ITER005_METHODS <- c(
 # Iteration 006 fits Iteration 005's set without polyfun_est and fb_pooled - the
 # user's decision; both are left out of every LSR figure. Set
 # FMB_ITER006_METHODS=1 to select it. It takes precedence over FMB_ITER005_METHODS.
+# polyfun_est was removed from the package on 2026-10-17, so only fb_pooled
+# is still dropped here; the name is kept for the record of what 006 ran.
 ITER006_METHODS <- setdiff(ITER005_METHODS, c("polyfun_est", "fb_pooled"))
 # >>> END ITERATION 006 TEMPORARY BLOCK <<<
 
@@ -101,7 +103,7 @@ METHODS <- c(
   # namely whichever scenarios happened to finish first.
   "finimom", "sparsepro",
   # annotation-informed
-  "funmap", "paintor", "polyfun_oracle", "polyfun_est", "polyfun_ldsc",
+  "funmap", "paintor", "oracle_susie", "polyfun_ldsc",
   "sbayesrc",
   # BEATRICE family: locus-only, then the two cross-region joint-prior models
   "beatrice", "functional_beatrice", "fb_pooled", "fb_xregion"
@@ -148,7 +150,7 @@ if (nzchar(Sys.getenv("FMB_ITER006_METHODS", ""))) {                 # ITER-006 
 # FMB_ITER007_METHODS=1 to select it. It takes precedence over the 005 and 006 sets.
 ITER007_METHODS <- c(
   "susie", "susie_inf", "finemap", "finemap_inf", "finimom", "sparsepro",
-  "funmap", "paintor", "polyfun_oracle", "polyfun_ldsc",
+  "funmap", "paintor", "oracle_susie", "polyfun_ldsc",
   "beatrice", "fb_xregion"
 )
 if (nzchar(Sys.getenv("FMB_ITER007_METHODS", ""))) {
@@ -166,8 +168,7 @@ METHOD_ARGS <- list(
   # an earlier value of 5 would have under-modelled every S=10 scenario.
   carma               = list(num.causal = 10),
   marginal_z          = list(coverage = 0.95),
-  polyfun_oracle      = list(L = 10),
-  polyfun_est         = list(L = 10),
+  oracle_susie      = list(L = 10),
   polyfun_ldsc        = list(L = 10),
   # SBayesRC at the paper's settings (3,000 iterations, 1,000 burn-in,
   # rho tuned by pseudo-validation); see R/wrapper_sbayesrc.R.

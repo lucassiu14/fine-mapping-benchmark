@@ -74,6 +74,9 @@ setup_susie <- function() {
 #' @param estimate_prior_variance Logical. Default: TRUE.
 #' @param prior_variance Numeric or NULL. Prior effect variance. If NULL,
 #'   set to \code{0.1 * var(y)} (individual-level) or 0.1 (summary stats).
+#' @param prior_weights Numeric or NULL. Per-variant prior probability of
+#'   being causal, length p, passed to SuSiE. NULL leaves SuSiE's uniform
+#'   prior in place. Used by \code{oracle_susie} to supply a known prior.
 #' @param coverage Numeric. Coverage level for credible sets. Default: 0.95.
 #' @param min_abs_corr Numeric. Purity threshold for filtering credible sets.
 #'   Default: 0.5.
@@ -118,6 +121,7 @@ run_susie <- function(z = NULL,
                       estimate_residual_variance = TRUE,
                       estimate_prior_variance = TRUE,
                       prior_variance = NULL,
+                      prior_weights = NULL,
                       coverage = 0.95,
                       min_abs_corr = 0.5,
                       max_iter = 100,
@@ -176,6 +180,7 @@ run_susie <- function(z = NULL,
         X = X,
         y = y,
         L = L,
+        prior_weights = prior_weights,
         scaled_prior_variance = prior_variance / var(y),
         estimate_residual_variance = estimate_residual_variance,
         estimate_prior_variance = estimate_prior_variance,
@@ -190,6 +195,7 @@ run_susie <- function(z = NULL,
         R = LD,
         n = n,
         L = L,
+        prior_weights = prior_weights,
         prior_variance = prior_variance,
         estimate_residual_variance = estimate_residual_variance,
         estimate_prior_variance = estimate_prior_variance,

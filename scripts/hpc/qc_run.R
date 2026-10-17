@@ -226,8 +226,8 @@ cat("\n--- verdict ---------------------------------------------------\n")
 # as missing, under a heading telling the reader not to trust the run. Each
 # results file records what it actually ran, so prefer that where it is present.
 expected <- c("susie","susie_inf","finemap","finemap_inf","abf","marginal_z",
-              "carma","finimom","sparsepro","funmap","paintor","polyfun_oracle",
-              "polyfun_est","polyfun_ldsc","sbayesrc","beatrice",
+              "carma","finimom","sparsepro","funmap","paintor","oracle_susie",
+              "polyfun_ldsc","sbayesrc","beatrice",
               "functional_beatrice","fb_pooled","fb_xregion")
 if (length(requested)) {
   cat(sprintf("the run asked for %d method(s): %s\n",

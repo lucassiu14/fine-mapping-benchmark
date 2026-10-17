@@ -70,7 +70,7 @@ for (sc_idx in seq_along(sim$scenarios)) {
       annotation_type = tr$annotation_type %||% NA_character_,
       causal_indices  = as.integer(tr$causal_indices),
       # Present only where the simulator stored it (Iteration 005 onward);
-      # polyfun_oracle's true prior cannot be reconstructed without it.
+      # oracle_susie's true prior cannot be reconstructed without it.
       causal_probs    = tr$causal_probs
     )
   }

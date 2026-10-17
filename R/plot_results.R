@@ -35,8 +35,7 @@
   # polyfun_* methods get a related-but-distinct hue family to signal
   # they're an annotation-aware family.
   marginal_z            = "#7F7F7F",   # mid grey — baseline / floor
-  polyfun_oracle        = "#1A535C",   # deep teal — the ceiling
-  polyfun_est           = "#4ECDC4",   # lighter teal — the (naive) realistic version
+  oracle_susie        = "#1A535C",   # deep teal — the ceiling
   polyfun_ldsc          = "#2E86AB",   # deep blue — the LD-score-corrected version
   sbayesrc              = "#8B5A2B",   # bronze — mixture-of-normals Bayesian
   # Deep wine — visually distinct from the BEATRICE

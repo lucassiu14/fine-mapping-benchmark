@@ -1,73 +1,67 @@
 # =============================================================================
-# polyfun_oracle.R
+# oracle_susie.R
 #
-# Wrapper for PolyFun-oracle: PolyFun-style fine-mapping with **true** per-SNP
-# priors recovered from the simulator. Serves as the methodological upper
-# bound for any annotation-aware method.
+# SuSiE given the **true** per-variant prior the simulator used to choose causal
+# variants. The methodological ceiling for any annotation-aware method.
 #
-# Canonical PolyFun (Weissbrod 2020) is a two-stage method: (1) estimate
-# per-SNP heritability h2(j) by stratified LDSC on a pre-computed UKB
-# annotation matrix; (2) feed those priors into SuSiE. Stage 1 depends on
-# real human SNP coordinates, reference LD scores tuned to a specific GWAS
-# population, and a ~25 GB pre-computed annotation file — none of which apply
-# to simulated benchmark data.
+# This is not PolyFun and uses none of PolyFun's machinery. PolyFun's
+# contribution is Stage 1: estimating a per-SNP prior from annotations by
+# stratified LD score regression. That stage is exactly what an oracle replaces,
+# so what remains is SuSiE with a known prior, run through run_susie() at the
+# same settings the `susie` method uses.
 #
-# polyfun_oracle skips Stage 1 entirely by using the **true** per-SNP causal
-# probability that the simulator used to assign causal variants:
+# RENAMED AND RE-POINTED 2026-10-17. It was oracle_susie, and fine-mapped
+# through run_polyfun_ldsc(), which fixes the causal effect variance to the
+# modified HESS estimate rather than fitting it. That made it comparable to
+# polyfun_ldsc but not to susie. The comparison that matters is the other one:
+# susie and oracle_susie now differ in the prior and in nothing else, so the gap
+# between them is what knowing the prior is worth. RESULTS STORED BEFORE THAT
+# DATE ARE NOT COMPARABLE TO RESULTS FROM THIS VERSION.
 #
-#   pi_j ∝ exp(A_j' log gamma)
+# The prior
+# ---------
+# The simulator draws causal variants with probability
 #
-# where A is the region's annotation matrix and gamma is the enrichment
-# vector. Both are stored by the simulator (truth$enrichment and
-# region_geno$annotations_matrix), so we can reconstruct pi_j exactly.
-# These per-SNP priors are then passed to susieR::susie_rss() via
-# prior_weights.
+#   pi_j = exp(A_j' log gamma) / sum_i exp(A_i' log gamma)
 #
-# Because the prior is exact, polyfun_oracle defines the ceiling: no
-# annotation-aware method should outperform it on a non-degenerate setting.
-# If one does, either the comparator is cheating or the simulator is leaking
-# information through some other channel.
+# and stores that vector. This method uses the stored vector where present and
+# reconstructs it from the annotation matrix and the enrichment vector
+# otherwise. The reconstruction is correct only for the additive relationship;
+# under the alternative annotation-causality forms the stored vector is the only
+# correct source, which is why the simulator records it.
 #
-# The fine-mapping step is exactly that of polyfun_ldsc (PolyFun + SuSiE as
-# in Weissbrod et al. 2020: L = 10, causal effect variance from the modified
-# HESS estimator, residual variance estimated; see R/wrapper_polyfun_ldsc.R),
-# so the two methods differ only in the prior and the gap between them is the
-# cost of estimating it. polyfun_oracle remains a ceiling: it is given the
-# simulator's true prior and is not a deployable method.
+# Because the prior is exact, oracle_susie is a ceiling: no annotation-aware
+# method on this backbone should beat it on a non-degenerate setting. If one
+# does, either that comparator is cheating or the simulator is leaking
+# information through another channel.
 #
-# When no annotations were simulated (annotations = "none"), there is no
-# per-SNP signal to reconstruct, and the non-functionally-informed PolyFun +
-# SuSiE (uniform prior) is run; prior_source = "uniform_fallback".
+# It reads ground truth, so it is NOT deployable and NOT a fair comparator.
+#
+# Where no annotations were simulated there is no per-SNP signal to recover and
+# a uniform prior is used (prior_source = "uniform_fallback"); the method is
+# then identical to susie, which is a useful check on the plumbing.
 #
 # This file provides:
-#   - setup_polyfun_oracle()        : checks susieR is installed
-#   - run_polyfun_oracle()          : runs the method on a single region
-#                                      (explicit inputs)
-#   - run_polyfun_oracle_region()   : adapter called by run_methods()
-#
-# Reference:
-#   Weissbrod O et al. (2020). Functionally informed fine-mapping and
-#   polygenic localization of complex trait heritability enrichment.
-#   Nature Genetics, 52(12), 1355-1363.
-#   https://doi.org/10.1038/s41588-020-00735-5
+#   - setup_oracle_susie()        : dependency check
+#   - run_oracle_susie()          : runs the method on a single region
+#   - run_oracle_susie_region()   : adapter called by run_methods()
 # =============================================================================
-
 
 # =============================================================================
 # Setup
 # =============================================================================
 
-#' Check that susieR is available for polyfun_oracle
+#' Check that susieR is available for oracle_susie
 #'
-#' polyfun_oracle is built on top of \code{susieR::susie_rss}. This function
+#' oracle_susie is built on top of \code{susieR::susie_rss}. This function
 #' verifies the dependency.
 #'
 #' @return Invisible TRUE if susieR is available.
 #' @export
-setup_polyfun_oracle <- function() {
+setup_oracle_susie <- function() {
   if (!requireNamespace("susieR", quietly = TRUE)) {
     stop(
-      "susieR is required for polyfun_oracle. Install with:\n",
+      "susieR is required for oracle_susie. Install with:\n",
       "  install.packages('susieR')\n",
       "or from GitHub:\n",
       "  remotes::install_github('stephenslab/susieR')",
@@ -75,13 +69,13 @@ setup_polyfun_oracle <- function() {
     )
   }
   message("susieR ", utils::packageVersion("susieR"),
-          " is available for polyfun_oracle.")
+          " is available for oracle_susie.")
   invisible(TRUE)
 }
 
 
 # =============================================================================
-# Run polyfun_oracle on a single region
+# Run oracle_susie on a single region
 # =============================================================================
 
 #' Run PolyFun-oracle fine-mapping on a single region
@@ -108,14 +102,11 @@ setup_polyfun_oracle <- function() {
 #' @param causal_probs Numeric vector or NULL. The simulator's stored
 #'   selection probabilities; used in preference to \code{enrichment}.
 #' @param L Integer. Maximum number of single-effect components. Default: 10.
-#' @param hess Logical. Set the causal effect variance by PolyFun's modified
-#'   HESS estimator. Default: TRUE.
-#' @param hess_iter Integer. HESS draws to average. Default: 100.
 #' @param max_iter Integer. Maximum IBSS iterations. Default: 100.
 #' @param ... Ignored (for wrapper compatibility).
 #'
-#' The fine-mapping step is \code{\link{run_polyfun_ldsc}}'s, so that
-#' polyfun_oracle and polyfun_ldsc differ only in the prior.
+#' The fine-mapping step is \code{\link{run_susie}}'s, so that \code{susie}
+#' and \code{oracle_susie} differ in the prior and in nothing else.
 #'
 #' @return A list with the standardised fine-mapping output. The
 #'   \code{additional} sub-list contains:
@@ -139,15 +130,13 @@ setup_polyfun_oracle <- function() {
 #' }
 #'
 #' @export
-run_polyfun_oracle <- function(z,
+run_oracle_susie <- function(z,
                                 LD,
                                 n,
                                 annotations = NULL,
                                 enrichment  = NULL,
                                 causal_probs = NULL,   # ITER-005 (temporary)
                                 L           = 10,
-                                hess        = TRUE,
-                                hess_iter   = 100L,
                                 max_iter    = 100L,
                                 ...) {
 
@@ -163,10 +152,10 @@ run_polyfun_oracle <- function(z,
   )
 
   if (!requireNamespace("susieR", quietly = TRUE)) {
-    return(.polyfun_oracle_error_result(
-      p, .polyfun_oracle_params(L, hess, hess_iter, max_iter,
+    return(.oracle_susie_error_result(
+      p, .oracle_susie_params(L, max_iter,
                                 prior_source = "missing_susier"),
-      0, "susieR is not installed. Run setup_polyfun_oracle() first."
+      0, "susieR is not installed. Run setup_oracle_susie() first."
     ))
   }
 
@@ -209,25 +198,28 @@ run_polyfun_oracle <- function(z,
   }
   }   # closes the ITERATION 005 stored-probs branch
 
-  params <- .polyfun_oracle_params(L, hess, hess_iter, max_iter,
+  params <- .oracle_susie_params(L, max_iter,
                                    prior_source = prior_source)
 
-  # --- PolyFun's fine-mapping step with the true prior -------------------------
+  # --- SuSiE, with the true prior -------------------------------------------
+  # Plain SuSiE as run_susie() configures it, differing from the `susie` method
+  # in the prior weights and nothing else. That is the point of the comparison:
+  # susie -> oracle_susie isolates what knowing the prior is worth, with the
+  # fine-mapping model held fixed.
 
   start_time <- proc.time()
   fit <- tryCatch(
-    run_polyfun_ldsc(
-      z = z, LD = LD, n = n,
-      prior = if (prior_source == "uniform_fallback") NULL else prior_weights,
-      L = L, hess = hess, hess_iter = hess_iter, max_iter = max_iter),
+    run_susie(
+      z = z, LD = LD, n = n, L = L, max_iter = max_iter,
+      prior_weights = if (prior_source == "uniform_fallback") NULL else prior_weights),
     error = function(e) list(error = conditionMessage(e)))
   elapsed <- as.numeric((proc.time() - start_time)["elapsed"])
 
   if (!is.null(fit$error)) {
-    return(.polyfun_oracle_error_result(p, params, elapsed, fit$error))
+    return(.oracle_susie_error_result(p, params, elapsed, fit$error))
   }
 
-  fit$method          <- "polyfun_oracle"
+  fit$method          <- "oracle_susie"
   fit$params          <- params
   fit$runtime_seconds <- elapsed
   fit$additional$prior_source    <- prior_source
@@ -241,12 +233,12 @@ run_polyfun_oracle <- function(z,
 # Region adapter (called by run_methods)
 # =============================================================================
 
-#' Run polyfun_oracle on a single region from simulation data structures
+#' Run oracle_susie on a single region from simulation data structures
 #'
 #' Thin adapter that pulls the annotation matrix from
 #' \code{region_geno$annotations_matrix} and the enrichment vector from
 #' \code{region_pheno$truth$enrichment}, then calls
-#' \code{\link{run_polyfun_oracle}}. If either is missing, the method falls
+#' \code{\link{run_oracle_susie}}. If either is missing, the method falls
 #' back to a uniform prior automatically.
 #'
 #' @param region_geno List. One element of \code{simulation$genotypes},
@@ -256,12 +248,12 @@ run_polyfun_oracle <- function(z,
 #'   containing at minimum \code{z} and (when annotations are simulated)
 #'   \code{truth$enrichment}. \code{annotations_matrix} on this list is also
 #'   accepted as a fallback location for the matrix.
-#' @param ... Additional arguments passed to \code{\link{run_polyfun_oracle}}
-#'   (e.g. \code{L}, \code{hess}).
+#' @param ... Additional arguments passed to \code{\link{run_oracle_susie}}
+#'   (e.g. \code{L}).
 #'
-#' @return The output of \code{\link{run_polyfun_oracle}}.
+#' @return The output of \code{\link{run_oracle_susie}}.
 #' @export
-run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
+run_oracle_susie_region <- function(region_geno, region_pheno, ...) {
 
   # Annotation matrix is stored on either side depending on pipeline path:
   # - run_simulation() places it on region_geno (shared across scenarios)
@@ -280,7 +272,7 @@ run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
   cprobs <- if (!is.null(region_pheno$truth))
     region_pheno$truth$causal_probs else NULL
 
-  run_polyfun_oracle(
+  run_oracle_susie(
     z            = region_pheno$z,
     LD           = region_geno$LD,
     n            = region_geno$n,
@@ -296,22 +288,20 @@ run_polyfun_oracle_region <- function(region_geno, region_pheno, ...) {
 # Internal helpers
 # =============================================================================
 
-.polyfun_oracle_params <- function(L, hess, hess_iter, max_iter,
+.oracle_susie_params <- function(L, max_iter,
                                     prior_source) {
   list(
     L            = L,
-    hess         = hess,
-    hess_iter    = hess_iter,
     max_iter     = max_iter,
     prior_source = prior_source
   )
 }
 
-.polyfun_oracle_error_result <- function(p, params, elapsed, error_msg) {
+.oracle_susie_error_result <- function(p, params, elapsed, error_msg) {
   list(
     pip             = rep(NA_real_, p),
     credible_sets   = list(),
-    method          = "polyfun_oracle",
+    method          = "oracle_susie",
     input_type      = "summary",
     params          = params,
     runtime_seconds = elapsed,

@@ -49,7 +49,7 @@ cat(sprintf("       %d regions x %d scenarios\n",
 cat("[2/3] Running methods ... ")
 t1 <- Sys.time()
 methods <- c("susie", "susie_inf", "abf", "carma",
-             "marginal_z", "polyfun_oracle", "polyfun_est",
+             "marginal_z", "oracle_susie",
              "polyfun_ldsc", "sbayesrc")
 results <- run_methods(
   sim,
@@ -60,8 +60,8 @@ results <- run_methods(
     abf            = list(prior_variance = 0.04),
     carma          = list(num.causal = 3),
     marginal_z     = list(coverage = 0.95),
-    polyfun_oracle = list(L = 5),
-    polyfun_est    = list(L = 5),
+    oracle_susie   = list(L = 5),
+    polyfun_ldsc    = list(L = 5),
     polyfun_ldsc   = list(L = 5),
     sbayesrc       = list(n_iter = 200, burn_in = 100)
   ),

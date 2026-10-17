@@ -361,7 +361,7 @@ simulate_phenotypes <- function(genotypes,
       causal_indices = causal_indices,
       causal_effects = beta_true[causal_indices],
       # ITERATION 005 (TEMPORARY): the exact per-variant selection probabilities
-      # actually used. polyfun_oracle reads these so it remains a true ceiling
+      # actually used. oracle_susie reads these so it remains a true ceiling
       # under relationships whose form it cannot reconstruct from gamma alone.
       causal_probs = causal_result$causal_probs,
       beta_true = beta_true,
@@ -639,7 +639,7 @@ simulate_annotations_for_region <- function(p,
       lambda * exp(-((cnt - 2) ^ 2) / 2)
     },
 
-    # Log-linear, hence representable in principle - but polyfun_est clamps
+    # Log-linear, hence representable in principle - but a linear prior clamps
     # negative coefficients to zero and polyfun_ldsc constrains non-negativity,
     # so neither can express the depleting half.
     mixed = {
@@ -834,7 +834,7 @@ select_causal_variants <- function(p,
   # Sample S causal indices without replacement
   causal_indices <- sort(sample(p, S, replace = FALSE, prob = probs))
 
-  # causal_probs is stored so polyfun_oracle can be a TRUE oracle under any
+  # causal_probs is stored so oracle_susie can be a TRUE oracle under any
   # relationship. It previously reconstructed exp(A' log gamma) itself, which
   # is only correct for the additive form - under any other relationship that
   # reconstruction is wrong and the "ceiling" silently stops being one.

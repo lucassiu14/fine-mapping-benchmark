@@ -48,8 +48,7 @@
   carma                 = "run_carma_region",
   # Baselines and annotation-aware comparators.
   marginal_z            = "run_marginal_z_region",
-  polyfun_oracle        = "run_polyfun_oracle_region",
-  polyfun_est           = "run_polyfun_est_region",
+  oracle_susie          = "run_oracle_susie_region",
   polyfun_ldsc          = "run_polyfun_ldsc_region",
   # SBayesRC-style Bayesian regression with annotation-informed mixture prior
   # pooled across regions (§0.1 of the auto-research plan).
@@ -250,9 +249,9 @@ run_methods <- function(simulation,
     # user_args)`, it is called once per scenario before that scenario's
     # per-region calls. The hook returns a named list whose entries are
     # merged into `user_args` for every region of that scenario. This lets
-    # methods compute shared state (e.g. pooled per-annotation coefficients
-    # in polyfun_est) without needing to see all regions inside the
-    # per-region wrapper.
+    # methods compute shared state (e.g. the annotation coefficients
+    # polyfun_ldsc fits across the scenario's other regions) without needing
+    # to see all regions inside the per-region wrapper.
     #
     # Methods that do not define this hook behave exactly as before.
     scenario_setup_name <- paste0("run_", method, "_scenario_setup")
