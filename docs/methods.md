@@ -590,29 +590,46 @@ and KL-divergence regularisation. No annotations required.
 
 **BEATRICE is a Python script** called from R via `system2`. Requires PyTorch.
 
-**Setup:** Clone the repository and install PyTorch (and other deps) into
-your Python environment. On macOS the existing Anaconda base works if you add
-`torch`:
+> **BEATRICE runs the authors' own implementation, unmodified.** `beatrice_dir`
+> must point at a clone of
+> [sayangsep/Beatrice-Finemapping](https://github.com/sayangsep/Beatrice-Finemapping),
+> **not** at the Functional BEATRICE fork. The fork carries our edits, and
+> scoring our corrected code against itself under two names would measure
+> nothing. `setup_beatrice()` requires `beatrice.py` and so rejects the fork.
+
+> **BEATRICE needs `numpy < 2`.** Upstream is written for numpy 1.x — its
+> `conda_environment.yml` pins `numpy=1.21.5` — and under numpy ≥ 2 it raises
+> `setting an array element with a sequence` at
+> `scripts/trainer.py:calculate_pip`, part-way through training. Give BEATRICE
+> its own environment; `setup_beatrice()` checks the version up front rather
+> than letting the run fail an hour in. Functional BEATRICE (`fb_xregion`) is
+> unaffected and keeps its own Python.
+
+**Setup:**
 
 ```bash
-# Clone
+# Clone the UPSTREAM repository
 git clone https://github.com/sayangsep/Beatrice-Finemapping ~/Beatrice-Finemapping
 
-# Install PyTorch (if not already present)
-pip install torch
-
-# Verify from R
+# Give it an environment with numpy 1.x
+python -m venv ~/beatrice-env
+~/beatrice-env/bin/python -m pip install 'numpy<2' torch pandas scipy \
+    matplotlib seaborn imageio absl-py tqdm
 ```
 
 ```r
 setup_beatrice(
   beatrice_dir = "~/Beatrice-Finemapping",
-  python       = "/opt/anaconda3/bin/python3"
+  python       = "~/beatrice-env/bin/python"
 )
 ```
 
-`setup_beatrice()` checks that `beatrice.py` exists and that `torch`, `numpy`,
-`scipy`, and `pandas` are importable from the specified Python.
+`setup_beatrice()` checks that `beatrice.py` exists, that `torch`, `numpy`,
+`scipy`, and `pandas` are importable, and that numpy is older than 2.
+
+Pass the environment's own `bin/python`. The package deliberately does not
+resolve symlinks on this path: `normalizePath()` would turn a virtualenv's
+`bin/python` into the base interpreter and silently drop the environment.
 
 Then run:
 
@@ -620,7 +637,7 @@ Then run:
 run_methods(sim, methods = "beatrice",
             method_args = list(beatrice = list(
               beatrice_dir = "~/Beatrice-Finemapping",
-              python       = "/opt/anaconda3/bin/python3",
+              python       = "~/beatrice-env/bin/python",
               max_iter     = 2000
             )))
 ```
@@ -629,8 +646,8 @@ run_methods(sim, methods = "beatrice",
 
 | Argument | Default | Description |
 |---|---|---|
-| `beatrice_dir` | *(required)* | Path to cloned Beatrice-Finemapping repository |
-| `python` | `"python"` | Path to Python executable |
+| `beatrice_dir` | *(required)* | Path to the cloned **upstream** Beatrice-Finemapping repository (not the Functional BEATRICE fork) |
+| `python` | `"python"` | Path to Python executable. Needs `numpy < 2`. |
 | `max_iter` | `2000` | Training iterations. Minimum 500. Reduce for speed at the cost of noise. |
 | `n_caus` | `10` | Expected number of causal variants |
 | `sigma_sq` | `0.0899` | Prior variance on effect sizes |
@@ -777,7 +794,7 @@ run_methods(
     funmap    = list(L = 10, max_iter = 100),
     paintor   = list(max_causal = 2, paintor_path = "~/tools/PAINTOR"),
     beatrice  = list(beatrice_dir = "~/Beatrice-Finemapping",
-                     python = "/opt/anaconda3/bin/python3",
+                     python = "~/beatrice-env/bin/python",   # needs numpy < 2
                      max_iter = 2000),
     carma     = list(rho.index = 0.95, num.causal = 10)
   )

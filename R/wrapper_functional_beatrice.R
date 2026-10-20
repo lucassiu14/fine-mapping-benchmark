@@ -94,11 +94,11 @@ setup_functional_beatrice <- function(beatrice_dir, python = "python") {
     )
   }
 
-  resolved_python <- if (file.exists(path.expand(python))) {
-    normalizePath(path.expand(python))
-  } else {
-    py <- Sys.which(python)
-    if (nchar(py) == 0) {
+  # fmb_resolve_python() does not follow symlinks: normalizePath() would
+  # resolve a virtualenv's bin/python to the base interpreter and silently
+  # drop the environment.
+  resolved_python <- fmb_resolve_python(python, use_path = TRUE)
+  if (!file.exists(resolved_python)) {
       stop(
         "Python executable not found: '", python, "'\n\n",
         "Pass the full path:\n",
@@ -108,8 +108,6 @@ setup_functional_beatrice <- function(beatrice_dir, python = "python") {
         "  )",
         call. = FALSE
       )
-    }
-    py
   }
 
   required_pkgs <- c("torch", "numpy", "pandas", "tqdm", "absl", "imageio",
@@ -298,11 +296,7 @@ run_functional_beatrice <- function(z,
   variant_ids <- gsub("\\s+", "_", variant_ids)
 
   beatrice_dir <- normalizePath(path.expand(beatrice_dir), mustWork = FALSE)
-  python       <- if (file.exists(path.expand(python))) {
-    normalizePath(path.expand(python))
-  } else {
-    python
-  }
+  python       <- fmb_resolve_python(python)
   script_path <- file.path(beatrice_dir, "beatrice_annot.py")
 
   if (!file.exists(script_path)) {

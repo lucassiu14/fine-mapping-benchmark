@@ -125,11 +125,11 @@ setup_sparsepro <- function(sparsepro_dir, python = "python") {
     )
   }
 
-  resolved_python <- if (file.exists(path.expand(python))) {
-    normalizePath(path.expand(python))
-  } else {
-    py <- Sys.which(python)
-    if (nchar(py) == 0) {
+  # fmb_resolve_python() does not follow symlinks: normalizePath() would
+  # resolve a virtualenv's bin/python to the base interpreter and silently
+  # drop the environment.
+  resolved_python <- fmb_resolve_python(python, use_path = TRUE)
+  if (!file.exists(resolved_python)) {
       stop(
         "Python executable not found: '", python, "'\n\n",
         "Pass the full path to your Python:\n",
@@ -139,8 +139,6 @@ setup_sparsepro <- function(sparsepro_dir, python = "python") {
         "  )",
         call. = FALSE
       )
-    }
-    py
   }
 
   # Check required Python packages
@@ -838,9 +836,7 @@ run_sparsepro_region <- function(region_geno, region_pheno,
   gsub("\\s+", "_", variant_ids)
 }
 
-.sparsepro_resolve_python <- function(python) {
-  if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
-}
+.sparsepro_resolve_python <- function(python) fmb_resolve_python(python)
 
 # Writes <label>.z (id, z; no header), <label>.ld (whitespace-separated
 # correlations; no header) and, when A is given, <label>.anno (tab-separated,

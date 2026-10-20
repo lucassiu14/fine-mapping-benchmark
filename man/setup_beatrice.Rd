@@ -7,8 +7,11 @@
 setup_beatrice(beatrice_dir, python = "python")
 }
 \arguments{
-\item{beatrice_dir}{Character. Path to the cloned Beatrice-Finemapping
-repository root (must contain \code{beatrice.py}).}
+\item{beatrice_dir}{Character. Path to the cloned \strong{upstream}
+Beatrice-Finemapping repository root (must contain \code{beatrice.py}),
+from \url{https://github.com/sayangsep/Beatrice-Finemapping}. This must
+not be the Functional BEATRICE fork: BEATRICE is a comparator and is run
+as its authors published it. Note that upstream requires \code{numpy < 2}.}
 
 \item{python}{Character. Path to the Python executable to use.
 Default: \code{"python"} (searches PATH).}
@@ -20,7 +23,8 @@ path to \code{beatrice.py}) and \code{python} (resolved Python path).
 \description{
 Verifies that the BEATRICE Python script can be found at \code{beatrice_dir}
 and that the required Python packages (torch, numpy, scipy, pandas) are
-importable by the specified Python executable.
+importable by the specified Python executable, and that numpy is older
+than 2 (upstream BEATRICE fails under numpy >= 2).
 }
 \details{
 Install BEATRICE by cloning the repository and creating its conda

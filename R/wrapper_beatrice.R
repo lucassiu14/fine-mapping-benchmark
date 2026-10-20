@@ -63,8 +63,11 @@
 #'   )
 #' }
 #'
-#' @param beatrice_dir Character. Path to the cloned Beatrice-Finemapping
-#'   repository root (must contain \code{beatrice.py}).
+#' @param beatrice_dir Character. Path to the cloned \strong{upstream}
+#'   Beatrice-Finemapping repository root (must contain \code{beatrice.py}),
+#'   from \url{https://github.com/sayangsep/Beatrice-Finemapping}. This must
+#'   not be the Functional BEATRICE fork: BEATRICE is a comparator and is run
+#'   as its authors published it. Note that upstream requires \code{numpy < 2}.
 #' @param python Character. Path to the Python executable to use.
 #'   Default: \code{"python"} (searches PATH).
 #'
@@ -88,23 +91,21 @@ setup_beatrice <- function(beatrice_dir, python = "python") {
     )
   }
 
-  # Check Python executable
-  resolved_python <- if (file.exists(path.expand(python))) {
-    normalizePath(path.expand(python))
-  } else {
-    py <- Sys.which(python)
-    if (nchar(py) == 0) {
-      stop(
-        "Python executable not found: '", python, "'\n\n",
-        "Pass the full path to your Python:\n",
-        "  setup_beatrice(\n",
-        "    beatrice_dir = '/path/to/Beatrice-Finemapping',\n",
-        "    python       = '~/anaconda3/envs/beatrice/bin/python'\n",
-        "  )",
-        call. = FALSE
-      )
-    }
-    py
+  # Check Python executable. fmb_resolve_python() deliberately does not follow
+  # symlinks - normalizePath() would resolve a virtualenv's bin/python to the
+  # base interpreter and silently drop the environment, so every later call
+  # fails with a bare ModuleNotFoundError for torch.
+  resolved_python <- fmb_resolve_python(python, use_path = TRUE)
+  if (!file.exists(resolved_python)) {
+    stop(
+      "Python executable not found: '", python, "'\n\n",
+      "Pass the full path to your Python:\n",
+      "  setup_beatrice(\n",
+      "    beatrice_dir = '/path/to/Beatrice-Finemapping',\n",
+      "    python       = '~/anaconda3/envs/beatrice/bin/python'\n",
+      "  )",
+      call. = FALSE
+    )
   }
 
   # Check required Python packages
@@ -134,9 +135,40 @@ setup_beatrice <- function(beatrice_dir, python = "python") {
     )
   }
 
+  # Upstream BEATRICE is written for numpy 1.x (conda_environment.yml pins
+  # numpy=1.21.5). Under numpy >= 2 it raises "setting an array element with a
+  # sequence" at scripts/trainer.py:calculate_pip - part-way through training,
+  # after all the expensive work. Catch it here instead of an hour in.
+  np_ver <- tryCatch(
+    suppressWarnings(system2(resolved_python,
+                             args = c("-c", shQuote("import numpy; print(numpy.__version__)")),
+                             stdout = TRUE, stderr = FALSE)),
+    error = function(e) character(0))
+  np_major <- suppressWarnings(as.integer(sub("\\..*$", "", np_ver[1])))
+  if (length(np_ver) >= 1L && !is.na(np_major) && np_major >= 2L) {
+    stop(
+      "BEATRICE requires numpy < 2, but '", resolved_python, "' has numpy ",
+      np_ver[1], ".\n\n",
+      "This is the authors' own implementation and the benchmark runs it\n",
+      "unmodified, so it needs the numpy it was written for. Give BEATRICE its\n",
+      "own environment:\n",
+      "  python -m venv ~/beatrice-env\n",
+      "  ~/beatrice-env/bin/python -m pip install 'numpy<2' torch pandas scipy \\\n",
+      "      matplotlib seaborn imageio absl-py tqdm\n\n",
+      "Then:\n",
+      "  setup_beatrice(\n",
+      "    beatrice_dir = '/path/to/Beatrice-Finemapping',\n",
+      "    python       = '~/beatrice-env/bin/python'\n",
+      "  )\n\n",
+      "Functional BEATRICE (fb_xregion) is unaffected and keeps its own Python.",
+      call. = FALSE
+    )
+  }
+
   message("BEATRICE ready.")
   message("  Script : ", script_path)
   message("  Python : ", resolved_python)
+  if (length(np_ver) >= 1L) message("  numpy  : ", np_ver[1])
 
   invisible(list(beatrice_script = script_path, python = resolved_python))
 }
@@ -253,25 +285,29 @@ run_beatrice <- function(z,
   variant_ids <- gsub("\\s+", "_", variant_ids)
 
   beatrice_dir   <- path.expand(beatrice_dir)
-  python         <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
+  python         <- fmb_resolve_python(python)
 
-  # Prefer beatrice_annot.py (the Functional BEATRICE fork) when present -
-  # upstream beatrice.py has a numpy-2.x bug in trainer.py:calculate_pip that
-  # crashes late in training. The fork fixes it and accepts the same flags
-  # when --annot is omitted, giving vanilla BEATRICE semantics.
-  script_path <- NULL
-  for (cand in c("beatrice_annot.py", "beatrice.py")) {
-    p_cand <- file.path(beatrice_dir, cand)
-    if (file.exists(p_cand)) { script_path <- p_cand; break }
-  }
+  # BEATRICE is a COMPARATOR, so it must run the authors' own implementation,
+  # unmodified, from https://github.com/sayangsep/Beatrice-Finemapping. Do NOT
+  # substitute the Functional BEATRICE fork: the fork carries our edits (most
+  # consequentially the log-sum-exp offset in reformat_memo), and scoring our
+  # corrected code against itself under two names measures nothing.
+  #
+  # Upstream is written for numpy 1.x - conda_environment.yml pins
+  # numpy=1.21.5 - and raises "setting an array element with a sequence" at
+  # trainer.py:calculate_pip under numpy >= 2. Give it a Python with numpy < 2;
+  # setup_beatrice() checks for this and says so.
+  script_path <- file.path(beatrice_dir, "beatrice.py")
 
-  if (is.null(script_path)) {
+  if (!file.exists(script_path)) {
     return(.beatrice_error_result(
       p, .beatrice_params(n, max_iter, n_caus, sigma_sq, gamma_coverage,
                           sparse_concrete, beatrice_dir, python),
       0,
-      paste("No BEATRICE script (beatrice_annot.py or beatrice.py) found in:",
-            beatrice_dir)
+      paste0("beatrice.py not found in: ", beatrice_dir,
+             " - BEATRICE must be the upstream implementation (clone ",
+             "https://github.com/sayangsep/Beatrice-Finemapping), not the ",
+             "Functional BEATRICE fork.")
     ))
   }
 

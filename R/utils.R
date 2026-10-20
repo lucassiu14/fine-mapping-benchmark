@@ -44,3 +44,32 @@ fmb_extdata <- function(filename) {
     call. = FALSE
   )
 }
+
+
+# -----------------------------------------------------------------------------
+# Resolve a Python executable path for system2().
+#
+# Expands "~", falls back to the PATH, and makes the result absolute - but
+# deliberately does NOT call normalizePath(), which follows symlinks. A
+# virtualenv's bin/python is a symlink to the base interpreter, and resolving it
+# bypasses the environment entirely: the base interpreter then cannot import
+# torch and every call fails with status 1. Conda envs behave the same way.
+# Returns the path unchanged when it cannot be found, so the caller's own
+# error message is what the user sees.
+#
+# Internal helper - not exported.
+# -----------------------------------------------------------------------------
+fmb_resolve_python <- function(python, use_path = FALSE) {
+  p <- path.expand(python)
+  if (!file.exists(p)) {
+    # Not a path on disk. Only look it up on PATH when the caller asks
+    # (setup_*() does; the run_*() wrappers historically pass the string
+    # straight through and record it verbatim in $params).
+    if (!use_path) return(python)
+    found <- Sys.which(python)
+    if (nchar(found) == 0L) return(python)
+    p <- unname(found)
+  }
+  if (!startsWith(p, "/")) p <- file.path(getwd(), p)
+  p
+}

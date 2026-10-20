@@ -164,7 +164,7 @@
     return(list(.fb_joint_annotated = TRUE, .fb_joint_head = prior_head,
                 .fb_joint_cache = list()))
   }
-  py <- if (file.exists(path.expand(python))) normalizePath(path.expand(python)) else python
+  py <- fmb_resolve_python(python)
 
   work_dir <- tempfile(pattern = "fbjoint_")
   dir.create(work_dir, recursive = TRUE)
