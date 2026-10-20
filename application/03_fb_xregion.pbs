@@ -16,10 +16,13 @@
 # (regularize_ld always falls through to eigendecomposition on real float32
 # UKBB LD) and will dominate. MEASURE with a 10-block manifest before
 # trusting the 48 h walltime.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
 mkdir -p joint_out logs
-source "${APP_VENV:?set APP_VENV}/bin/activate"
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
 
 # Manifest is rebuilt each run so a re-prep is always picked up.
 printf 'z\tLD\tannot\ttarget\tN\n' > manifest.tsv
@@ -30,7 +33,21 @@ while IFS=, read -r rid rest; do
   printf '%s\t%s\t%s\t%s\t%s\n' "$d/locus.z" "$d/locus_ld.npy" "$d/locus.annot" \
          "joint_out/$rid" "${N_LIKELIHOOD:-337000}" >> manifest.tsv
 done < blocks.csv
-echo "manifest: $(( $(wc -l < manifest.tsv) - 1 )) blocks"
+N_MAN=$(( $(wc -l < manifest.tsv) - 1 ))
+N_BLK=$(( $(wc -l < blocks.csv) - 1 ))
+log "manifest : $N_MAN of $N_BLK blocks"
+[ "$N_MAN" -gt 0 ] || die "manifest is empty - run 02_prep first"
+if [ "$N_MAN" -lt "$N_BLK" ]; then
+  warn "$(( N_BLK - N_MAN )) blocks are missing from the manifest."
+  warn "fb_xregion shares one prior head across blocks, so a partial set changes"
+  warn "the fit. Run 'python preflight.py prep' and finish 02 before relying on this."
+fi
+log "LD resident at float32 will be roughly:"
+python - <<'PY'
+import os, numpy as np
+tot = sum(os.path.getsize(l.split("\t")[1]) for l in open("manifest.tsv").readlines()[1:])
+print(f"            {tot/1e9:.0f} GB across the manifest", flush=True)
+PY
 
 # --- guard: refuse to run against a checkout missing the memo fix ----------
 # These fixes landed on main in 7a46a13. Any checkout older than that silently
@@ -64,3 +81,13 @@ python "${FB_DIR}/beatrice_joint.py" \
   --N "${N_LIKELIHOOD:-337000}" \
   --n_caus 10 --max_iter 2000 --prior_head lassonet \
   --save_prior_weights joint_out/prior_head.pt
+
+section "verifying output"
+MISS=0
+while IFS=$'\t' read -r _ _ _ tgt _; do
+  [ -s "$tgt/pip.csv" ] || { warn "no pip.csv for $(basename "$tgt")"; MISS=$((MISS+1)); }
+done < <(tail -n +2 manifest.tsv)
+[ "$MISS" -eq 0 ] || die "$MISS of $N_MAN blocks produced no pip.csv"
+check_output joint_out/prior_head.pt 1000
+log "all $N_MAN blocks produced PIPs"
+finish

@@ -17,8 +17,9 @@
 #
 # finemapper.py reads the UKBB .npz/.gz pair natively via load_ld_npz(), so it
 # consumes exactly the LD we already downloaded - no conversion.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
 SET="${ANNOT_SET:-sniff}"
 case "$SET" in sniff|combined) ;; *) echo "ANNOT_SET must be sniff or combined" >&2; exit 2 ;; esac
 mkdir -p "polyfun_out_${SET}" logs
@@ -73,7 +74,14 @@ print(f'{len(d)} variants with SNPVAR (of {n_all} in the block) after matching '
       f'the shared variant set', flush=True)
 PY
 
-python "${POLYFUN_DIR:?set POLYFUN_DIR to the upstream polyfun checkout}/finemapper.py" \
+require_env POLYFUN_DIR "the upstream polyfun checkout"
+require_file "${POLYFUN_DIR}/finemapper.py" 1000
+require_file "ld/${LDR}.npz" 1000000 "stage 01 incomplete"
+require_file "$W/sumstats.parquet" 1000 "per-block sumstats build failed"
+require_dir  "${POLYFUN_RLIB:?set POLYFUN_RLIB}" "susieR 0.11.92 must be installed here"
+[ -d "${POLYFUN_RLIB}/susieR" ] || die "susieR not found in ${POLYFUN_RLIB}. finemapper.py needs 0.11.92 specifically: 0.12+ moved bhat/shat/R out of susie_suff_stat."
+
+python "${POLYFUN_DIR}/finemapper.py" \
   --ld "ld/${LDR}" \
   --sumstats "$W/sumstats.parquet" \
   --n "${N_LIKELIHOOD:-373220}" \
@@ -81,4 +89,6 @@ python "${POLYFUN_DIR:?set POLYFUN_DIR to the upstream polyfun checkout}/finemap
   --method susie --max-num-causal 10 \
   --allow-missing \
   --out "$OUT"
-echo "$RID ($SET) done"
+check_output "$OUT" 1000
+log "$RID ($SET) done"
+finish

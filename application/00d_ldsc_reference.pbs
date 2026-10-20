@@ -13,8 +13,9 @@
 #
 # EUR is the right panel: the GWAS is UK Biobank white-British and the loci
 # are LDetect EUR blocks.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p logs
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p logs
 Z=https://zenodo.org/records/10515792/files
 
 if [ -d 1000G_EUR_Phase3_plink ]; then echo "plink panel already present"; else
@@ -25,6 +26,10 @@ if [ -d 1000G_Phase3_weights_hm3_no_MHC ]; then echo "weights already present"; 
   curl -fL --retry 5 -o w.tgz "$Z/1000G_Phase3_weights_hm3_no_MHC.tgz?download=1"
   tar xzf w.tgz && rm -f w.tgz
 fi
-ls 1000G_EUR_Phase3_plink/1000G.EUR.QC.22.bed \
-   1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.22.l2.ldscore.gz
-echo "reference data ready"
+for C in $(seq 1 22); do
+  require_file "1000G_EUR_Phase3_plink/1000G.EUR.QC.${C}.bed" 100000 "plink panel incomplete"
+  require_file "1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.${C}.l2.ldscore.gz" 1000 "weights incomplete"
+done
+log "plink panel and weights present for all 22 chromosomes"
+log "reference data ready"
+finish

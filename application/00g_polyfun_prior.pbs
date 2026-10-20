@@ -19,9 +19,12 @@
 #   combined  Borzoi-102 + baselineLF v2.2 = 289. The standard S-LDSC setup,
 #             and PolyFun at its strongest; any advantage it shows here may be
 #             the extra 187 annotations rather than the method.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"
-source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
+require_env POLYFUN_ENV "the PolyFun python environment"
+source "${POLYFUN_ENV}/bin/activate"
+report_python
 PF="${POLYFUN_DIR:?set POLYFUN_DIR}"
 W=1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
 SET="${ANNOT_SET:-sniff}"
@@ -61,8 +64,22 @@ if [ ! -s ${OUTP}.22.snpvar_constrained.gz ]; then
     --allow-missing
 else echo "stage 3 already done"; fi
 
+n_done=$(ls "${OUTP}".*.snpvar_constrained.gz 2>/dev/null | wc -l)
+[ "$n_done" -eq 22 ] || die "expected 22 snpvar_constrained files, found $n_done. S-LDSC is genome-wide; check the log above for which chromosome failed."
+python - "${OUTP}.22.snpvar_constrained.gz" <<'PY' || die "the prior is unusable"
+import sys, pandas as pd, numpy as np
+d = pd.read_csv(sys.argv[1], sep="\t")
+need = {"CHR","SNP","BP","A1","A2","SNPVAR"}
+assert need <= set(d.columns), f"missing columns: {need - set(d.columns)}"
+assert len(d) > 0, "zero rows"
+assert np.isfinite(d.SNPVAR).all(), "SNPVAR contains non-finite values"
+assert (d.SNPVAR > 0).all(), "SNPVAR contains non-positive values"
+print(f"            verified : {len(d):,} SNPs, SNPVAR in "
+      f"[{d.SNPVAR.min():.3e}, {d.SNPVAR.max():.3e}]", flush=True)
+PY
 echo
 echo "prior ready. Per-chromosome files carry CHR SNP BP A1 A2 SNPVAR MAF N Z,"
 echo "which is what 05_polyfun.pbs feeds to finemapper.py:"
 ls -la "${OUTP}".*.snpvar_constrained.gz | head -3
 echo "($(ls "${OUTP}".*.snpvar_constrained.gz | wc -l) of 22 chromosomes, set=$SET)"
+finish

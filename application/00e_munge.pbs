@@ -12,9 +12,12 @@
 #
 # Do NOT pass --n: the file already carries an N column and the script refuses
 # both ("cannot both specify --n and have an N column").
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p logs
-source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p logs
+require_env POLYFUN_ENV "the PolyFun python environment"
+source "${POLYFUN_ENV}/bin/activate"
+report_python
 
 [ -s sumstats.tsv ] || python - <<'PY'
 import os, pyarrow.parquet as pq
@@ -29,4 +32,5 @@ python "${POLYFUN_DIR:?set POLYFUN_DIR}/munge_polyfun_sumstats.py" \
   --sumstats sumstats.tsv \
   --out munged.parquet \
   --min-info 0
-echo "munged sumstats ready"
+log "munged sumstats ready"
+finish

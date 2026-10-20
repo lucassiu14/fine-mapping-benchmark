@@ -12,12 +12,17 @@
 # identical SNP, BP and A1 sequences, 271,699 rows each), so this is a column
 # concatenation rather than a join. The script asserts that alignment rather
 # than assuming it.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p annot_combined logs
-source "${APP_VENV:?set APP_VENV}/bin/activate"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p annot_combined logs
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
 C=${PBS_ARRAY_INDEX}
 OUT="annot_combined/combined.${C}.annot.parquet"
-[ -s "$OUT" ] && { echo "chr$C already combined"; exit 0; }
+[ -s "$OUT" ] && { log "chr$C already combined"; exit 0; }
+require_file "annot/borzoi.${C}.annot.parquet" 1000000 "stage 00b incomplete"
+require_file "annot/baselineLF.${C}.annot.parquet" 1000000 "stage 00b incomplete"
 
 python - "$C" "$OUT" <<'PY'
 import sys, pandas as pd, pyarrow.parquet as pq
@@ -36,3 +41,5 @@ pd.concat([b, l[lann]], axis=1).to_parquet(out, index=False)
 print(f"chr{c}: {len(bann)} Borzoi + {len(lann)} baselineLF = "
       f"{len(bann)+len(lann)} annotations, {len(b):,} variants", flush=True)
 PY
+check_output "$OUT" 1000000
+finish

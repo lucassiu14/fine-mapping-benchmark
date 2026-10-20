@@ -7,8 +7,30 @@
 #PBS -o logs/
 # Build per-block inputs for every method. Idempotent: a block with a DONE
 # marker is skipped, so the array can be resubmitted after a partial failure.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
 mkdir -p regions logs
-source "${APP_VENV:?set APP_VENV to the python env with numpy/pandas/pyarrow/scipy}/bin/activate"
-python prep_block.py $((PBS_ARRAY_INDEX - 1))        # prep_block.py is 0-based
+require_env APP_VENV "the python env with numpy/pandas/pyarrow/scipy"
+source "${APP_VENV}/bin/activate"
+report_python
+
+I=$((PBS_ARRAY_INDEX - 1))                            # prep_block.py is 0-based
+read -r RID CHR _ _ LDR < <(awk -F, -v n="$((PBS_ARRAY_INDEX + 1))" \
+  'NR==n{print $1, $2, $3, $4, $5}' blocks.csv)
+[ -n "$RID" ] || die "no block at array index $PBS_ARRAY_INDEX (blocks.csv has $(( $(wc -l < blocks.csv) - 1 )) rows)"
+log "block    : $RID  chr$CHR  window $LDR"
+
+require_file chol_sumstats.parquet 400000000 "run setup.sh"
+require_file "ld/${LDR}.npz" 1000000 "stage 01 incomplete for this window"
+require_file "ld/${LDR}.gz"     1000 "stage 01 incomplete for this window"
+require_file "annot/borzoi.${CHR}.annot.parquet" 1000000 "stage 00b incomplete for chr$CHR"
+
+python prep_block.py "$I"
+
+[ -f "regions/$RID/DONE" ] || die "prep_block.py exited 0 but wrote no DONE marker for $RID"
+for f in locus.z locus_ld.npy locus.annot funmap.z.txt funmap.anno.txt snps.csv; do
+  check_output "regions/$RID/$f" 100
+done
+log "variants : $(wc -l < "regions/$RID/locus.z")"
+finish

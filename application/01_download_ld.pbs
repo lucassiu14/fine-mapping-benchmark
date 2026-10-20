@@ -8,8 +8,9 @@
 # Download one UKBB LD window per array task (.npz + .gz).
 # 249 windows, ~1.2 GB each -> ~300 GB total. The bucket is public: no
 # credentials, no requester-pays. Re-running is safe; existing files skip.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT to the application directory}"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
 mkdir -p ld logs
 
 W=$(sed -n "${PBS_ARRAY_INDEX}p" ld_windows.txt)
@@ -21,5 +22,16 @@ for ext in gz npz; do
   aws s3 cp --no-sign-request \
       "s3://broad-alkesgroup-ukbb-ld/UKBB_LD/${W}.${ext}" "$out.part"
   mv "$out.part" "$out"          # atomic: a killed job never leaves a half file
-  echo "got $out ($(du -h "$out" | cut -f1))"
+  log "got $out ($(du -h "$out" | cut -f1))"
 done
+
+# A truncated .npz downloads "successfully" and then fails hours later inside
+# prep, so open it here where the error is attributable.
+require_file "ld/${W}.npz" 1000000 "download truncated"
+require_file "ld/${W}.gz"     1000 "download truncated"
+python3 - "ld/${W}.npz" <<'PY' || die "ld/${W}.npz is corrupt - delete it and resubmit this task"
+import sys, scipy.sparse as sp
+m = sp.load_npz(sys.argv[1])
+print(f"            verified : {m.shape[0]} x {m.shape[1]} sparse matrix", flush=True)
+PY
+finish

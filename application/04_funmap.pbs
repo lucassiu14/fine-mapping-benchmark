@@ -18,13 +18,17 @@
 #
 # The text LD is ~500-900 MB per block, so it is written to $TMPDIR (node-local)
 # and discarded when the task ends. Never write it into the shared filesystem.
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
 mkdir -p funmap_out logs
-source "${FUNMAP_VENV:?set FUNMAP_VENV - Funmap pins numpy 1.26.2 / scipy 1.11.4 / pandas 2.1.3}/bin/activate"
+require_env FUNMAP_VENV "Funmap pins numpy 1.26.2 / scipy 1.11.4 / pandas 2.1.3"
+source "${FUNMAP_VENV}/bin/activate"
+report_python
 
 RID=$(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" 'NR==i{print $1}' blocks.csv)
 [ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
+log "block    : $RID"
 D="regions/$RID"; OUT="funmap_out/$RID"
 [ -f "$OUT/pip.csv" ] && { echo "$RID already done"; exit 0; }
 [ -f "$D/DONE" ]      || { echo "prep missing for $RID"; exit 1; }
@@ -38,10 +42,23 @@ R = np.load(sys.argv[1])
 np.savetxt(sys.argv[2], R, fmt="%.5f", delimiter=" ")   # upstream: sep='\s+'
 PY
 
-python "${FUNMAP_DIR:?set FUNMAP_DIR to the upstream Funmap checkout}/funmap_cmd.py" \
+require_env FUNMAP_DIR "the UPSTREAM Funmap checkout, not Beatrice_annot/alt_methods"
+require_file "${FUNMAP_DIR}/funmap_cmd.py" 1000
+require_file "$D/funmap.z.txt" 100 "stage 02 incomplete"
+require_file "$D/funmap.anno.txt" 100 "stage 02 incomplete"
+require_file "$W/ld.txt" 1000000 "LD text conversion failed"
+P_Z=$(wc -l < "$D/funmap.z.txt"); P_LD=$(wc -l < "$W/ld.txt")
+[ "$P_Z" -eq "$P_LD" ] || die "z has $P_Z rows but LD has $P_LD - inputs are inconsistent"
+log "variants : $P_Z"
+
+python "${FUNMAP_DIR}/funmap_cmd.py" \
   --zdir "$D/funmap.z.txt" \
   --Rdir "$W/ld.txt" \
   --Adir "$D/funmap.anno.txt" \
   --n "${N_LIKELIHOOD:-337000}" \
   --save "$OUT" --L 10
-echo "$RID done: $(wc -l < "$OUT/pip.csv") variants"
+check_output "$OUT/pip.csv" 100
+P_OUT=$(wc -l < "$OUT/pip.csv")
+[ "$P_OUT" -eq "$P_Z" ] || die "funmap wrote $P_OUT PIPs for $P_Z variants"
+log "$RID done: $P_OUT PIPs"
+finish

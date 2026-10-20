@@ -8,8 +8,9 @@
 # Annotations, one autosome per task. Public GCS bucket, no auth.
 #   Borzoi-102    ~15 GB total - used by fb_xregion, funmap and PolyFun
 #   baselineLF    ~5 GB total  - used by the second PolyFun variant only
-set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p annot logs
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p annot logs
 C=${PBS_ARRAY_INDEX}
 G=https://storage.googleapis.com/seqnn-share/sniff
 
@@ -29,4 +30,7 @@ fetch "$G/processed_borzoi_parquets/borzoi.${C}.annot.parquet" \
 # column concatenation.
 fetch "$G/processed_baselineLF_parquets/baselineLF2.2.UKB.${C}.annot.parquet" \
       "annot/baselineLF.${C}.annot.parquet"
-echo "chr$C done"
+require_file "annot/borzoi.${C}.annot.parquet"     1000000 "download truncated"
+require_file "annot/baselineLF.${C}.annot.parquet" 1000000 "download truncated"
+log "chr$C done"
+finish

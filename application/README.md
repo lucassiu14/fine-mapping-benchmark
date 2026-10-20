@@ -309,7 +309,53 @@ array sizes to match the new block and window counts.
 
 ---
 
-## 4. Resources
+## 4. Diagnostics
+
+Every stage sources `lib.sh`, which gives it:
+
+- a **banner** recording job id, host, cpus, cwd, free disk, every relevant
+  environment variable, and — after the venv is activated — the python that
+  actually ran and its package versions. Most failures are an environment
+  pointing somewhere unexpected, and this makes that visible immediately.
+- an **ERR trap** naming the failing line number, the command, the working
+  directory and the elapsed time. No more silent `set -e` exits.
+- **preconditions** (`require_file`, `require_dir`, `require_env`) checked
+  *before* expensive work. `require_file` takes a minimum size, because the
+  failure that actually happens is a truncated download that is present but
+  unusable.
+- **output validation** (`check_output`) after it, so a stage cannot report
+  success having written a zero-row file. `01` opens each `.npz` to prove it
+  loads; `00f` checks the LD-score file has rows and annotation columns; `00g`
+  asserts all 22 chromosomes exist and that SNPVAR is finite and positive;
+  `04` checks funmap wrote one PIP per input variant.
+
+Abnormal lines are prefixed `FATAL` or `WARN`, so an entire array triages with:
+
+```bash
+bash triage.sh            # all stages
+bash triage.sh 02_prep    # one stage
+```
+
+It separates completed tasks, tasks that failed with a `FATAL` (showing the
+message), and tasks with neither — which means the scheduler killed them, so
+look at walltime and memory. It also groups the distinct failure modes, which
+is what tells you whether 40 failures are one problem or forty.
+
+A worked example of what a failure looks like:
+
+```
+[14:02:11] chol_prep[57]  ===== start =====
+[14:02:11] chol_prep[57]  host     : cx3-6-21.cx3.hpc.ic.ac.uk  (4 cpus)
+[14:02:11] chol_prep[57]  APP_ROOT : /rds/general/user/xx/home/chol_app
+[14:02:11] chol_prep[57]  disk free: 812 GB
+[14:02:12] chol_prep[57]  python   : .../appenv/bin/python (Python 3.11.6)
+[14:02:12] chol_prep[57]  block    : ldEUR_04_0048  chr4  window chr4_68000001_71000001
+[14:02:12] chol_prep[57]  FATAL missing file: ld/chr4_68000001_71000001.npz  (stage 01 incomplete for this window)
+```
+
+---
+
+## 5. Resources
 
 **Measured** (5 pilot blocks, 35,621 variants, 2000 joint iterations):
 366 s wall with `.npy` LD against 493 s with text; peak RSS 3.25 GB of which
@@ -447,7 +493,7 @@ installation rpy2 should embed.
 
 ---
 
-## 5. Open items
+## 6. Open items
 
 - **Pre-registered prediction.** `RNAGTEX-PC5` (0-based) separates liver at
   3.5 SD, so a lipid trait should select it. Check
