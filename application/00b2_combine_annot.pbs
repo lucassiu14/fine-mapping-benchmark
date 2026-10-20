@@ -35,6 +35,16 @@ for k in ("SNP", "BP", "A1"):
     assert (b[k].values == l[k].values).all(), f"chr{c}: {k} not row-aligned"
 lann = [x for x in l.columns if x not in key]
 bann = [x for x in b.columns if x not in key]
+# The Borzoi files must carry nothing but the 102 PCs beyond the key
+# columns. chr6/8/11 of the Sniff release ship a stray pandas `index`
+# column, and `key` above does not exclude it -- so without this check it
+# would be merged in as a Borzoi annotation on those three chromosomes
+# only, and 00g's genome-wide S-LDSC would regress on an annotation set
+# that differs by chromosome.
+stray = [x for x in bann if "-PC" not in x]
+assert not stray, (f"chr{c}: Borzoi file carries non-annotation columns "
+                   f"{stray}. Run: python fix_annot_index.py --apply")
+assert len(bann) == 102, f"chr{c}: expected 102 Borzoi PCs, got {len(bann)}"
 dup = set(lann) & set(bann)
 assert not dup, f"chr{c}: annotation names collide: {sorted(dup)[:5]}"
 pd.concat([b, l[lann]], axis=1).to_parquet(out, index=False)

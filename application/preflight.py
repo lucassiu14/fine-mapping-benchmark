@@ -62,7 +62,7 @@ def check_data():
     # the set is not what fb_xregion and funmap are given, which matters more
     # than truncation because it would not crash anything.
     chroms = sorted({int(r["chrom"]) for r in rows})
-    missing_an, broken_an, ncols = [], [], {}
+    missing_an, broken_an, ncols, stray_an = [], [], {}, {}
     META = {"CHR", "SNP", "BP", "A1", "A2", "CM", "MAF", "base"}
     try:
         import pyarrow.parquet as pq
@@ -74,17 +74,31 @@ def check_data():
             missing_an.append(c)
         elif pq is not None:
             try:
-                names = pq.ParquetFile(q).schema_arrow.names
-                ncols.setdefault(len([x for x in names if x not in META]), []).append(c)
+                names = list(pq.ParquetFile(q).schema_arrow.names)
+                ncols.setdefault(len([x for x in names if "-PC" in x]), []).append(c)
+                st = [x for x in names if x not in META and "-PC" not in x]
+                if st:
+                    stray_an[c] = st
             except Exception as e:
                 broken_an.append(f"chr{c} ({type(e).__name__})")
     if missing_an:
         fail(f"annotations for chromosomes {missing_an}")
     if broken_an:
         fail(f"{len(broken_an)} unreadable annotation files: {broken_an[:5]}")
+    # A stray column is the dangerous case: it does not crash anything, it
+    # just means PolyFun regresses on one more annotation on some
+    # chromosomes than others. chr6/8/11 of the Sniff release ship a pandas
+    # `index` column; fb_xregion and funmap are insulated because
+    # prep_block.py selects on "-PC", but 00f passes the whole file through.
+    if stray_an:
+        fail("non-annotation columns in the Borzoi files - run "
+             "'python fix_annot_index.py --apply': "
+             + "; ".join(f"chr{c} {v}" for c, v in sorted(stray_an.items())))
     if len(ncols) > 1:
-        fail("annotation column count is not consistent across chromosomes: "
-             + ", ".join(f"{n} cols on {len(cs)} chrom" for n, cs in sorted(ncols.items())))
+        fail("the number of '-PC' annotations differs by chromosome: "
+             + ", ".join(f"{n} PCs on chr {cs}" for n, cs in sorted(ncols.items())))
+    elif ncols and list(ncols)[0] != 102:
+        fail(f"expected 102 Borzoi PCs, found {list(ncols)[0]}")
     if ok:
         cols = f", {list(ncols)[0]} annotation columns" if len(ncols) == 1 else ""
         print(f"  OK  sumstats, {len({r['ld_region'] for r in rows})} LD windows, "
