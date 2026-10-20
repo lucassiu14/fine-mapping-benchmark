@@ -220,25 +220,60 @@ in the `.pbs` headers if you change the p-value threshold.
 **Projected** for 265 blocks: LD 94 GB + annotations ~1 GB + ~2 GB fixed
 overhead. **Request 160 GB for `03_fb_xregion`**; mini-batching is not needed.
 
-**Not yet measured, and the numbers to check first:**
+**Measured per-method, on one block (`ldEUR_20_0038`, chr20, p = 4,238,
+8-core laptop):**
 
-- **fb_xregion total runtime.** `regularize_ld` always falls through to a full
-  eigendecomposition on real float32 UKBB LD (min eigenvalue ≈ −0.029, so the
-  Cholesky fast path never succeeds), which is O(p³) *per block*. At
-  p ≈ 9,000–15,000 over 265 blocks this dominates setup. Run `03` against a
-  10-block manifest and extrapolate before trusting the walltime.
-- **Funmap runtime.** On this laptop, one block at p = 4,238 ran for over
-  45 minutes without finishing. Funmap is three stacked SuSiE-style stages, so
-  cost grows roughly with `L × p² × iterations × 3`. At p ≈ 9,000 expect
-  multiple hours per block. It parallelises trivially as an array job, but set
-  the walltime generously and measure on one block first.
+| method | wall time | notes |
+|---|---|---|
+| fb_xregion | 366 s for **5 blocks jointly**, 2000 iterations | one job over all blocks |
+| Funmap | **3,107 s (52 min) for ONE block** | stage 1: 1 iter, stage 2: 13, stage 3: 14 |
+| PolyFun `finemapper.py` | **46 s** total, 6–8 s in SuSiE | per block |
+
+**Funmap is the binding constraint.** Its cost grows roughly with
+`L × p² × iterations × 3` (three stacked SuSiE-style stages), so scaling 52 min
+at p = 4,238 gives ≈ **4 h at p ≈ 9,000** and ≈ **11 h at p = 15,219**. It
+parallelises trivially as an array job, but give `04_funmap.pbs` a walltime of
+at least 24 h and expect the largest blocks to need more.
+
+**Still to measure: fb_xregion total runtime.** `regularize_ld` always falls
+through to a full eigendecomposition on real float32 UKBB LD (min eigenvalue
+≈ −0.029, so the Cholesky fast path never succeeds), which is O(p³) *per
+block*. At p ≈ 9,000–15,000 over 265 blocks this dominates setup. Run `03`
+against a 10-block manifest and extrapolate before trusting the walltime.
+
+### Verified end to end
+
+All three methods were run on `ldEUR_20_0038` with identical inputs:
+
+| method | sum PIP | max PIP | top variant | \|Z\| | rank | n PIP>0.5 |
+|---|---|---|---|---|---|---|
+| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27 | 1 |
+| funmap | 9.99 | 1.000 | 62,370,732 | 6.00 | 13 | 2 |
+| polyfun_susie | 9.91 | 0.457 | 62,370,732 | 6.00 | 13 | 0 |
+
+Spearman correlation between PIP vectors: funmap–polyfun 0.722,
+fb_xregion–polyfun 0.533, fb_xregion–funmap 0.518.
+
+### Building the PolyFun environment
+
+`polyfun.yml` (python 3.8, `r-susier==0.11.92`) solves on x86_64 Linux, which
+is what the cluster runs. It does **not** solve on osx-arm64. A working pip
+environment needs four specific pins, each found the hard way:
+
+| pin | why |
+|---|---|
+| `pyarrow<=17` | newer pyarrow requires numpy ≥ 2, which conflicts with the rest |
+| `rpy2==3.5.x` | 3.6 turned `numpy2ri.activate()` into a raised `DeprecationWarning`, and finemapper.py calls it |
+| `susieR 0.11.92` | 0.12+ moved `bhat/shat/R/var_y` out of `susie_suff_stat` into `susie_rss`; finemapper.py calls the old signature. Install with `remotes::install_github("stephenslab/susieR@v0.11.92")` — note the `v` prefix on the tag |
+| `RPY2_CFFI_MODE=ABI` | only if the rpy2 wheel was built against a different R minor version than the one installed |
+
+Set `R_LIBS` so the 0.11.92 library comes first, and `R_HOME` to the R
+installation rpy2 should embed.
 
 ---
 
 ## 5. Open items
 
-- **PolyFun locally.** `polyfun.yml` (python 3.8, `r-susier==0.11.92`) does not
-  solve on osx-arm64; it targets x86_64 Linux, where the HPC run will be fine.
 - **Pre-registered prediction.** `RNAGTEX-PC5` (0-based) separates liver at
   3.5 SD, so a lipid trait should select it. Check
   `results/annotation_weights.csv` against Funmap's shrunk weights.

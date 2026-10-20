@@ -29,14 +29,22 @@ OUT="polyfun_out/${RID}.txt.gz"
 # already carries CHR SNP BP A1 A2 SNPVAR MAF N Z P.
 W="${TMPDIR:-/tmp}/${RID}"; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
 python - "polyfun_priors/${PF_SET:-sniff}.biochemistry_Cholesterol.${CHR}.txt.gz" \
-         "$W/sumstats.parquet" "$BS" "$BE" <<'PY'
+         "$W/sumstats.parquet" "$BS" "$BE" "regions/$RID/snps.csv" <<'PY'
 import sys, pandas as pd
-src, dst, bs, be = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+src, dst, bs, be, snps = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
 d = pd.read_csv(src, sep='\t')
 d = d[(d.BP >= bs) & (d.BP <= be)]
+# Restrict to the SAME variant set the other methods see. Without this PolyFun
+# fine-maps every variant its priors file carries in the block - including the
+# indels and duplicate positions prep_block.py drops - so the three methods
+# would be scoring different SNP sets. Measured on one block: 4,711 vs 4,238.
+keep = set(pd.read_csv(snps)['SNP'])
+n_all = len(d)
+d = d[d.SNP.isin(keep)]
 d = d[['CHR','SNP','BP','A1','A2','SNPVAR','MAF','N','Z','P']]
 d.to_parquet(dst, index=False)
-print(f'{len(d)} variants with SNPVAR in the block', flush=True)
+print(f'{len(d)} variants with SNPVAR (of {n_all} in the block) after matching '
+      f'the shared variant set', flush=True)
 PY
 
 python "${POLYFUN_DIR:?set POLYFUN_DIR to the upstream polyfun checkout}/finemapper.py" \
