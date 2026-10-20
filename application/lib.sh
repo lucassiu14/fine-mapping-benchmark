@@ -98,6 +98,35 @@ check_output() {
   log "wrote    : $f ($(du -h "$f" | cut -f1))"
 }
 
+require_fb_fixes() {
+  # --- guard: refuse to run against a checkout missing the memo fix ----------
+  # These fixes landed on main in 7a46a13. Any checkout older than that silently
+  # produces diluted PIPs: reformat_memo would subtract the MEAN
+  # log-BF instead of the max, saturating 27-53% of the memo at the 1e15 clamp
+  # and turning calculate_pip into a count of visited configurations. Max PIP
+  # collapses to ~0.02-0.05 and no credible set is ever formed. It fails
+  # quietly, looks like a modelling result, and is the single most expensive
+  # mistake available here - so check for it rather than trusting the checkout.
+  : "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}"
+  grep -q 'm0 = max(' "${FB_DIR}/scripts/trainer_annot.py" || {
+    echo "FATAL: ${FB_DIR} is missing the reformat_memo max-offset fix." >&2
+    echo "       Update the checkout to main at d0fb022 or later." >&2
+    exit 1
+  }
+  grep -q 'nearest PD correlation matrix' "${FB_DIR}/scripts/trainer_annot.py" || {
+    echo "FATAL: ${FB_DIR} is missing the LD regularisation fix." >&2
+    echo "       The diagonal shift scales every implied correlation by 1/(1+c)," >&2
+    echo "       which makes the Bayes factor FAVOUR co-including collinear variants." >&2
+    echo "       Update the checkout to main at d0fb022 or later." >&2
+    exit 1
+  }
+  grep -q 'def read_ld' "${FB_DIR}/scripts/joint_trainer.py" || {
+    echo "FATAL: ${FB_DIR} is missing .npy LD support; the manifest points at .npy files." >&2
+    exit 1
+  }
+  echo "[guard] fb checkout has the memo fix, the LD regularisation fix and .npy LD support"
+}
+
 finish() {
   local el=$(( $(date +%s) - _T0 ))
   section "done in ${el}s ($((el/60)) min)"

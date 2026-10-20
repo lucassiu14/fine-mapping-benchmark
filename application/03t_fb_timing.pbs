@@ -1,0 +1,130 @@
+#!/bin/bash
+#PBS -N chol_fb_timing
+#PBS -l select=1:ncpus=16:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -o logs/
+# Measure fb_xregion's cost on a stratified subset, to turn 03's 48 h walltime
+# from an assumption into a measurement.
+#
+# The only prior datapoint is "5 blocks x 2000 iterations took 366 s", which
+# extrapolates to ~5.4 h for 265 blocks if cost is linear in block count. But
+# 03's own note says the O(p^3) setup dominates (regularize_ld always falls
+# through to an eigendecomposition on real float32 UKBB LD), and p was not
+# recorded for those 5 blocks -- so the extrapolation could be out by a lot in
+# either direction.
+#
+# Block widths run 0.38-3.00 Mb with a median of 1.77, and the largest 10
+# blocks hold only 13% of the sum of width^3 (the largest single block 1.4%),
+# because the prep trims every block to at most 3 Mb. There is therefore no
+# heavy tail for a cubic term to blow up on, which is why a 10-block sample
+# can say something useful at all.
+#
+# Sampling: evenly spaced across blocks SORTED BY p, so the subset spans the
+# size distribution rather than clustering wherever blocks.csv happens to
+# order things. p is read from each locus_ld.npy's shape via mmap, so it is
+# the real post-prep variant count, not a width proxy.
+#
+# The run uses the REAL configuration (--n_caus 10 --max_iter 2000
+# --prior_head lassonet) so what is measured is what 03 will do. Output goes
+# to joint_out_timing/, never joint_out/, so this cannot be mistaken for or
+# contaminate a real fit.
+#
+# NOTE this is a timing measurement, not a scientific one. fb_xregion shares
+# one prior head across all blocks in the manifest, so a 10-block fit is a
+# DIFFERENT fit from a 265-block fit. Only the cost transfers; the PIPs in
+# joint_out_timing/ are not comparable to a full run's and must not be used.
+#
+#   qsub -v APP_ROOT,APP_MODULES,APP_VENV,FB_DIR,N_LIKELIHOOD 03t_fb_timing.pbs
+#   qsub -v ...,TIMING_N=20 03t_fb_timing.pbs     # a larger sample
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
+mkdir -p joint_out_timing logs
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
+require_fb_fixes
+
+section "building the stratified manifest"
+python - "${TIMING_N:-10}" <<'PY'
+import os, sys, csv
+import numpy as np
+want = int(sys.argv[1])
+elig = []
+for r in csv.DictReader(open("blocks.csv")):
+    d = os.path.join("regions", r["region_id"])
+    ld = os.path.join(d, "locus_ld.npy")
+    if os.path.exists(os.path.join(d, "DONE")) and os.path.exists(ld):
+        # mmap: reads the .npy header for the shape, not the matrix
+        elig.append((r["region_id"], d, int(np.load(ld, mmap_mode="r").shape[0])))
+if not elig:
+    sys.exit("FATAL: no prepped blocks found - run 02_prep first")
+elig.sort(key=lambda t: t[2])
+n = len(elig)
+want = min(want, n)
+idx = sorted({round(i * (n - 1) / max(want - 1, 1)) for i in range(want)})
+sel = [elig[i] for i in idx]
+N = os.environ.get("N_LIKELIHOOD", "337000")
+with open("manifest_timing.tsv", "w") as f:
+    f.write("z\tLD\tannot\ttarget\tN\n")
+    for rid, d, _ in sel:
+        f.write(f"{d}/locus.z\t{d}/locus_ld.npy\t{d}/locus.annot\t"
+                f"joint_out_timing/{rid}\t{N}\n")
+c_sel = float(sum(p**3 for _, _, p in sel))
+c_all = float(sum(p**3 for _, _, p in elig))
+ld_sel = sum(os.path.getsize(os.path.join(d, "locus_ld.npy")) for _, d, _ in sel)
+ld_all = sum(os.path.getsize(os.path.join(d, "locus_ld.npy")) for _, d, _ in elig)
+open("timing_meta.txt", "w").write(f"{len(sel)} {n} {c_sel!r} {c_all!r} {ld_sel} {ld_all}\n")
+print(f"            eligible blocks  : {n}")
+print(f"            sampled          : {len(sel)}")
+print(f"            p sampled        : {[p for _, _, p in sel]}")
+print(f"            p over all       : {elig[0][2]:,} .. {elig[-1][2]:,}")
+print(f"            sum p^3 sampled  : {c_sel:.4g}  ({100*c_sel/c_all:.1f}% of all blocks)")
+print(f"            LD resident      : {ld_sel/1e9:.1f} GB sampled, {ld_all/1e9:.0f} GB for all",
+      flush=True)
+PY
+
+section "running the real configuration on the sample"
+T0=$SECONDS
+python "${FB_DIR}/beatrice_joint.py" \
+  --manifest manifest_timing.tsv \
+  --N "${N_LIKELIHOOD:-337000}" \
+  --n_caus 10 --max_iter 2000 --prior_head lassonet \
+  --save_prior_weights joint_out_timing/prior_head.pt
+ELAPSED=$(( SECONDS - T0 ))
+log "sample run took ${ELAPSED}s"
+
+section "extrapolating to the full block set"
+python - "$ELAPSED" <<'PY'
+import sys
+t = float(sys.argv[1])
+ns, n, c_sel, c_all, ld_sel, ld_all = open("timing_meta.txt").read().split()
+ns, n = int(ns), int(n)
+c_sel, c_all = float(c_sel), float(c_all)
+lin = t * n / ns              # cost linear in block count
+cub = t * c_all / c_sel       # cost dominated by the per-block O(p^3) setup
+lo, hi = sorted((lin, cub))
+print(f"  measured            : {t:,.0f} s for {ns} blocks")
+print(f"  linear in blocks    : {lin/3600:.1f} h for {n} blocks")
+print(f"  scaled by sum p^3   : {cub/3600:.1f} h for {n} blocks")
+print()
+print(f"  The two models bracket the answer: {lo/3600:.1f}-{hi/3600:.1f} h.")
+rec = max(4.0, hi / 3600 * 2.0)
+print(f"  Suggested walltime  : {rec:.0f} h  (2x the pessimistic model, floor 4 h)")
+if rec > 48:
+    print("  WARNING: that exceeds 03's current 48 h request. Raise it, or")
+    print("           mini-batch the regions, before submitting the full run.")
+else:
+    print(f"  03's current 48 h request is {48/(hi/3600):.0f}x the pessimistic estimate.")
+PY
+
+section "verifying the sample produced output"
+MISS=0
+while IFS=$'\t' read -r _ _ _ tgt _; do
+  [ -s "$tgt/pip.csv" ] || { warn "no pip.csv for $(basename "$tgt")"; MISS=$((MISS+1)); }
+done < <(tail -n +2 manifest_timing.tsv)
+[ "$MISS" -eq 0 ] || die "$MISS sampled blocks produced no pip.csv"
+check_output joint_out_timing/prior_head.pt 1000
+log "timing run complete - joint_out_timing/ is NOT a usable fit, only a measurement"
+finish
