@@ -78,15 +78,41 @@ if [ -d "$RLIB/susieR" ]; then echo "  already installed"; else
   # was current when both R 4.3.2 and susieR 0.11.92 were in use.
   RSNAP="${R_CRAN_SNAPSHOT:-https://packagemanager.posit.co/cran/2023-11-01}"
   echo "  using CRAN snapshot: $RSNAP"
+
+  # Safety net for the snapshot's C++11-era packages. R picks the compiler
+  # standard from each package's own CXX_STD, and a package pinning CXX11
+  # cannot build against the Armadillo that current RcppArmadillo bundles
+  # (Armadillo >= 12 hard-errors: "C++14 compiler required"). Raising what
+  # CXX11 resolves to keeps such a package buildable; gnu++14 is backward
+  # compatible with gnu++11 for anything these packages do.
+  MKV="$APP_ROOT/Rmakevars_polyfun"
+  printf 'CXX11STD = -std=gnu++14\n' > "$MKV"
+  export R_MAKEVARS_USER="$MKV"
+  echo "  R_MAKEVARS_USER=$MKV (CXX11STD -> gnu++14)"
+
   Rscript --vanilla -e "
     .libPaths(c('$RLIB', .libPaths()))
     options(repos = c(CRAN = '$RSNAP'))
     # Matrix explicitly and first: it is the root of the failure chain.
-    for (p in c('Matrix','irlba','mixsqp','matrixStats','reshape'))
+    for (p in c('Matrix','irlba','matrixStats','reshape'))
       if (!requireNamespace(p, quietly=TRUE))
         install.packages(p, lib='$RLIB')
     stopifnot(requireNamespace('Matrix', quietly=TRUE))
     cat('  Matrix', as.character(packageVersion('Matrix')), 'available\n')
+
+    # mixsqp is the ONE package taken from current CRAN rather than the
+    # snapshot, and it is deliberate. The snapshot's 0.3-48 declares
+    # CXX_STD = CXX11 in src/Makevars, so it compiles with -std=gnu++11 and
+    # the bundled Armadillo 12 headers reject it outright. Upstream 0.3-54
+    # drops the CXX_STD pin for exactly this reason and is otherwise
+    # identical: same Depends, same Imports (utils, stats, irlba,
+    # Rcpp >= 0.12.15), same LinkingTo. susieR 0.11.92 imports mixsqp with
+    # no version constraint, so either satisfies it.
+    if (!requireNamespace('mixsqp', quietly=TRUE))
+      install.packages('mixsqp', lib='$RLIB',
+                       repos = c(CRAN = 'https://cloud.r-project.org'))
+    stopifnot(requireNamespace('mixsqp', quietly=TRUE))
+    cat('  mixsqp', as.character(packageVersion('mixsqp')), 'available\n')
     if (!requireNamespace('remotes', quietly=TRUE))
       install.packages('remotes', lib='$RLIB')
     remotes::install_github('stephenslab/susieR@v0.11.92', lib='$RLIB', upgrade='never')
