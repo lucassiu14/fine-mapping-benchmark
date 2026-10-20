@@ -33,8 +33,8 @@ done < blocks.csv
 echo "manifest: $(( $(wc -l < manifest.tsv) - 1 )) blocks"
 
 # --- guard: refuse to run against a checkout missing the memo fix ----------
-# These fixes live on the branch `fix/memo-normalisation`, NOT on main. Running
-# main silently produces diluted PIPs: reformat_memo would subtract the MEAN
+# These fixes landed on main in 7a46a13. Any checkout older than that silently
+# produces diluted PIPs: reformat_memo would subtract the MEAN
 # log-BF instead of the max, saturating 27-53% of the memo at the 1e15 clamp
 # and turning calculate_pip into a count of visited configurations. Max PIP
 # collapses to ~0.02-0.05 and no credible set is ever formed. It fails
@@ -43,7 +43,7 @@ echo "manifest: $(( $(wc -l < manifest.tsv) - 1 )) blocks"
 : "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}"
 grep -q 'm0 = max(' "${FB_DIR}/scripts/trainer_annot.py" || {
   echo "FATAL: ${FB_DIR} is missing the reformat_memo max-offset fix." >&2
-  echo "       Check out the branch fix/memo-normalisation (or a descendant)." >&2
+  echo "       Update the checkout to main at 7a46a13 or later." >&2
   exit 1
 }
 grep -q 'def read_ld' "${FB_DIR}/scripts/joint_trainer.py" || {
