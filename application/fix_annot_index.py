@@ -28,7 +28,6 @@ rebuilt. It is idempotent: a second run reports nothing to do.
 """
 import os, sys
 import pyarrow.parquet as pq
-import pandas as pd
 
 ROOT = os.environ.get("APP_ROOT", ".")
 KEY = {"CHR", "SNP", "BP", "A1", "A2", "CM", "MAF", "base"}
@@ -67,17 +66,53 @@ if not APPLY:
 print()
 for c, e in sorted(bad.items()):
     f = os.path.join(ROOT, "annot", f"borzoi.{c}.annot.parquet")
-    orig = f + ".orig"
-    d = pq.ParquetFile(f).read().to_pandas()
-    before = list(d.columns)
-    d = d.drop(columns=e)
-    assert len([x for x in d.columns if "-PC" in x]) == 102, f"chr{c}: lost a PC"
-    assert len(d.columns) == len(before) - len(e)
+    orig, tmp = f + ".orig", f + ".tmp"
+
+    # Work on Arrow row groups, not a pandas round-trip. Two reasons:
+    #
+    #  1. `index` is recorded in the parquet footer's pandas metadata, so
+    #     to_pandas() restores it as the DataFrame INDEX rather than a
+    #     column. d.drop(columns=["index"]) therefore raises KeyError even
+    #     though the column is plainly there in schema_arrow.names.
+    #  2. these files reach 1.37 GB (chr6); reading one whole into pandas on
+    #     a login node is inconsiderate at best. One row group at a time
+    #     keeps the footprint small.
+    #
+    # replace_schema_metadata(None) drops the stale pandas metadata, which
+    # still names `index` as the index column and would otherwise be carried
+    # into the rewritten file.
+    pfh = pq.ParquetFile(f)
+    keep = [x for x in pfh.schema_arrow.names if x not in e]
+    n_pc = len([x for x in keep if "-PC" in x])
+    assert n_pc == 102, f"chr{c}: would keep {n_pc} PCs, not 102 - refusing"
+
+    rows, writer = 0, None
+    try:
+        for i in range(pfh.num_row_groups):
+            t = pfh.read_row_group(i, columns=keep).replace_schema_metadata(None)
+            if writer is None:
+                writer = pq.ParquetWriter(tmp, t.schema)
+            writer.write_table(t)
+            rows += t.num_rows
+    finally:
+        if writer is not None:
+            writer.close()
+
+    # Verify the rewrite BEFORE displacing the original.
+    chk = pq.ParquetFile(tmp)
+    got = list(chk.schema_arrow.names)
+    assert chk.metadata.num_rows == pfh.metadata.num_rows, (
+        f"chr{c}: row count changed {pfh.metadata.num_rows} -> {chk.metadata.num_rows}")
+    assert len([x for x in got if "-PC" in x]) == 102, f"chr{c}: PC count wrong after rewrite"
+    survived = [x for x in got if x not in KEY and "-PC" not in x]
+    assert not survived, f"chr{c}: extras survived the rewrite: {survived}"
+    del chk
+
     if not os.path.exists(orig):
         os.rename(f, orig)
-    d.to_parquet(f, index=False)
-    print(f"  chr{c}: dropped {e}, {len(before)} -> {len(d.columns)} columns, "
-          f"{len(d):,} rows (original kept as {os.path.basename(orig)})")
+    os.replace(tmp, f)
+    print(f"  chr{c}: dropped {e}, {len(pfh.schema_arrow.names)} -> {len(got)} columns, "
+          f"{rows:,} rows (original kept as {os.path.basename(orig)})")
 
 # Derived files built from the un-normalised input. The prior is genome-wide,
 # so it is invalidated by ANY affected chromosome, not only those three.
