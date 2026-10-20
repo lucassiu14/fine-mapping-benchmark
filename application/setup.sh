@@ -16,7 +16,13 @@ cd "$APP_ROOT"
 say() { printf '\n=== %s ===\n' "$1"; }
 
 say "pipeline scripts"
-cp -f "$HERE"/*.py "$HERE"/*.pbs "$APP_ROOT"/
+# lib.sh in particular: every stage does `source ./lib.sh` relative to
+# APP_ROOT, so without it nothing runs at all.
+if [ "$(cd "$HERE" && pwd)" != "$(cd "$APP_ROOT" && pwd)" ]; then
+  cp -f "$HERE"/*.py "$HERE"/*.pbs "$HERE"/*.sh "$APP_ROOT"/
+else
+  echo "  (running from APP_ROOT; scripts already in place)"
+fi
 cp -f "$HERE"/blocks_scored.csv "$HERE"/blocks.csv "$APP_ROOT"/ 2>/dev/null || true
 cp -f "$HERE"/../inst/extdata/gwfm_regions_ldetect_EUR.csv "$APP_ROOT"/ 2>/dev/null \
   || echo "  NOTE: copy gwfm_regions_ldetect_EUR.csv here if you want to re-derive blocks_scored.csv"
