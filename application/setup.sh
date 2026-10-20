@@ -65,12 +65,34 @@ mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-pl
 say "susieR 0.11.92 for PolyFun"
 RLIB="$APP_ROOT/Rlib_polyfun"; mkdir -p "$RLIB"
 if [ -d "$RLIB/susieR" ]; then echo "  already installed"; else
+  # Install from a CRAN SNAPSHOT contemporary with the R module, not from
+  # today's CRAN. Two problems otherwise, both seen in practice:
+  #   - the R/4.3.2 module ships no recommended packages, so Matrix must be
+  #     installed, but current Matrix (>= 1.7) requires R >= 4.4 and is
+  #     therefore "not available" on 4.3.2. irlba, then mixsqp, then susieR
+  #     all fail behind it.
+  #   - today's CRAN resolves a 2022 package's dependencies to 2026 versions
+  #     (ggplot2 4.x, S7, RcppArmadillo 15.x), which is a lot of compiling for
+  #     combinations nobody has tested together.
+  # A snapshot dated just after R 4.3.2's release gives a dependency set that
+  # was current when both R 4.3.2 and susieR 0.11.92 were in use.
+  RSNAP="${R_CRAN_SNAPSHOT:-https://packagemanager.posit.co/cran/2023-11-01}"
+  echo "  using CRAN snapshot: $RSNAP"
   Rscript --vanilla -e "
-    .libPaths('$RLIB')
+    .libPaths(c('$RLIB', .libPaths()))
+    options(repos = c(CRAN = '$RSNAP'))
+    # Matrix explicitly and first: it is the root of the failure chain.
+    for (p in c('Matrix','irlba','mixsqp','matrixStats','reshape'))
+      if (!requireNamespace(p, quietly=TRUE))
+        install.packages(p, lib='$RLIB')
+    stopifnot(requireNamespace('Matrix', quietly=TRUE))
+    cat('  Matrix', as.character(packageVersion('Matrix')), 'available\n')
     if (!requireNamespace('remotes', quietly=TRUE))
-      install.packages('remotes', lib='$RLIB', repos='https://cloud.r-project.org')
+      install.packages('remotes', lib='$RLIB')
     remotes::install_github('stephenslab/susieR@v0.11.92', lib='$RLIB', upgrade='never')
-    cat('susieR', as.character(packageVersion('susieR', lib.loc='$RLIB')), 'installed\n')"
+    v <- as.character(packageVersion('susieR', lib.loc='$RLIB'))
+    stopifnot(identical(v, '0.11.92'))
+    cat('susieR', v, 'installed\n')"
 fi
 
 say "LDSC reference data for computing the PolyFun prior (0.30 GB)"
