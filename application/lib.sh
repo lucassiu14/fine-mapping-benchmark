@@ -27,12 +27,27 @@ on_err() {
 }
 trap 'on_err "$LINENO" "$BASH_COMMAND"' ERR
 
+# Load cluster modules before anything else. The venvs are built on the login
+# node against a particular python; if that python comes from a module, the
+# compute node needs the same module loaded or the venv will not start. Set
+# APP_MODULES in env.sh, e.g.
+#   export APP_MODULES="tools/prod Python/3.11.2 R/4.3.2 aws-cli"
+# Left unset, nothing is loaded and the system defaults are used.
+load_modules() {
+  [ -n "${APP_MODULES:-}" ] || return 0
+  command -v module >/dev/null 2>&1 || { warn "APP_MODULES is set but 'module' is unavailable"; return 0; }
+  for m in $APP_MODULES; do
+    module load "$m" 2>/dev/null && log "module   : loaded $m" || warn "module load $m failed"
+  done
+}
+
 banner() {
   section "start"
+  load_modules
   log "job      : ${PBS_JOBID:-interactive}${_TASK:+  task $_TASK}"
   log "host     : $(hostname)  ($(nproc 2>/dev/null || echo '?') cpus)"
   log "cwd      : $PWD"
-  for v in APP_ROOT N_LIKELIHOOD ANNOT_SET FB_DIR FUNMAP_DIR POLYFUN_DIR \
+  for v in APP_ROOT N_LIKELIHOOD ANNOT_SET APP_MODULES FB_DIR FUNMAP_DIR POLYFUN_DIR \
            APP_VENV FUNMAP_VENV POLYFUN_ENV POLYFUN_RLIB R_HOME; do
     [ -n "${!v:-}" ] && log "$(printf '%-9s' "$v"): ${!v}"
   done

@@ -20,7 +20,7 @@ while [ $# -gt 0 ]; do
   esac; shift
 done
 
-PASS=APP_ROOT,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE
+PASS=APP_ROOT,APP_MODULES,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE
 
 sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
   local stage="$1" script="$2" dep="${3:-}"; shift 3 2>/dev/null || shift $#

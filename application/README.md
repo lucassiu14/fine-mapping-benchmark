@@ -233,7 +233,19 @@ genuine r = 1 group.
 ### Bootstrap once
 
 ```bash
-export APP_ROOT=/rds/general/user/<you>/home/chol_app
+# Put APP_ROOT on project space, not $HOME. Peak usage is ~429 GB:
+#   246  UKB LD .npz/.gz, needed right through stage 05
+#    94  prep locus_ld.npy (float32 submatrix per block, as well as the windows)
+#    40  LD-scores for the two annotation sets
+#    40  annotations (Borzoi + baselineLF + combined)
+#     9  everything else
+export APP_ROOT=/rds/general/project/<project>/live/$USER/chol_app
+
+# Modules the COMPUTE nodes need - without these the venvs will not start
+# there, since they are built against whichever python is active now.
+module avail 2>&1 | grep -iE "python|^R/|aws"     # find the right names
+export APP_MODULES="tools/prod Python/3.11.2 R/4.3.2 aws-cli"   # EXAMPLE - use yours
+
 bash setup.sh
 ```
 

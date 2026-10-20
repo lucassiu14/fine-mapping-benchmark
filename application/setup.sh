@@ -89,6 +89,9 @@ say "environment file"
 cat > "$APP_ROOT/env.sh" <<ENVEOF
 # source this before submitting
 export APP_ROOT="$APP_ROOT"
+# Modules the COMPUTE nodes need. The venvs below were built against the
+# python active when setup.sh ran, so that python must be loadable there too.
+export APP_MODULES="${APP_MODULES:-}"
 export N_LIKELIHOOD=373220
 export APP_VENV="$APP_ROOT/appenv"
 export FUNMAP_VENV="$APP_ROOT/funmapenv"
