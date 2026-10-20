@@ -31,16 +31,28 @@ done
 
 PASS=APP_ROOT,APP_MODULES,AWS_MODULE,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE
 
-arr () {
-  # Array-job dependency token. PBS Pro's qsub already returns the brackets
-  # for an array job -- "4424612[].pbs-7" -- so appending another "[]" yields
-  # "4424612[].pbs-7[]" and qsub rejects it with "illegal -W value". Append
-  # only when they are absent, so this also works on a PBS that returns a
-  # plain id, and on --dry-run placeholders.
-  case "$1" in
-    *'[]'*) printf '%s' "$1" ;;
-    *)      printf '%s[]' "$1" ;;
-  esac
+dep_arr () {
+  # Dependency on an ARRAY job. MEASURED on this scheduler with
+  # probe_depend.sh (PBS Pro pbs_version = 2024.1.1.20240608133507):
+  #
+  #   afterokarray:4424651[].pbs-7     rejected: illegal -W value
+  #   afterokarray:4424651.pbs-7[]     rejected
+  #   afterokarray:4424651[]           rejected
+  #   afterokarray:4424651.pbs-7       rejected
+  #   afterokarray:4424651             rejected
+  #   afterok:4424651[].pbs-7          ACCEPTED
+  #
+  # Every afterokarray spelling is refused, so this build does not accept
+  # that dependency type; afterok with the id exactly as qsub returns it
+  # does. Do NOT change this back to afterokarray without re-running
+  # probe_depend.sh on the scheduler you are submitting to.
+  #
+  # Caveat, not measured: whether afterok on an array parent requires every
+  # subjob to have succeeded, or only the parent to have finished. The
+  # stages do not rely on it either way - each one verifies its own inputs
+  # (00f checks its annotation file exists, 00g requires all 22
+  # snpvar_constrained files) and dies rather than running on partial data.
+  printf 'afterok:%s' "$1"
 }
 
 sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
@@ -75,19 +87,19 @@ fi
 J_REF=$(  sub 00d 00d_ldsc_reference.pbs)   ; echo "  LDSC ref    : $J_REF"
 
 echo "== annotation sets =="
-J_COMB=$(sub 00b2 00b2_combine_annot.pbs "afterokarray:$(arr "$J_ANNOT")")
+J_COMB=$(sub 00b2 00b2_combine_annot.pbs "$(dep_arr "$J_ANNOT")")
 echo "  combined    : $J_COMB  (Borzoi-102 + baselineLF = 289)"
 
 echo "== PolyFun prior, computed from OUR annotations, once per set =="
 J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
 echo "  munge       : $J_MUNGE"
-J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:$(arr "$J_ANNOT")" ANNOT_SET=sniff)
+J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_ANNOT")" ANNOT_SET=sniff)
 echo "  LD-scores   : $J_LDSC_S  (sniff)"
-J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:$(arr "$J_COMB")"  ANNOT_SET=combined)
+J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_COMB")"  ANNOT_SET=combined)
 echo "  LD-scores   : $J_LDSC_C  (combined)"
-J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:$(arr "$J_LDSC_S")" ANNOT_SET=sniff)
+J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "$(dep_arr "$J_LDSC_S")" ANNOT_SET=sniff)
 echo "  prior       : $J_PRIOR_S  (sniff)"
-J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:$(arr "$J_LDSC_C")" ANNOT_SET=combined)
+J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "$(dep_arr "$J_LDSC_C")" ANNOT_SET=combined)
 echo "  prior       : $J_PRIOR_C  (combined)"
 
 if [ "$PRIOR_ONLY" = 1 ]; then
@@ -115,17 +127,17 @@ PNOTE
 fi
 
 echo "== prep (needs annotations + LD) =="
-J_PREP=$(sub 02 02_prep.pbs "afterokarray:$(arr "$J_ANNOT"),afterokarray:$(arr "$J_LD")")
+J_PREP=$(sub 02 02_prep.pbs "$(dep_arr "$J_ANNOT"),$(dep_arr "$J_LD")")
 echo "  prep        : $J_PREP"
 
 echo "== methods (independent of each other) =="
-J_FB=$(sub 03 03_fb_xregion.pbs "afterokarray:$(arr "$J_PREP")")
+J_FB=$(sub 03 03_fb_xregion.pbs "$(dep_arr "$J_PREP")")
 echo "  fb_xregion  : $J_FB"
-J_FM=$(sub 04 04_funmap.pbs     "afterokarray:$(arr "$J_PREP")")
+J_FM=$(sub 04 04_funmap.pbs     "$(dep_arr "$J_PREP")")
 echo "  funmap      : $J_FM"
-J_PF_S=$(sub 05 05_polyfun.pbs "afterokarray:$(arr "$J_PREP"),afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
+J_PF_S=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
 echo "  polyfun     : $J_PF_S  (sniff, 102 annotations)"
-J_PF_C=$(sub 05 05_polyfun.pbs "afterokarray:$(arr "$J_PREP"),afterok:${J_PRIOR_C}" ANNOT_SET=combined)
+J_PF_C=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_C}" ANNOT_SET=combined)
 echo "  polyfun     : $J_PF_C  (combined, 289 annotations)"
 
 cat <<NOTE
