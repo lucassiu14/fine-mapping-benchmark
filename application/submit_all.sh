@@ -31,6 +31,18 @@ done
 
 PASS=APP_ROOT,APP_MODULES,AWS_MODULE,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE
 
+arr () {
+  # Array-job dependency token. PBS Pro's qsub already returns the brackets
+  # for an array job -- "4424612[].pbs-7" -- so appending another "[]" yields
+  # "4424612[].pbs-7[]" and qsub rejects it with "illegal -W value". Append
+  # only when they are absent, so this also works on a PBS that returns a
+  # plain id, and on --dry-run placeholders.
+  case "$1" in
+    *'[]'*) printf '%s' "$1" ;;
+    *)      printf '%s[]' "$1" ;;
+  esac
+}
+
 sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
   local stage="$1" script="$2" dep="${3:-}"; shift 3 2>/dev/null || shift $#
   local extra=""
@@ -44,7 +56,10 @@ sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
     # the command goes to stderr; ONLY the job id goes to stdout, because the
     # caller captures stdout into a variable it then builds dependencies from
     { echo; echo "  \$ ${cmd[*]}"; } >&2
-    echo "dry-$stage"
+    # Mimic the id shape PBS Pro actually returns, brackets and all, so a
+    # dry run exercises the dependency expressions the same way a real run does.
+    if grep -qE '^#PBS +-J ' "$script"; then echo "dry-$stage[].pbs-0"
+    else echo "dry-$stage.pbs-0"; fi
     return
   fi
   "${cmd[@]}"
@@ -60,19 +75,19 @@ fi
 J_REF=$(  sub 00d 00d_ldsc_reference.pbs)   ; echo "  LDSC ref    : $J_REF"
 
 echo "== annotation sets =="
-J_COMB=$(sub 00b2 00b2_combine_annot.pbs "afterokarray:${J_ANNOT}[]")
+J_COMB=$(sub 00b2 00b2_combine_annot.pbs "afterokarray:$(arr "$J_ANNOT")")
 echo "  combined    : $J_COMB  (Borzoi-102 + baselineLF = 289)"
 
 echo "== PolyFun prior, computed from OUR annotations, once per set =="
 J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
 echo "  munge       : $J_MUNGE"
-J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_ANNOT}[]" ANNOT_SET=sniff)
+J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:$(arr "$J_ANNOT")" ANNOT_SET=sniff)
 echo "  LD-scores   : $J_LDSC_S  (sniff)"
-J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_COMB}[]"  ANNOT_SET=combined)
+J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:$(arr "$J_COMB")"  ANNOT_SET=combined)
 echo "  LD-scores   : $J_LDSC_C  (combined)"
-J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_S}[]" ANNOT_SET=sniff)
+J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:$(arr "$J_LDSC_S")" ANNOT_SET=sniff)
 echo "  prior       : $J_PRIOR_S  (sniff)"
-J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_C}[]" ANNOT_SET=combined)
+J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:$(arr "$J_LDSC_C")" ANNOT_SET=combined)
 echo "  prior       : $J_PRIOR_C  (combined)"
 
 if [ "$PRIOR_ONLY" = 1 ]; then
@@ -100,17 +115,17 @@ PNOTE
 fi
 
 echo "== prep (needs annotations + LD) =="
-J_PREP=$(sub 02 02_prep.pbs "afterokarray:${J_ANNOT}[],afterokarray:${J_LD}[]")
+J_PREP=$(sub 02 02_prep.pbs "afterokarray:$(arr "$J_ANNOT"),afterokarray:$(arr "$J_LD")")
 echo "  prep        : $J_PREP"
 
 echo "== methods (independent of each other) =="
-J_FB=$(sub 03 03_fb_xregion.pbs "afterokarray:${J_PREP}[]")
+J_FB=$(sub 03 03_fb_xregion.pbs "afterokarray:$(arr "$J_PREP")")
 echo "  fb_xregion  : $J_FB"
-J_FM=$(sub 04 04_funmap.pbs     "afterokarray:${J_PREP}[]")
+J_FM=$(sub 04 04_funmap.pbs     "afterokarray:$(arr "$J_PREP")")
 echo "  funmap      : $J_FM"
-J_PF_S=$(sub 05 05_polyfun.pbs "afterokarray:${J_PREP}[],afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
+J_PF_S=$(sub 05 05_polyfun.pbs "afterokarray:$(arr "$J_PREP"),afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
 echo "  polyfun     : $J_PF_S  (sniff, 102 annotations)"
-J_PF_C=$(sub 05 05_polyfun.pbs "afterokarray:${J_PREP}[],afterok:${J_PRIOR_C}" ANNOT_SET=combined)
+J_PF_C=$(sub 05 05_polyfun.pbs "afterokarray:$(arr "$J_PREP"),afterok:${J_PRIOR_C}" ANNOT_SET=combined)
 echo "  polyfun     : $J_PF_C  (combined, 289 annotations)"
 
 cat <<NOTE
