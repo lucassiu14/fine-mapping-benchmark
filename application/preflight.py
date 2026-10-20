@@ -13,9 +13,13 @@ B = os.path.join(ROOT, "blocks.csv")
 ok = True
 
 
+fails = 0
+
+
 def fail(msg):
-    global ok
+    global ok, fails
     ok = False
+    fails += 1
     print(f"  MISSING  {msg}")
 
 
@@ -27,11 +31,19 @@ def blocks():
 def check_data():
     print("inputs for 02_prep:")
     rows = blocks()
+    # Report each group's result independently. A single failing group used to
+    # suppress the one summary line at the end, so a run that failed on the LD
+    # files said nothing at all about the annotations - which is exactly when
+    # you want to know they are fine.
+    f0 = fails
     s = os.path.join(ROOT, "chol_sumstats.parquet")
     if not os.path.exists(s) or os.path.getsize(s) < 400_000_000:
         fail(f"chol_sumstats.parquet (expect ~526 MB, got "
              f"{os.path.getsize(s)/1e6:.0f} MB)" if os.path.exists(s)
              else "chol_sumstats.parquet")
+    elif fails == f0:
+        print(f"  OK       sumstats, {os.path.getsize(s)/1e6:.0f} MB")
+    f0 = fails
     # A truncated download is the failure mode that actually happens, and a
     # size floor does not catch it: an interrupted transfer leaves a file that
     # exists and is far over any floor worth setting. Both formats here keep
@@ -54,6 +66,9 @@ def check_data():
         fail(f"{len(missing_ld)} LD files, e.g. {missing_ld[:3]}")
     if broken_ld:
         fail(f"{len(broken_ld)} truncated/corrupt LD files, e.g. {broken_ld[:3]}")
+    if fails == f0:
+        print(f"  OK       {len({r['ld_region'] for r in rows})} LD windows")
+    f0 = fails
 
     # Annotations. Nothing else opens these before 00f hands them to
     # compute_ldscores.py (sniff) or 00b2 merges them (combined), where a bad
@@ -99,10 +114,9 @@ def check_data():
              + ", ".join(f"{n} PCs on chr {cs}" for n, cs in sorted(ncols.items())))
     elif ncols and list(ncols)[0] != 102:
         fail(f"expected 102 Borzoi PCs, found {list(ncols)[0]}")
-    if ok:
-        cols = f", {list(ncols)[0]} annotation columns" if len(ncols) == 1 else ""
-        print(f"  OK  sumstats, {len({r['ld_region'] for r in rows})} LD windows, "
-              f"{len({r['chrom'] for r in rows})} annotation files{cols}")
+    if fails == f0:
+        print(f"  OK       {len(chroms)} annotation files"
+              + (f", {list(ncols)[0]} PCs each" if len(ncols) == 1 else ""))
 
 
 def check_prep():
