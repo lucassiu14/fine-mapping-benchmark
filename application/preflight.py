@@ -69,14 +69,14 @@ def check_prep():
     # The PolyFun prior, computed by 00g from our own annotations. Needed by
     # 05 only. Note S-LDSC is genome-wide, so all 22 must be present even
     # though only 22 chromosomes carry selected blocks.
-    pd_ = os.environ.get("PF_PRIOR_DIR", "pf_prior")
-    miss = [c for c in range(1, 23)
-            if not os.path.exists(os.path.join(ROOT, pd_, f"chol.{c}.snpvar_constrained.gz"))]
-    if miss:
-        fail(f"PolyFun prior missing for chromosomes {miss} - run 00d/00e/00f/00g "
-             f"(needed by 05 only)")
-    else:
-        print("  OK  PolyFun prior computed for all 22 chromosomes")
+    for st in ("sniff", "combined"):
+        miss = [c for c in range(1, 23)
+                if not os.path.exists(os.path.join(ROOT, f"pf_prior_{st}", f"chol.{c}.snpvar_constrained.gz"))]
+        if miss:
+            fail(f"PolyFun prior ({st}) missing for chromosomes {miss} - run "
+                 f"00d/00e/00f/00g with ANNOT_SET={st} (needed by 05 only)")
+        else:
+            print(f"  OK  PolyFun prior ({st}) computed for all 22 chromosomes")
 
 
 def check_methods():
@@ -85,7 +85,8 @@ def check_methods():
     for name, path, label in [
         ("fb_xregion", lambda r: os.path.join(ROOT, "joint_out", r["region_id"], "pip.csv"), "03"),
         ("funmap", lambda r: os.path.join(ROOT, "funmap_out", r["region_id"], "pip.csv"), "04"),
-        ("polyfun_susie", lambda r: os.path.join(ROOT, "polyfun_out", f"{r['region_id']}.txt.gz"), "05"),
+        ("polyfun_sniff", lambda r: os.path.join(ROOT, "polyfun_out_sniff", f"{r['region_id']}.txt.gz"), "05/sniff"),
+        ("polyfun_combined", lambda r: os.path.join(ROOT, "polyfun_out_combined", f"{r['region_id']}.txt.gz"), "05/combined"),
     ]:
         miss = [r["region_id"] for r in rows if not os.path.exists(path(r))]
         if miss:

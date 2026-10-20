@@ -20,13 +20,15 @@ while [ $# -gt 0 ]; do
   esac; shift
 done
 
-PASS=APP_ROOT,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE,PF_SET
+PASS=APP_ROOT,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,RPY2_CFFI_MODE
 
-sub () {  # sub <stage> <script> [dependency-expression]
-  local stage="$1" script="$2" dep="${3:-}"
+sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
+  local stage="$1" script="$2" dep="${3:-}"; shift 3 2>/dev/null || shift $#
+  local extra=""
+  for kv in "$@"; do extra="${extra},${kv}"; done
   if [ -n "$FROM" ] && [ "$stage" \< "$FROM" ]; then echo "skip $script"; return; fi
   if [ -n "$FROM" ] && [ "$stage" = "$FROM" ]; then dep=""; fi   # resuming: no deps
-  local cmd=(qsub -v "$PASS")
+  local cmd=(qsub -v "${PASS}${extra}")
   [ -n "$dep" ] && cmd+=(-W "depend=$dep")
   cmd+=("$script")
   if [ "$DRY" = 1 ]; then
@@ -40,17 +42,25 @@ sub () {  # sub <stage> <script> [dependency-expression]
 }
 
 echo "== downloads (independent, run concurrently) =="
-J_ANNOT=$(sub 00b 00b_download_annot.pbs)   ; echo "  annotations : $J_ANNOT"
+J_ANNOT=$(sub 00b 00b_download_annot.pbs)   ; echo "  annotations : $J_ANNOT  (Borzoi + baselineLF)"
 J_LD=$(   sub 01  01_download_ld.pbs)       ; echo "  LD          : $J_LD"
 J_REF=$(  sub 00d 00d_ldsc_reference.pbs)   ; echo "  LDSC ref    : $J_REF"
 
-echo "== PolyFun prior, computed from OUR annotations =="
+echo "== annotation sets =="
+J_COMB=$(sub 00b2 00b2_combine_annot.pbs "afterokarray:${J_ANNOT}[]")
+echo "  combined    : $J_COMB  (Borzoi-102 + baselineLF = 289)"
+
+echo "== PolyFun prior, computed from OUR annotations, once per set =="
 J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
 echo "  munge       : $J_MUNGE"
-J_LDSC=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_ANNOT}[],afterok:${J_REF}")
-echo "  LD-scores   : $J_LDSC"
-J_PRIOR=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC}[]")
-echo "  prior       : $J_PRIOR"
+J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_ANNOT}[]" ANNOT_SET=sniff)
+echo "  LD-scores   : $J_LDSC_S  (sniff)"
+J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_COMB}[]"  ANNOT_SET=combined)
+echo "  LD-scores   : $J_LDSC_C  (combined)"
+J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_S}[]" ANNOT_SET=sniff)
+echo "  prior       : $J_PRIOR_S  (sniff)"
+J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_C}[]" ANNOT_SET=combined)
+echo "  prior       : $J_PRIOR_C  (combined)"
 
 echo "== prep (needs annotations + LD) =="
 J_PREP=$(sub 02 02_prep.pbs "afterokarray:${J_ANNOT}[],afterokarray:${J_LD}[]")
@@ -61,8 +71,10 @@ J_FB=$(sub 03 03_fb_xregion.pbs "afterokarray:${J_PREP}[]")
 echo "  fb_xregion  : $J_FB"
 J_FM=$(sub 04 04_funmap.pbs     "afterokarray:${J_PREP}[]")
 echo "  funmap      : $J_FM"
-J_PF=$(sub 05 05_polyfun.pbs    "afterokarray:${J_PREP}[],afterok:${J_PRIOR}")
-echo "  polyfun     : $J_PF"
+J_PF_S=$(sub 05 05_polyfun.pbs "afterokarray:${J_PREP}[],afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
+echo "  polyfun     : $J_PF_S  (sniff, 102 annotations)"
+J_PF_C=$(sub 05 05_polyfun.pbs "afterokarray:${J_PREP}[],afterok:${J_PRIOR_C}" ANNOT_SET=combined)
+echo "  polyfun     : $J_PF_C  (combined, 289 annotations)"
 
 cat <<NOTE
 

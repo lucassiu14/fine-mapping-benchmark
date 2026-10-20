@@ -1,0 +1,38 @@
+#!/bin/bash
+#PBS -N chol_combine_annot
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -J 1-22
+#PBS -j oe
+#PBS -o logs/
+# Build the combined annotation set for the second PolyFun variant:
+# Borzoi-102 + baselineLF v2.2 = 289 annotations.
+#
+# The two files share a variant set and row order exactly (verified on chr22:
+# identical SNP, BP and A1 sequences, 271,699 rows each), so this is a column
+# concatenation rather than a join. The script asserts that alignment rather
+# than assuming it.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p annot_combined logs
+source "${APP_VENV:?set APP_VENV}/bin/activate"
+C=${PBS_ARRAY_INDEX}
+OUT="annot_combined/combined.${C}.annot.parquet"
+[ -s "$OUT" ] && { echo "chr$C already combined"; exit 0; }
+
+python - "$C" "$OUT" <<'PY'
+import sys, pandas as pd, pyarrow.parquet as pq
+c, out = sys.argv[1], sys.argv[2]
+key = ["CHR", "SNP", "BP", "A1", "A2"]
+b = pq.ParquetFile(f"annot/borzoi.{c}.annot.parquet").read().to_pandas()
+l = pq.ParquetFile(f"annot/baselineLF.{c}.annot.parquet").read().to_pandas()
+assert len(b) == len(l), f"chr{c}: row counts differ ({len(b)} vs {len(l)})"
+for k in ("SNP", "BP", "A1"):
+    assert (b[k].values == l[k].values).all(), f"chr{c}: {k} not row-aligned"
+lann = [x for x in l.columns if x not in key]
+bann = [x for x in b.columns if x not in key]
+dup = set(lann) & set(bann)
+assert not dup, f"chr{c}: annotation names collide: {sorted(dup)[:5]}"
+pd.concat([b, l[lann]], axis=1).to_parquet(out, index=False)
+print(f"chr{c}: {len(bann)} Borzoi + {len(lann)} baselineLF = "
+      f"{len(bann)+len(lann)} annotations, {len(b):,} variants", flush=True)
+PY

@@ -5,14 +5,28 @@
 #PBS -J 1-22
 #PBS -j oe
 #PBS -o logs/
-# Borzoi-102 annotations, one autosome per task. Public GCS bucket, no auth.
-# ~0.4-1.3 GB per chromosome, ~15 GB total.
+# Annotations, one autosome per task. Public GCS bucket, no auth.
+#   Borzoi-102    ~15 GB total - used by fb_xregion, funmap and PolyFun
+#   baselineLF    ~5 GB total  - used by the second PolyFun variant only
 set -euo pipefail
 cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p annot logs
 C=${PBS_ARRAY_INDEX}
-F="annot/borzoi.${C}.annot.parquet"
-if [ -s "$F" ]; then echo "skip chr$C"; exit 0; fi
-curl -fsS --retry 5 --retry-delay 10 --max-time 7200 -o "$F.part" \
-  "https://storage.googleapis.com/seqnn-share/sniff/processed_borzoi_parquets/borzoi.${C}.annot.parquet"
-mv "$F.part" "$F"
-echo "chr$C done ($(du -h "$F" | cut -f1))"
+G=https://storage.googleapis.com/seqnn-share/sniff
+
+fetch () {  # fetch <url> <dest>
+  [ -s "$2" ] && { echo "  skip $(basename "$2")"; return; }
+  curl -fsS --retry 5 --retry-delay 10 --max-time 7200 -o "$2.part" "$1"
+  mv "$2.part" "$2"
+  echo "  got $(basename "$2") ($(du -h "$2" | cut -f1))"
+}
+
+# Borzoi-102: the annotation set fb_xregion and funmap use.
+fetch "$G/processed_borzoi_parquets/borzoi.${C}.annot.parquet" \
+      "annot/borzoi.${C}.annot.parquet"
+
+# baselineLF v2.2 (187 annotations), for the second PolyFun variant. Same
+# variant set and row order as the Borzoi file, so 00b2 can combine them by
+# column concatenation.
+fetch "$G/processed_baselineLF_parquets/baselineLF2.2.UKB.${C}.annot.parquet" \
+      "annot/baselineLF.${C}.annot.parquet"
+echo "chr$C done"

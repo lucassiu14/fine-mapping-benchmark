@@ -19,7 +19,9 @@
 # consumes exactly the LD we already downloaded - no conversion.
 set -euo pipefail
 cd "${APP_ROOT:?set APP_ROOT}"
-mkdir -p polyfun_out logs
+SET="${ANNOT_SET:-sniff}"
+case "$SET" in sniff|combined) ;; *) echo "ANNOT_SET must be sniff or combined" >&2; exit 2 ;; esac
+mkdir -p "polyfun_out_${SET}" logs
 # Activate POLYFUN_ENV, which may be a venv or a conda env. Written as an
 # if/else rather than `source ... || conda activate ...` because the latter
 # parses as `(A || B) && C` and runs conda activate even when the venv
@@ -45,13 +47,13 @@ export RPY2_CFFI_MODE="${RPY2_CFFI_MODE:-ABI}"
 read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
   'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)
 [ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
-OUT="polyfun_out/${RID}.txt.gz"
-[ -s "$OUT" ] && { echo "$RID already done"; exit 0; }
+OUT="polyfun_out_${SET}/${RID}.txt.gz"
+[ -s "$OUT" ] && { echo "$RID ($SET) already done"; exit 0; }
 
 # finemapper wants a sumstats file with SNPVAR; the downloaded priors file
 # already carries CHR SNP BP A1 A2 SNPVAR MAF N Z P.
 W="${TMPDIR:-/tmp}/${RID}"; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
-python - "${PF_PRIOR_DIR:-pf_prior}/chol.${CHR}.snpvar_constrained.gz" \
+python - "pf_prior_${SET}/chol.${CHR}.snpvar_constrained.gz" \
          "$W/sumstats.parquet" "$BS" "$BE" "regions/$RID/snps.csv" <<'PY'
 import sys, pandas as pd
 src, dst, bs, be, snps = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
@@ -79,4 +81,4 @@ python "${POLYFUN_DIR:?set POLYFUN_DIR to the upstream polyfun checkout}/finemap
   --method susie --max-num-causal 10 \
   --allow-missing \
   --out "$OUT"
-echo "$RID done"
+echo "$RID ($SET) done"

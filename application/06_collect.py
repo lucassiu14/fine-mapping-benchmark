@@ -26,7 +26,8 @@ for rid in blocks.region_id:
     src = {
         "fb_xregion":    (os.path.join(ROOT, "joint_out", rid, "pip.csv"), "csv_named"),
         "funmap":        (os.path.join(ROOT, "funmap_out", rid, "pip.csv"), "csv_headerless"),
-        "polyfun_susie": (os.path.join(ROOT, "polyfun_out", f"{rid}.txt.gz"), "finemapper"),
+        "polyfun_sniff": (os.path.join(ROOT, "polyfun_out_sniff", f"{rid}.txt.gz"), "finemapper"),
+        "polyfun_combined": (os.path.join(ROOT, "polyfun_out_combined", f"{rid}.txt.gz"), "finemapper"),
     }
     for meth, (path, kind) in src.items():
         if not os.path.exists(path):

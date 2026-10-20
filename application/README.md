@@ -1,8 +1,18 @@
 # UK Biobank cholesterol application
 
 Genome-wide fine-mapping of UK Biobank total cholesterol over LDetect EUR
-blocks, comparing **fb_xregion** (annotation selection) against **Funmap**
-(annotation shrinkage) and **PolyFun + SuSiE**.
+blocks, comparing four methods on identical loci:
+
+| method | annotations | how it uses them |
+|---|---|---|
+| `fb_xregion` | Borzoi-102 | LassoNet — sparse **selection** |
+| `funmap` | Borzoi-102 | random effects — **shrinkage**, no selection |
+| `polyfun_sniff` | Borzoi-102 | S-LDSC prior on the same 102 |
+| `polyfun_combined` | Borzoi-102 + baselineLF (289) | S-LDSC prior, standard specification |
+
+The two PolyFun variants separate the method from the annotation set:
+`polyfun_sniff` sees exactly what the other two see, `polyfun_combined` is
+PolyFun at its strongest.
 
 Everything below is reproducible from public data. No UK Biobank application
 or credentials are needed: all three inputs are openly hosted.
@@ -74,7 +84,18 @@ https://storage.googleapis.com/seqnn-share/sniff/processed_borzoi_parquets/borzo
 
 **Borzoi-102**: 102 principal components of Borzoi variant-effect predictions
 over 6,385 datasets — ATAC 20, DNASE 20, RNA 20, CHIP 20, RNAGTEX 13, CAGE 9.
-Public GCS, no authentication.
+Public GCS, no authentication. Used by all four methods.
+
+```
+.../sniff/processed_baselineLF_parquets/baselineLF2.2.UKB.{CHR}.annot.parquet   (~5 GB total)
+```
+
+**baselineLF v2.2**: 187 annotations, used only by `polyfun_combined`. It
+shares the Borzoi files' variant set and row order exactly — verified on
+chr22: identical SNP, BP and A1 sequences, 271,699 rows each — so `00b2`
+combines them by column concatenation into 289 annotations, asserting the
+alignment rather than assuming it. baselineLF has no tissue-specific
+annotations.
 
 ### 1.5 PolyFun prior — computed here, not downloaded
 
@@ -109,12 +130,17 @@ and a reference panel is the conventional S-LDSC choice. The UKB LD is still
 used for the fine-mapping itself, where it matters. EUR is the right panel:
 the GWAS is UK Biobank white-British and the loci are LDetect EUR blocks.
 
-*The 102 Borzoi PCs only, with no baseline model.* This is non-standard for
-S-LDSC — enrichment estimates may be biased without baseline controls — but it
-is deliberate: PolyFun then sees exactly what `fb_xregion` and `funmap` see,
-so the comparison isolates the method rather than the annotation set. Giving
-PolyFun the ~187 baselineLF annotations would hand it information the other
-two do not have.
+*Two annotation sets, run separately.* `ANNOT_SET=sniff` gives PolyFun the
+102 Borzoi PCs only — non-standard for S-LDSC, since enrichment estimates may
+be biased without baseline controls, but it means PolyFun sees exactly what
+`fb_xregion` and `funmap` see. `ANNOT_SET=combined` adds baselineLF v2.2 for
+289 annotations, the standard specification and PolyFun at its strongest.
+Running both removes the objection either way: if `polyfun_combined` wins, the
+289-annotation advantage is visible rather than hidden; if `polyfun_sniff`
+already wins, the extra annotations were not what mattered.
+
+Each set gets its own LD-scores (`ldscores_<set>/`), prior (`pf_prior_<set>/`)
+and fine-mapping output (`polyfun_out_<set>/`).
 
 S-LDSC is a genome-wide regression, so this runs over all 22 chromosomes.
 Restricting it to the 265 significant blocks would be selection on the outcome.
@@ -239,16 +265,18 @@ bash submit_all.sh
 before its inputs exist:
 
 ```
-  00b annotations ─┬────────────────> 02 prep ─┬─> 03 fb_xregion  (ONE job, 160 GB)
-  01  LD          ─┘                           ├─> 04 funmap      (265 tasks)
-                                               │
-  00d LDSC ref ─> 00e munge ─> 00f LD-scores ──┴─> 05 polyfun     (265 tasks)
-                               (22 tasks)
-                                    └─> 00g PolyFun prior
+  00b annotations ─┬──────────────────────> 02 prep ─┬─> 03 fb_xregion (ONE job, 160 GB)
+  01  LD          ─┘                                  ├─> 04 funmap     (265 tasks)
+       │                                              │
+       └─> 00b2 combine (289)                         │
+                                                      │
+  00d LDSC ref ─> 00e munge ─┬─> 00f ldscores[sniff]    ─> 00g prior[sniff]    ─┼─> 05 polyfun[sniff]
+                             └─> 00f ldscores[combined] ─> 00g prior[combined] ─┴─> 05 polyfun[combined]
 ```
 
-`00d`–`00g` compute the PolyFun prior from our annotations; they run in
-parallel with the LD download.
+`00d`–`00g` compute each PolyFun prior from our own annotations and run in
+parallel with the LD download. `00f`, `00g` and `05` are each submitted twice,
+once per `ANNOT_SET`; `submit_all.sh` does this for you.
 
 The three downloads run concurrently. 03, 04 and 05 are independent of one
 another. `--from 03` resumes at a stage with dependencies dropped.

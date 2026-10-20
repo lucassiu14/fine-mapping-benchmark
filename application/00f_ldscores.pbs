@@ -5,8 +5,8 @@
 #PBS -J 1-22
 #PBS -j oe
 #PBS -o logs/
-# LD-scores for the 102 Borzoi annotations, one chromosome per task, computed
-# from the 1000G EUR panel.
+# LD-scores for one annotation set, one chromosome per task, from the 1000G
+# EUR panel. Submit once per ANNOT_SET (sniff, combined).
 #
 # --allow-missing is REQUIRED: the plink panel contains SNPs with no Borzoi
 # annotation and the script aborts otherwise. Measured on chr22, the Borzoi
@@ -18,16 +18,28 @@
 # Timing: chr22 took 34 s on 8 cores; the larger chromosomes scale roughly
 # with SNP count.
 set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p ldscores logs
+cd "${APP_ROOT:?set APP_ROOT}"
 source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
 C=${PBS_ARRAY_INDEX}
-OUT="ldscores/borzoi.${C}.l2.ldscore.parquet"
-[ -s "$OUT" ] && { echo "chr$C already done"; exit 0; }
+
+# ANNOT_SET selects the PolyFun variant:
+#   sniff    - the 102 Borzoi PCs, exactly what fb_xregion and funmap see
+#   combined - Borzoi-102 + baselineLF v2.2 = 289, the standard S-LDSC setup
+SET="${ANNOT_SET:-sniff}"
+case "$SET" in
+  sniff)    ANNOT="annot/borzoi.${C}.annot.parquet" ;;
+  combined) ANNOT="annot_combined/combined.${C}.annot.parquet" ;;
+  *) echo "ANNOT_SET must be sniff or combined, not '$SET'" >&2; exit 2 ;;
+esac
+mkdir -p "ldscores_${SET}" logs
+OUT="ldscores_${SET}/annot.${C}.l2.ldscore.parquet"
+[ -s "$OUT" ] && { echo "chr$C ($SET) already done"; exit 0; }
+[ -s "$ANNOT" ] || { echo "missing annotation file: $ANNOT" >&2; exit 1; }
 
 python "${POLYFUN_DIR:?set POLYFUN_DIR}/compute_ldscores.py" \
   --bfile "1000G_EUR_Phase3_plink/1000G.EUR.QC.${C}" \
-  --annot "annot/borzoi.${C}.annot.parquet" \
+  --annot "$ANNOT" \
   --out "$OUT" \
   --ld-wind-cm 1 \
   --allow-missing
-echo "chr$C LD-scores done"
+echo "chr$C ($SET) LD-scores done"

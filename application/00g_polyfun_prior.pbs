@@ -11,42 +11,51 @@
 # blocks - doing so would be selection on the outcome. (--chr applies only to
 # --compute-ldscores, not to --compute-h2-L2.)
 #
-# Annotations: the 102 Borzoi PCs ONLY, with no baseline model. That is
-# non-standard for S-LDSC and the enrichment estimates may be biased without
-# baseline controls, but it is deliberate: PolyFun then sees exactly what
-# fb_xregion and funmap see, so the comparison isolates the method rather
-# than the annotation set.
+# Two variants, selected by ANNOT_SET:
+#   sniff     102 Borzoi PCs only. Non-standard for S-LDSC - enrichment may be
+#             biased without baseline controls - but PolyFun then sees exactly
+#             what fb_xregion and funmap see, so the comparison isolates the
+#             method rather than the annotation set.
+#   combined  Borzoi-102 + baselineLF v2.2 = 289. The standard S-LDSC setup,
+#             and PolyFun at its strongest; any advantage it shows here may be
+#             the extra 187 annotations rather than the method.
 set -euo pipefail
-cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p pf_prior logs
+cd "${APP_ROOT:?set APP_ROOT}"
 source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
 PF="${POLYFUN_DIR:?set POLYFUN_DIR}"
 W=1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
+SET="${ANNOT_SET:-sniff}"
+case "$SET" in sniff|combined) ;; *) echo "ANNOT_SET must be sniff or combined" >&2; exit 2 ;; esac
+LDS="ldscores_${SET}/annot."
+OUTP="pf_prior_${SET}/chol"
+mkdir -p "pf_prior_${SET}" logs
+echo "[prior] annotation set: $SET"
 
 # --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
-if [ ! -s pf_prior/chol.22.snpvar_ridge.gz ]; then
+if [ ! -s ${OUTP}.22.snpvar_ridge.gz ]; then
   python "$PF/polyfun.py" \
     --compute-h2-L2 \
-    --output-prefix pf_prior/chol \
+    --output-prefix "$OUTP" \
     --sumstats munged.parquet \
-    --ref-ld-chr ldscores/borzoi. \
+    --ref-ld-chr "$LDS" \
     --w-ld-chr "$W" \
     --allow-missing
 else echo "stage 1 already done"; fi
 
 # --- stage 2: LD-scores of the snpvar bins ---------------------------------
-if [ ! -s pf_prior/chol.22.l2.ldscore.parquet ]; then
+if [ ! -s ${OUTP}.22.l2.ldscore.parquet ]; then
   python "$PF/polyfun.py" \
     --compute-ldscores \
-    --output-prefix pf_prior/chol \
+    --output-prefix "$OUTP" \
     --bfile-chr 1000G_EUR_Phase3_plink/1000G.EUR.QC. \
     --ld-wind-cm 1
 else echo "stage 2 already done"; fi
 
 # --- stage 3: re-estimate h2 per bin -> the final prior --------------------
-if [ ! -s pf_prior/chol.22.snpvar_constrained.gz ]; then
+if [ ! -s ${OUTP}.22.snpvar_constrained.gz ]; then
   python "$PF/polyfun.py" \
     --compute-h2-bins \
-    --output-prefix pf_prior/chol \
+    --output-prefix "$OUTP" \
     --sumstats munged.parquet \
     --w-ld-chr "$W" \
     --allow-missing
@@ -55,5 +64,5 @@ else echo "stage 3 already done"; fi
 echo
 echo "prior ready. Per-chromosome files carry CHR SNP BP A1 A2 SNPVAR MAF N Z,"
 echo "which is what 05_polyfun.pbs feeds to finemapper.py:"
-ls -la pf_prior/chol.*.snpvar_constrained.gz | head -3
-echo "($(ls pf_prior/chol.*.snpvar_constrained.gz | wc -l) of 22 chromosomes)"
+ls -la "${OUTP}".*.snpvar_constrained.gz | head -3
+echo "($(ls "${OUTP}".*.snpvar_constrained.gz | wc -l) of 22 chromosomes, set=$SET)"
