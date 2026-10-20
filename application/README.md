@@ -223,17 +223,23 @@ overhead. **Request 160 GB for `03_fb_xregion`**; mini-batching is not needed.
 **Measured per-method, on one block (`ldEUR_20_0038`, chr20, p = 4,238,
 8-core laptop):**
 
-| method | wall time | notes |
-|---|---|---|
-| fb_xregion | 366 s for **5 blocks jointly**, 2000 iterations | one job over all blocks |
-| Funmap | **3,107 s (52 min) for ONE block** | stage 1: 1 iter, stage 2: 13, stage 3: 14 |
-| PolyFun `finemapper.py` | **46 s** total, 6–8 s in SuSiE | per block |
+| method | block | p | wall time |
+|---|---|---|---|
+| fb_xregion | 5 blocks **jointly**, 2000 iterations | 35,621 total | 366 s |
+| Funmap | ldEUR_22_0024_part | 7,777 | **702 s (11.7 min)** |
+| Funmap | ldEUR_20_0038 | 4,238 | 3,107 s — *see below* |
+| PolyFun `finemapper.py` | ldEUR_20_0038 | 4,238 | 46 s (6–8 s in SuSiE) |
+| PolyFun `finemapper.py` | ldEUR_22_0024_part | 7,777 | 29 s |
 
-**Funmap is the binding constraint.** Its cost grows roughly with
-`L × p² × iterations × 3` (three stacked SuSiE-style stages), so scaling 52 min
-at p = 4,238 gives ≈ **4 h at p ≈ 9,000** and ≈ **11 h at p = 15,219**. It
-parallelises trivially as an array job, but give `04_funmap.pbs` a walltime of
-at least 24 h and expect the largest blocks to need more.
+**The 3,107 s figure is not a clean measurement** — that run spent most of its
+life competing with a stray process for the CPU. The clean number is chr22:
+**11.7 minutes at p = 7,777**, despite that block being larger *and* taking
+more stage-2 iterations (19 vs 13). Funmap's cost tracks iteration count to
+convergence as much as p, so it varies block to block.
+
+Budget on the clean figure: roughly **15–25 min per block** at the median
+p ≈ 9,000, more for the largest. A 12 h walltime on `04_funmap.pbs` is ample,
+and it parallelises trivially as an array job.
 
 **Still to measure: fb_xregion total runtime.** `regularize_ld` always falls
 through to a full eigendecomposition on real float32 UKBB LD (min eigenvalue
@@ -245,14 +251,42 @@ against a 10-block manifest and extrapolate before trusting the walltime.
 
 All three methods were run on `ldEUR_20_0038` with identical inputs:
 
-| method | sum PIP | max PIP | top variant | \|Z\| | rank | n PIP>0.5 |
-|---|---|---|---|---|---|---|
-| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27 | 1 |
-| funmap | 9.99 | 1.000 | 62,370,732 | 6.00 | 13 | 2 |
-| polyfun_susie | 9.91 | 0.457 | 62,370,732 | 6.00 | 13 | 0 |
+**ldEUR_20_0038** (chr20:62.19–62.97 Mb, p = 4,238, max |Z| = 6.05)
 
-Spearman correlation between PIP vectors: funmap–polyfun 0.722,
+| method | sum PIP | max PIP | top variant | \|Z\| | rank |
+|---|---|---|---|---|---|
+| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27 |
+| funmap | 9.99 | **1.000** | 62,370,732 | 6.00 | 13 |
+| polyfun_susie | 9.04 | 0.407 | 62,370,732 | 6.00 | 13 |
+
+**ldEUR_22_0024_part** (chr22:50.00–51.24 Mb, p = 7,777, max |Z| = 5.52)
+
+| method | sum PIP | max PIP | top variant | \|Z\| | rank |
+|---|---|---|---|---|---|
+| fb_xregion | 1.00 | 0.033 | 50,858,813 | 5.46 | 2 |
+| funmap | 9.99 | **1.000** | 50,858,813 | 5.46 | 2 |
+| polyfun_susie | 9.97 | 0.133 | 50,838,241 | 5.42 | 11 |
+
+Spearman between PIP vectors on chr20: funmap–polyfun 0.722,
 fb_xregion–polyfun 0.533, fb_xregion–funmap 0.518.
+
+Three things to look at before reading anything into the full run:
+
+1. **Funmap returns PIP of exactly 1.000**, on the lead variant in both blocks
+   and on two variants in chr20. At |Z| ≈ 6 inside a region of several thousand
+   variants in LD, a posterior of exactly 1 is not credible; it suggests
+   numerical saturation rather than certainty.
+2. **fb_xregion is far more conservative** — sum(PIP) 1.0–1.7 against ~10 for
+   the other two, and on chr22 its maximum is 0.033, i.e. it declines to
+   localise at all where funmap is certain. Whether that is appropriate
+   caution or a failure to commit is the thing to establish.
+3. **Funmap and PolyFun both put sum(PIP) ≈ 9.99**, their L = 10 prior, in
+   every block. That is SuSiE-like behaviour and means the posterior expected
+   number of causal variants is essentially the prior.
+
+A real 50 kb gap at chr22:50,364,571–50,414,983 is visible in the z-scores. It
+is genuine: zero variants there in both the summary statistics and the LD
+panel, not an artefact of the filtering.
 
 ### Building the PolyFun environment
 
