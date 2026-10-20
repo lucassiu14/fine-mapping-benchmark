@@ -537,6 +537,7 @@ environment needs four specific pins, each found the hard way:
 | `pyarrow<=17` | newer pyarrow requires numpy ≥ 2, which conflicts with the rest |
 | `rpy2==3.5.x` | 3.6 turned `numpy2ri.activate()` into a raised `DeprecationWarning`, and finemapper.py calls it |
 | `susieR 0.11.92` | 0.12+ moved `bhat/shat/R/var_y` out of `susie_suff_stat` into `susie_rss`; finemapper.py calls the old signature. Install with `remotes::install_github("stephenslab/susieR@v0.11.92")` — note the `v` prefix on the tag |
+| R dependency tree | susieR's deps must come from a **CRAN snapshot**, not today's CRAN. Current `Matrix` (1.7-6) declares `R (>= 4.4)`, so under `R/4.3.2` it is filtered out of `available.packages()` and reported as `dependency 'Matrix' is not available` — taking `irlba`, then `mixsqp`, then `susieR` down with it. `setup.sh` resolves from `packagemanager.posit.co/cran/2023-11-01` (override with `R_CRAN_SNAPSHOT`), giving `Matrix 1.6-1.1`, `irlba 2.3.5.1`, `mixsqp 0.3-48`, `ggplot2 3.4.4`. This also avoids compiling a 2026 tree (ggplot2 4.x, S7, RcppArmadillo 15.x) for a 2022 package |
 | `RPY2_CFFI_MODE=ABI` | only if the rpy2 wheel was built against a different R minor version than the one installed |
 
 Set `R_LIBS` so the 0.11.92 library comes first, and `R_HOME` to the R
