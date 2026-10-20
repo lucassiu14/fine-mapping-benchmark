@@ -253,9 +253,24 @@ Three environments are needed because the pins genuinely conflict:
 Then put functional-beatrice at `$FB_DIR` — **`main` at `d0fb022` or later**;
 `03_fb_xregion.pbs` verifies this by content and refuses to run otherwise.
 
+### Where to run things
+
+`setup.sh` is run **from the cloned repo** — it copies every script into
+`$APP_ROOT`. Everything after that is run **from `$APP_ROOT`**:
+
+```bash
+cd "$APP_ROOT"
+```
+
+Strictly, the shell scripts all `cd "$APP_ROOT"` as their first action and the
+python scripts resolve `APP_ROOT` from the environment, so they work from any
+directory as long as the path you give resolves. But `$APP_ROOT` is where the
+copies live, so running there is what the commands below assume.
+
 ### Submit
 
 ```bash
+cd "$APP_ROOT"
 source "$APP_ROOT/env.sh"
 bash submit_all.sh --dry-run     # inspect the qsub commands and dependencies
 bash submit_all.sh
@@ -296,8 +311,13 @@ in seconds rather than a third of the way through a 265-task array.
 
 ```bash
 python 06_collect.py && python preflight.py collect
-python 07_plot_blocks.py      # z-scores and PIPs per block
+python 07_plot_blocks.py                        # the 4 strongest blocks
+python 07_plot_blocks.py ldEUR_01_0067          # or named blocks
+python 07_plot_blocks.py --n 8                  # or the 8 strongest
 ```
+
+`07_plot_blocks.py` skips blocks that are not finished rather than failing, so
+it is usable while a run is still going.
 
 `06_collect.py` is deliberately **not** chained, so a partial failure in one
 method does not quietly produce a half-empty results table.
