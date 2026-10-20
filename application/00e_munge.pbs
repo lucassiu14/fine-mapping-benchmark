@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -N chol_munge
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -o logs/
+# Munge the summary statistics into PolyFun's format.
+#
+# munge_polyfun_sumstats.py reads WHITESPACE TEXT, not parquet, so the parquet
+# is converted first. Our column names (CHR BP SNP A1 A2 MAF N Z) are all ones
+# it recognises.
+#
+# Do NOT pass --n: the file already carries an N column and the script refuses
+# both ("cannot both specify --n and have an N column").
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p logs
+source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
+
+[ -s sumstats.tsv ] || python - <<'PY'
+import os, pyarrow.parquet as pq
+root = os.environ["APP_ROOT"]
+d = pq.ParquetFile(os.path.join(root, "chol_sumstats.parquet")).read(
+    columns=["SNP","CHR","BP","A1","A2","MAF","N","Z"]).to_pandas()
+d.to_csv(os.path.join(root, "sumstats.tsv"), sep="\t", index=False)
+print(f"wrote {len(d):,} rows to sumstats.tsv", flush=True)
+PY
+
+python "${POLYFUN_DIR:?set POLYFUN_DIR}/munge_polyfun_sumstats.py" \
+  --sumstats sumstats.tsv \
+  --out munged.parquet \
+  --min-info 0
+echo "munged sumstats ready"

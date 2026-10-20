@@ -7,9 +7,13 @@
 #PBS -o logs/
 # PolyFun + SuSiE, one block per array task, using the AUTHORS' finemapper.py.
 #
-# Stage 1 (annotations -> per-SNP prior causal variance, SNPVAR) is NOT re-run:
-# we use the priors PolyFun itself produced on this trait and these
-# annotations, downloaded by 00c. Stage 2 is the real finemapper.py.
+# Stage 1 (annotations -> per-SNP prior causal variance, SNPVAR) is computed
+# by 00g from OUR annotation set, not downloaded. The published priors in the
+# Sniff bucket are for the same GWAS - verified: N, Z and MAF match to within
+# text rounding over 209,974 clean 1:1 matches on chr22 - but which annotation
+# set produced them cannot be established, because the bucket holds only
+# stage-2 intermediates (snpvar bins), and a scalar SNPVAR cannot be
+# reverse-engineered. 00c can still fetch them as a cross-check.
 #
 # finemapper.py reads the UKBB .npz/.gz pair natively via load_ld_npz(), so it
 # consumes exactly the LD we already downloaded - no conversion.
@@ -47,11 +51,11 @@ OUT="polyfun_out/${RID}.txt.gz"
 # finemapper wants a sumstats file with SNPVAR; the downloaded priors file
 # already carries CHR SNP BP A1 A2 SNPVAR MAF N Z P.
 W="${TMPDIR:-/tmp}/${RID}"; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
-python - "polyfun_priors/${PF_SET:-sniff}.biochemistry_Cholesterol.${CHR}.txt.gz" \
+python - "${PF_PRIOR_DIR:-pf_prior}/chol.${CHR}.snpvar_constrained.gz" \
          "$W/sumstats.parquet" "$BS" "$BE" "regions/$RID/snps.csv" <<'PY'
 import sys, pandas as pd
 src, dst, bs, be, snps = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
-d = pd.read_csv(src, sep='\t')
+d = pd.read_csv(src, sep='\t')      # CHR SNP BP A1 A2 SNPVAR MAF N Z
 d = d[(d.BP >= bs) & (d.BP <= be)]
 # Restrict to the SAME variant set the other methods see. Without this PolyFun
 # fine-maps every variant its priors file carries in the block - including the
@@ -60,7 +64,8 @@ d = d[(d.BP >= bs) & (d.BP <= be)]
 keep = set(pd.read_csv(snps)['SNP'])
 n_all = len(d)
 d = d[d.SNP.isin(keep)]
-d = d[['CHR','SNP','BP','A1','A2','SNPVAR','MAF','N','Z','P']]
+cols = [c for c in ['CHR','SNP','BP','A1','A2','SNPVAR','MAF','N','Z','P'] if c in d.columns]
+d = d[cols]
 d.to_parquet(dst, index=False)
 print(f'{len(d)} variants with SNPVAR (of {n_all} in the block) after matching '
       f'the shared variant set', flush=True)

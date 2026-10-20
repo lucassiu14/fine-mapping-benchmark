@@ -1,0 +1,33 @@
+#!/bin/bash
+#PBS -N chol_ldscores
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=08:00:00
+#PBS -J 1-22
+#PBS -j oe
+#PBS -o logs/
+# LD-scores for the 102 Borzoi annotations, one chromosome per task, computed
+# from the 1000G EUR panel.
+#
+# --allow-missing is REQUIRED: the plink panel contains SNPs with no Borzoi
+# annotation and the script aborts otherwise. Measured on chr22, the Borzoi
+# set covers 98.5% of the panel, so little is lost.
+#
+# The output name must follow the LDSC convention <prefix><chr>.l2.ldscore...
+# because 00g passes --ref-ld-chr ldscores/borzoi. to PolyFun.
+#
+# Timing: chr22 took 34 s on 8 cores; the larger chromosomes scale roughly
+# with SNP count.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p ldscores logs
+source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
+C=${PBS_ARRAY_INDEX}
+OUT="ldscores/borzoi.${C}.l2.ldscore.parquet"
+[ -s "$OUT" ] && { echo "chr$C already done"; exit 0; }
+
+python "${POLYFUN_DIR:?set POLYFUN_DIR}/compute_ldscores.py" \
+  --bfile "1000G_EUR_Phase3_plink/1000G.EUR.QC.${C}" \
+  --annot "annot/borzoi.${C}.annot.parquet" \
+  --out "$OUT" \
+  --ld-wind-cm 1 \
+  --allow-missing
+echo "chr$C LD-scores done"

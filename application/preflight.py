@@ -66,14 +66,17 @@ def check_prep():
         fail(f"{len(bad)} of {len(rows)} blocks incomplete, e.g. {bad[:3]}")
     else:
         print(f"  OK  all {len(rows)} blocks prepared")
-    # PolyFun priors are only needed by 05
-    miss = [c for c in sorted({int(r["chrom"]) for r in rows})
-            if not any(os.path.exists(os.path.join(ROOT, "polyfun_priors", f"{s}.biochemistry_Cholesterol.{c}.txt.gz"))
-                       for s in ("sniff", "baseline"))]
+    # The PolyFun prior, computed by 00g from our own annotations. Needed by
+    # 05 only. Note S-LDSC is genome-wide, so all 22 must be present even
+    # though only 22 chromosomes carry selected blocks.
+    pd_ = os.environ.get("PF_PRIOR_DIR", "pf_prior")
+    miss = [c for c in range(1, 23)
+            if not os.path.exists(os.path.join(ROOT, pd_, f"chol.{c}.snpvar_constrained.gz"))]
     if miss:
-        fail(f"PolyFun priors for chromosomes {miss} (needed by 05 only)")
+        fail(f"PolyFun prior missing for chromosomes {miss} - run 00d/00e/00f/00g "
+             f"(needed by 05 only)")
     else:
-        print("  OK  PolyFun priors present")
+        print("  OK  PolyFun prior computed for all 22 chromosomes")
 
 
 def check_methods():

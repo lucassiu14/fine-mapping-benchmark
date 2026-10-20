@@ -46,10 +46,15 @@ say "python environments"
 mkenv appenv    numpy pandas pyarrow scipy torch
 # Funmap pins these exactly; do not relax them.
 mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8.2"
-# PolyFun: pyarrow<=17 keeps numpy 1.x usable; rpy2 3.5.x because 3.6 turned
-# numpy2ri.activate() into a raised DeprecationWarning and finemapper calls it.
+# PolyFun pins, each found the hard way:
+#   pyarrow<=17   newer pyarrow requires numpy>=2, which conflicts with the rest
+#   rpy2 3.5.x    3.6 turned numpy2ri.activate() into a raised DeprecationWarning
+#                 and finemapper.py calls it
+#   bitarray<3    3.x changed bitarray.decode() to return an iterator; PolyFun's
+#                 plink reader passes the result straight to np.array(dtype=float64)
+#                 and dies with "float() argument must be ... not decodeiterator"
 mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-plink \
-                 bitarray networkx packaging tqdm "rpy2==3.5.17"
+                 "bitarray==2.9.2" networkx packaging tqdm "rpy2==3.5.17"
 
 say "susieR 0.11.92 for PolyFun"
 RLIB="$APP_ROOT/Rlib_polyfun"; mkdir -p "$RLIB"
@@ -61,6 +66,18 @@ if [ -d "$RLIB/susieR" ]; then echo "  already installed"; else
     remotes::install_github('stephenslab/susieR@v0.11.92', lib='$RLIB', upgrade='never')
     cat('susieR', as.character(packageVersion('susieR', lib.loc='$RLIB')), 'installed\n')"
 fi
+
+say "LDSC reference data for computing the PolyFun prior (0.30 GB)"
+Z=https://zenodo.org/records/10515792/files
+if [ -d "$APP_ROOT/1000G_EUR_Phase3_plink" ]; then echo "  plink panel already present"; else
+  curl -fL --retry 5 -o "$APP_ROOT/plink.tgz" "$Z/1000G_Phase3_plinkfiles.tgz?download=1"
+  tar xzf "$APP_ROOT/plink.tgz" -C "$APP_ROOT" && rm -f "$APP_ROOT/plink.tgz"
+fi
+if [ -d "$APP_ROOT/1000G_Phase3_weights_hm3_no_MHC" ]; then echo "  weights already present"; else
+  curl -fL --retry 5 -o "$APP_ROOT/w.tgz" "$Z/1000G_Phase3_weights_hm3_no_MHC.tgz?download=1"
+  tar xzf "$APP_ROOT/w.tgz" -C "$APP_ROOT" && rm -f "$APP_ROOT/w.tgz"
+fi
+echo "  1000G EUR panel and HapMap3 weights ready"
 
 say "environment file"
 cat > "$APP_ROOT/env.sh" <<ENVEOF

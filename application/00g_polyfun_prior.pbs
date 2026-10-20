@@ -1,0 +1,59 @@
+#!/bin/bash
+#PBS -N chol_pf_prior
+#PBS -l select=1:ncpus=16:mem=64gb
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o logs/
+# Compute the PolyFun prior ourselves, from our own annotations.
+#
+# Three stages of the authors' polyfun.py, run genome-wide. S-LDSC is a
+# genome-wide regression, so this CANNOT be restricted to the 265 significant
+# blocks - doing so would be selection on the outcome. (--chr applies only to
+# --compute-ldscores, not to --compute-h2-L2.)
+#
+# Annotations: the 102 Borzoi PCs ONLY, with no baseline model. That is
+# non-standard for S-LDSC and the enrichment estimates may be biased without
+# baseline controls, but it is deliberate: PolyFun then sees exactly what
+# fb_xregion and funmap see, so the comparison isolates the method rather
+# than the annotation set.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p pf_prior logs
+source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate"
+PF="${POLYFUN_DIR:?set POLYFUN_DIR}"
+W=1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
+
+# --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
+if [ ! -s pf_prior/chol.22.snpvar_ridge.gz ]; then
+  python "$PF/polyfun.py" \
+    --compute-h2-L2 \
+    --output-prefix pf_prior/chol \
+    --sumstats munged.parquet \
+    --ref-ld-chr ldscores/borzoi. \
+    --w-ld-chr "$W" \
+    --allow-missing
+else echo "stage 1 already done"; fi
+
+# --- stage 2: LD-scores of the snpvar bins ---------------------------------
+if [ ! -s pf_prior/chol.22.l2.ldscore.parquet ]; then
+  python "$PF/polyfun.py" \
+    --compute-ldscores \
+    --output-prefix pf_prior/chol \
+    --bfile-chr 1000G_EUR_Phase3_plink/1000G.EUR.QC. \
+    --ld-wind-cm 1
+else echo "stage 2 already done"; fi
+
+# --- stage 3: re-estimate h2 per bin -> the final prior --------------------
+if [ ! -s pf_prior/chol.22.snpvar_constrained.gz ]; then
+  python "$PF/polyfun.py" \
+    --compute-h2-bins \
+    --output-prefix pf_prior/chol \
+    --sumstats munged.parquet \
+    --w-ld-chr "$W" \
+    --allow-missing
+else echo "stage 3 already done"; fi
+
+echo
+echo "prior ready. Per-chromosome files carry CHR SNP BP A1 A2 SNPVAR MAF N Z,"
+echo "which is what 05_polyfun.pbs feeds to finemapper.py:"
+ls -la pf_prior/chol.*.snpvar_constrained.gz | head -3
+echo "($(ls pf_prior/chol.*.snpvar_constrained.gz | wc -l) of 22 chromosomes)"

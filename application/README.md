@@ -76,25 +76,48 @@ https://storage.googleapis.com/seqnn-share/sniff/processed_borzoi_parquets/borzo
 over 6,385 datasets — ATAC 20, DNASE 20, RNA 20, CHIP 20, RNAGTEX 13, CAGE 9.
 Public GCS, no authentication.
 
-### 1.5 PolyFun priors (pre-computed by the real implementation)
+### 1.5 PolyFun prior — computed here, not downloaded
+
+The prior is computed from our own annotation set by `00d`–`00g`, using the
+authors' `polyfun.py`. It is **not** downloaded.
+
+Precomputed priors do exist in the same bucket
+(`sniff_results_ukb_15/{sniff,baseline}/biochemistry_Cholesterol.{CHR}.txt.gz`)
+and they are for the **same GWAS** — verified on chr22: N, Z and MAF agree to
+within text rounding across 209,974 clean 1:1 matches on position+alleles,
+with zero allele flips. But **which annotation set produced them cannot be
+established**: the bucket holds only stage-2 intermediates (30 `snpvar_bin`
+columns), not the annotation LD-scores, and a scalar `SNPVAR` cannot be
+reverse-engineered. `00c` can still fetch them as a cross-check against our
+own, which is the only honest use for them.
+
+Reference data for computing it ourselves (0.30 GB, from the Zenodo record
+"S-LDSC reference files", 10515792 — the old
+`alkesgroup.broadinstitute.org/LDSCORE` URLs 404 after redirect):
 
 ```
-.../sniff/sniff_results_ukb_15/sniff/biochemistry_Cholesterol.{CHR}.txt.gz      # Borzoi-102 priors
-.../sniff/sniff_results_ukb_15/baseline/biochemistry_Cholesterol.{CHR}.txt.gz   # baselineLF priors
+1000G_Phase3_plinkfiles.tgz            0.29 GB  -> 1000G_EUR_Phase3_plink/
+1000G_Phase3_weights_hm3_no_MHC.tgz    0.01 GB
 ```
 
-Columns: `CHR SNP BP A1 A2 SNPVAR MAF N Z P PIP BETA_MEAN BETA_SD CREDIBLE_SET`.
+**Two deliberate choices.**
 
-`SNPVAR` is PolyFun's **stage-1 output**: the per-SNP prior causal variance
-from its S-LDSC + ridge model, computed by the authors' own code on exactly
-this trait and these annotations. Using it lets us run the real
-`finemapper.py` without re-running S-LDSC genome-wide for 102 annotations.
-The two sets are genuinely different (corr(SNPVAR) = 0.247, and 3 vs 1 SNPs
-at PIP > 0.5 on chr22), confirming `sniff/` is the Borzoi-based prior.
+*LD-scores from the 1000G EUR panel, not the UKB LD.* Computing them from the
+UKB LD would mean all 2,763 regions, **3.06 TB** of transfer (mean 1.11 GB
+each). LD-scores are a genome-wide summary rather than a per-locus quantity,
+and a reference panel is the conventional S-LDSC choice. The UKB LD is still
+used for the fine-mapping itself, where it matters. EUR is the right panel:
+the GWAS is UK Biobank white-British and the loci are LDetect EUR blocks.
 
-Note their `PIP`/`CREDIBLE_SET` columns fine-map over **3 Mb windows**, not
-LDetect blocks, so they are not directly comparable to our loci — we use
-`SNPVAR` only, and refit on our blocks.
+*The 102 Borzoi PCs only, with no baseline model.* This is non-standard for
+S-LDSC — enrichment estimates may be biased without baseline controls — but it
+is deliberate: PolyFun then sees exactly what `fb_xregion` and `funmap` see,
+so the comparison isolates the method rather than the annotation set. Giving
+PolyFun the ~187 baselineLF annotations would hand it information the other
+two do not have.
+
+S-LDSC is a genome-wide regression, so this runs over all 22 chromosomes.
+Restricting it to the 265 significant blocks would be selection on the outcome.
 
 ### 1.6 Software (all upstream, unmodified)
 
@@ -216,11 +239,16 @@ bash submit_all.sh
 before its inputs exist:
 
 ```
-  00b annotations ─┐
-  01  LD          ─┴─> 02 prep ─┬─> 03 fb_xregion   (ONE job, 160 GB)
-                                ├─> 04 funmap       (265 tasks)
-  00c PF priors ────────────────┴─> 05 polyfun      (265 tasks)
+  00b annotations ─┬────────────────> 02 prep ─┬─> 03 fb_xregion  (ONE job, 160 GB)
+  01  LD          ─┘                           ├─> 04 funmap      (265 tasks)
+                                               │
+  00d LDSC ref ─> 00e munge ─> 00f LD-scores ──┴─> 05 polyfun     (265 tasks)
+                               (22 tasks)
+                                    └─> 00g PolyFun prior
 ```
+
+`00d`–`00g` compute the PolyFun prior from our annotations; they run in
+parallel with the LD download.
 
 The three downloads run concurrently. 03, 04 and 05 are independent of one
 another. `--from 03` resumes at a stage with dependencies dropped.

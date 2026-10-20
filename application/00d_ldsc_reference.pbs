@@ -1,0 +1,30 @@
+#!/bin/bash
+#PBS -N chol_ldsc_ref
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o logs/
+# Reference data for computing the PolyFun prior ourselves: the 1000G EUR
+# plink panel (LD-scores) and the HapMap3 LD-score weights.
+#
+# ~0.30 GB in total. The old alkesgroup.broadinstitute.org/LDSCORE URLs are
+# dead (they 404 after redirect); the data now lives in the Zenodo record
+# "S-LDSC reference files", 10515792.
+#
+# EUR is the right panel: the GWAS is UK Biobank white-British and the loci
+# are LDetect EUR blocks.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p logs
+Z=https://zenodo.org/records/10515792/files
+
+if [ -d 1000G_EUR_Phase3_plink ]; then echo "plink panel already present"; else
+  curl -fL --retry 5 -o plink.tgz "$Z/1000G_Phase3_plinkfiles.tgz?download=1"
+  tar xzf plink.tgz && rm -f plink.tgz
+fi
+if [ -d 1000G_Phase3_weights_hm3_no_MHC ]; then echo "weights already present"; else
+  curl -fL --retry 5 -o w.tgz "$Z/1000G_Phase3_weights_hm3_no_MHC.tgz?download=1"
+  tar xzf w.tgz && rm -f w.tgz
+fi
+ls 1000G_EUR_Phase3_plink/1000G.EUR.QC.22.bed \
+   1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.22.l2.ldscore.gz
+echo "reference data ready"

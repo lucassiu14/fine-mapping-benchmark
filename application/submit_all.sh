@@ -40,9 +40,17 @@ sub () {  # sub <stage> <script> [dependency-expression]
 }
 
 echo "== downloads (independent, run concurrently) =="
-J_ANNOT=$(sub 00b 00b_download_annot.pbs)          ; echo "  annotations : $J_ANNOT"
-J_LD=$(   sub 01  01_download_ld.pbs)              ; echo "  LD          : $J_LD"
-J_PRIOR=$(sub 00c 00c_download_polyfun_priors.pbs) ; echo "  PF priors   : $J_PRIOR"
+J_ANNOT=$(sub 00b 00b_download_annot.pbs)   ; echo "  annotations : $J_ANNOT"
+J_LD=$(   sub 01  01_download_ld.pbs)       ; echo "  LD          : $J_LD"
+J_REF=$(  sub 00d 00d_ldsc_reference.pbs)   ; echo "  LDSC ref    : $J_REF"
+
+echo "== PolyFun prior, computed from OUR annotations =="
+J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
+echo "  munge       : $J_MUNGE"
+J_LDSC=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},afterokarray:${J_ANNOT}[],afterok:${J_REF}")
+echo "  LD-scores   : $J_LDSC"
+J_PRIOR=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC}[]")
+echo "  prior       : $J_PRIOR"
 
 echo "== prep (needs annotations + LD) =="
 J_PREP=$(sub 02 02_prep.pbs "afterokarray:${J_ANNOT}[],afterokarray:${J_LD}[]")
@@ -53,7 +61,7 @@ J_FB=$(sub 03 03_fb_xregion.pbs "afterokarray:${J_PREP}[]")
 echo "  fb_xregion  : $J_FB"
 J_FM=$(sub 04 04_funmap.pbs     "afterokarray:${J_PREP}[]")
 echo "  funmap      : $J_FM"
-J_PF=$(sub 05 05_polyfun.pbs    "afterokarray:${J_PREP}[],afterokarray:${J_PRIOR}[]")
+J_PF=$(sub 05 05_polyfun.pbs    "afterokarray:${J_PREP}[],afterok:${J_PRIOR}")
 echo "  polyfun     : $J_PF"
 
 cat <<NOTE
