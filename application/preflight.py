@@ -32,22 +32,63 @@ def check_data():
         fail(f"chol_sumstats.parquet (expect ~526 MB, got "
              f"{os.path.getsize(s)/1e6:.0f} MB)" if os.path.exists(s)
              else "chol_sumstats.parquet")
-    missing_ld = []
+    # A truncated download is the failure mode that actually happens, and a
+    # size floor does not catch it: an interrupted transfer leaves a file that
+    # exists and is far over any floor worth setting. Both formats here keep
+    # their index at the END of the file (zip central directory, parquet
+    # footer), which is precisely what truncation destroys - so open that
+    # index. Neither read touches the bulk data.
+    missing_ld, broken_ld = [], []
     for w in sorted({r["ld_region"] for r in rows}):
         for ext in ("npz", "gz"):
-            p = os.path.join(ROOT, "ld", f"{w}.{ext}")
-            # a truncated .npz is the failure mode that actually happens
-            if not os.path.exists(p) or os.path.getsize(p) < 1000:
+            q = os.path.join(ROOT, "ld", f"{w}.{ext}")
+            if not os.path.exists(q) or os.path.getsize(q) < 1000:
                 missing_ld.append(f"{w}.{ext}")
+            elif ext == "npz":
+                try:
+                    import zipfile
+                    zipfile.ZipFile(q).namelist()
+                except Exception as e:
+                    broken_ld.append(f"{w}.npz ({type(e).__name__})")
     if missing_ld:
         fail(f"{len(missing_ld)} LD files, e.g. {missing_ld[:3]}")
-    missing_an = [c for c in sorted({int(r["chrom"]) for r in rows})
-                  if not os.path.exists(os.path.join(ROOT, "annot", f"borzoi.{c}.annot.parquet"))]
+    if broken_ld:
+        fail(f"{len(broken_ld)} truncated/corrupt LD files, e.g. {broken_ld[:3]}")
+
+    # Annotations. Nothing else opens these before 00f hands them to
+    # compute_ldscores.py (sniff) or 00b2 merges them (combined), where a bad
+    # file surfaces as an obscure error deep inside someone else's code. Also
+    # report the annotation column count: a count that differs from 102 means
+    # the set is not what fb_xregion and funmap are given, which matters more
+    # than truncation because it would not crash anything.
+    chroms = sorted({int(r["chrom"]) for r in rows})
+    missing_an, broken_an, ncols = [], [], {}
+    META = {"CHR", "SNP", "BP", "A1", "A2", "CM", "MAF", "base"}
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        pq = None
+    for c in chroms:
+        q = os.path.join(ROOT, "annot", f"borzoi.{c}.annot.parquet")
+        if not os.path.exists(q):
+            missing_an.append(c)
+        elif pq is not None:
+            try:
+                names = pq.ParquetFile(q).schema_arrow.names
+                ncols.setdefault(len([x for x in names if x not in META]), []).append(c)
+            except Exception as e:
+                broken_an.append(f"chr{c} ({type(e).__name__})")
     if missing_an:
         fail(f"annotations for chromosomes {missing_an}")
+    if broken_an:
+        fail(f"{len(broken_an)} unreadable annotation files: {broken_an[:5]}")
+    if len(ncols) > 1:
+        fail("annotation column count is not consistent across chromosomes: "
+             + ", ".join(f"{n} cols on {len(cs)} chrom" for n, cs in sorted(ncols.items())))
     if ok:
+        cols = f", {list(ncols)[0]} annotation columns" if len(ncols) == 1 else ""
         print(f"  OK  sumstats, {len({r['ld_region'] for r in rows})} LD windows, "
-              f"{len({r['chrom'] for r in rows})} annotation files")
+              f"{len({r['chrom'] for r in rows})} annotation files{cols}")
 
 
 def check_prep():
