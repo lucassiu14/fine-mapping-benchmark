@@ -34,7 +34,12 @@ done
 # prep, so open it here where the error is attributable.
 require_file "ld/${W}.npz" 1000000 "download truncated"
 require_file "ld/${W}.gz"     1000 "download truncated"
-python3 - "ld/${W}.npz" <<'PY' || die "ld/${W}.npz is corrupt - delete it and resubmit this task"
+# Use the venv python explicitly, not bare python3. Loading awscli can make
+# Lmod swap the GCCcore-12.3.0 Python for the awscli toolchain's, leaving
+# `python3` as an interpreter with no scipy - and this check needs scipy.
+VPY="${APP_VENV:-}/bin/python"
+[ -x "$VPY" ] || VPY=python3
+"$VPY" - "ld/${W}.npz" <<'PY' || die "ld/${W}.npz is corrupt - delete it and resubmit this task"
 import sys, scipy.sparse as sp
 m = sp.load_npz(sys.argv[1])
 print(f"            verified : {m.shape[0]} x {m.shape[1]} sparse matrix", flush=True)

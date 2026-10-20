@@ -249,13 +249,15 @@ module avail 2>&1 | grep -E "^ *(Python|R|awscli)/"
 # so they co-load. Python 3.11 is what the PolyFun pins below were validated
 # against; R 4.3.2 is close to susieR 0.11.92's era, which is the one package
 # here that must be an old version.
-export APP_MODULES="Python/3.11.3-GCCcore-12.3.0 R/4.3.2-gfbf-2023a"
+# tools/prod FIRST: on CX3 these modules are hierarchical and are not
+# loadable until it is in place ("exist but cannot be loaded as requested").
+export APP_MODULES="tools/prod Python/3.11.3-GCCcore-12.3.0 R/4.3.2-gfbf-2023a"
 
 # awscli goes in its own variable, not APP_MODULES: it is typically built
 # against a different toolchain (GCCcore-13.2.0 against Python's 12.3.0) and
 # the two may refuse to load together. Only stage 01 needs it, so it is
 # loaded there alone.
-export AWS_MODULE="awscli/2.17.54-GCCcore-13.2.0"
+export AWS_MODULE="awscli/2.17.54-GCCcore-13.2.0"   # tools/prod comes from APP_MODULES
 
 # Sanity-check before going further - if these do not both work, the jobs
 # will fail in a way that is tedious to diagnose later:
