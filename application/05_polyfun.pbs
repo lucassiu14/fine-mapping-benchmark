@@ -16,8 +16,27 @@
 set -euo pipefail
 cd "${APP_ROOT:?set APP_ROOT}"
 mkdir -p polyfun_out logs
-source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate" 2>/dev/null || \
-  eval "$(conda shell.bash hook)" && conda activate "${POLYFUN_ENV}"
+# Activate POLYFUN_ENV, which may be a venv or a conda env. Written as an
+# if/else rather than `source ... || conda activate ...` because the latter
+# parses as `(A || B) && C` and runs conda activate even when the venv
+# activated cleanly, failing the job under `set -e`.
+: "${POLYFUN_ENV:?set POLYFUN_ENV to the PolyFun venv or conda env}"
+if [ -f "${POLYFUN_ENV}/bin/activate" ]; then
+  # shellcheck disable=SC1091
+  source "${POLYFUN_ENV}/bin/activate"
+else
+  eval "$(conda shell.bash hook)"
+  conda activate "${POLYFUN_ENV}"
+fi
+
+# PolyFun calls susieR through rpy2, which needs three things set explicitly.
+# susieR must be 0.11.92: 0.12+ moved bhat/shat/R/var_y out of
+# susie_suff_stat into susie_rss, and finemapper.py calls the old signature.
+export R_HOME="${R_HOME:?set R_HOME to the R installation rpy2 should embed}"
+export R_LIBS="${POLYFUN_RLIB:?set POLYFUN_RLIB to the library holding susieR 0.11.92}:${R_LIBS:-}"
+# Only needed when the rpy2 wheel was built against a different R minor
+# version than the one installed; harmless otherwise.
+export RPY2_CFFI_MODE="${RPY2_CFFI_MODE:-ABI}"
 
 read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
   'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)

@@ -181,33 +181,75 @@ genuine r = 1 group.
 
 ## 3. Running
 
-Three Python environments, because the pinned dependencies conflict:
+### Bootstrap once
+
+```bash
+export APP_ROOT=/rds/general/user/<you>/home/chol_app
+bash setup.sh
+```
+
+`setup.sh` creates the directory tree, downloads the summary statistics,
+clones upstream Funmap and PolyFun, builds the three Python environments,
+installs susieR 0.11.92 for PolyFun, and writes `$APP_ROOT/env.sh`. It is
+safe to re-run: every step skips work already done.
+
+Three environments are needed because the pins genuinely conflict:
 
 | env | for | pins |
 |---|---|---|
 | `APP_VENV` | prep, fb_xregion | numpy, pandas, pyarrow, scipy, torch |
 | `FUNMAP_VENV` | Funmap | numpy 1.26.2, scipy 1.11.4, pandas 2.1.3, matplotlib 3.8.2 |
-| `POLYFUN_ENV` | PolyFun | see `polyfun.yml` upstream; needs rpy2 + susieR |
+| `POLYFUN_ENV` | PolyFun | numpy<2, pyarrow 17, rpy2 3.5.17, plus susieR 0.11.92 in `POLYFUN_RLIB` |
+
+Then put functional-beatrice at `$FB_DIR` — **`main` at `d0fb022` or later**;
+`03_fb_xregion.pbs` verifies this by content and refuses to run otherwise.
+
+### Submit
 
 ```bash
-export APP_ROOT=/rds/.../chol_app
-export N_LIKELIHOOD=373220
-
-python 00a_score_blocks.py                              # -> blocks_scored.csv
-python 00_make_blocks.py                                # -> blocks.csv, ld_windows.txt
-qsub -v APP_ROOT 00b_download_annot.pbs                 # 22 tasks,  ~15 GB
-qsub -v APP_ROOT 01_download_ld.pbs                     # 262 tasks, ~246 GB
-qsub -v APP_ROOT,APP_VENV 02_prep.pbs                   # 265 tasks
-qsub -v APP_ROOT,APP_VENV,FB_DIR 03_fb_xregion.pbs      # ONE job, 160 GB
-qsub -v APP_ROOT,FUNMAP_VENV,FUNMAP_DIR 04_funmap.pbs   # 265 tasks
-qsub -v APP_ROOT,POLYFUN_ENV,POLYFUN_DIR 05_polyfun.pbs # 265 tasks
-python 06_collect.py
+source "$APP_ROOT/env.sh"
+bash submit_all.sh --dry-run     # inspect the qsub commands and dependencies
+bash submit_all.sh
 ```
 
-Steps 03–05 are independent and can run concurrently. Every step is
-idempotent: a block with a `DONE` marker or an existing output is skipped, so
-any array can be resubmitted after a partial failure. Update the array sizes
-in the `.pbs` headers if you change the p-value threshold.
+`submit_all.sh` chains the stages with PBS dependencies, so nothing starts
+before its inputs exist:
+
+```
+  00b annotations ─┐
+  01  LD          ─┴─> 02 prep ─┬─> 03 fb_xregion   (ONE job, 160 GB)
+                                ├─> 04 funmap       (265 tasks)
+  00c PF priors ────────────────┴─> 05 polyfun      (265 tasks)
+```
+
+The three downloads run concurrently. 03, 04 and 05 are independent of one
+another. `--from 03` resumes at a stage with dependencies dropped.
+
+### Check before committing CPU
+
+```bash
+python preflight.py data      # before prep:    downloads complete and non-truncated?
+python preflight.py prep      # before methods: all 265 blocks built?
+python preflight.py methods   # progress per method
+```
+
+`preflight.py` exits non-zero and names what is missing. The point is to fail
+in seconds rather than a third of the way through a 265-task array.
+
+### Collect
+
+```bash
+python 06_collect.py && python preflight.py collect
+python 07_plot_blocks.py      # z-scores and PIPs per block
+```
+
+`06_collect.py` is deliberately **not** chained, so a partial failure in one
+method does not quietly produce a half-empty results table.
+
+Every stage is idempotent — a block with a `DONE` marker or an existing output
+is skipped — so any array can be resubmitted after a partial failure. If you
+change the p-value threshold, re-run `00a`/`00` and update the `#PBS -J`
+array sizes to match the new block and window counts.
 
 ---
 
