@@ -32,7 +32,27 @@ while IFS=, read -r rid rest; do
 done < blocks.csv
 echo "manifest: $(( $(wc -l < manifest.tsv) - 1 )) blocks"
 
-python "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}/beatrice_joint.py" \
+# --- guard: refuse to run against a checkout missing the memo fix ----------
+# These fixes live on the branch `fix/memo-normalisation`, NOT on main. Running
+# main silently produces diluted PIPs: reformat_memo would subtract the MEAN
+# log-BF instead of the max, saturating 27-53% of the memo at the 1e15 clamp
+# and turning calculate_pip into a count of visited configurations. Max PIP
+# collapses to ~0.02-0.05 and no credible set is ever formed. It fails
+# quietly, looks like a modelling result, and is the single most expensive
+# mistake available here - so check for it rather than trusting the checkout.
+: "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}"
+grep -q 'm0 = max(' "${FB_DIR}/scripts/trainer_annot.py" || {
+  echo "FATAL: ${FB_DIR} is missing the reformat_memo max-offset fix." >&2
+  echo "       Check out the branch fix/memo-normalisation (or a descendant)." >&2
+  exit 1
+}
+grep -q 'def read_ld' "${FB_DIR}/scripts/joint_trainer.py" || {
+  echo "FATAL: ${FB_DIR} is missing .npy LD support; the manifest points at .npy files." >&2
+  exit 1
+}
+echo "[guard] fb checkout has the memo fix and .npy LD support"
+
+python "${FB_DIR}/beatrice_joint.py" \
   --manifest manifest.tsv \
   --N "${N_LIKELIHOOD:-337000}" \
   --n_caus 10 --max_iter 2000 --prior_head lassonet \

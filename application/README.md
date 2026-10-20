@@ -100,7 +100,7 @@ LDetect blocks, so they are not directly comparable to our loci — we use
 
 | | |
 |---|---|
-| Functional BEATRICE | this project; branch with `.npy` LD support |
+| Functional BEATRICE | this project, branch **`fix/memo-normalisation`** or a descendant — **not `main`**, which lacks the `reformat_memo` max-offset fix and silently produces diluted PIPs. `03_fb_xregion.pbs` checks for it and refuses to run otherwise. |
 | Funmap | <https://github.com/LeeHITsz/Funmap> |
 | PolyFun | <https://github.com/omerwe/polyfun> |
 | BEATRICE (if run) | <https://github.com/sayangsep/Beatrice-Finemapping> |
