@@ -255,9 +255,17 @@ All three methods were run on `ldEUR_20_0038` with identical inputs:
 
 | method | sum PIP | max PIP | top variant | \|Z\| | rank |
 |---|---|---|---|---|---|
-| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27 |
+| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27* |
 | funmap | 9.99 | **1.000** | 62,370,732 | 6.00 | 13 |
 | polyfun_susie | 9.04 | 0.407 | 62,370,732 | 6.00 | 13 |
+
+\* The global rank is misleading here. This block holds **two independent
+signals** of near-identical strength 534 kb apart — peak A at 62.36 Mb
+(max |Z| 6.05) and peak B at 62.91 Mb (max |Z| 6.04), with r = 0.097 between
+their leads. 28 of the top 30 |Z| sit in peak A, so anything in peak B ranks
+badly globally while being correct locally. fb_xregion picked peak B at **rank
+2 of the 707 variants within ±100 kb of it**; funmap and PolyFun picked peak A.
+Report per-signal rank, not global rank, in blocks with multiple peaks.
 
 **ldEUR_22_0024_part** (chr22:50.00–51.24 Mb, p = 7,777, max |Z| = 5.52)
 
@@ -277,9 +285,13 @@ Three things to look at before reading anything into the full run:
    variants in LD, a posterior of exactly 1 is not credible; it suggests
    numerical saturation rather than certainty.
 2. **fb_xregion is far more conservative** — sum(PIP) 1.0–1.7 against ~10 for
-   the other two, and on chr22 its maximum is 0.033, i.e. it declines to
-   localise at all where funmap is certain. Whether that is appropriate
-   caution or a failure to commit is the thing to establish.
+   the other two. Across five prepared blocks its confidence tracks signal
+   strength: max PIP 0.86 at |Z| 35, 0.94 at |Z| 10, 0.73 at |Z| 6, but only
+   0.16 at |Z| 5.0 and 0.03 at |Z| 5.5. Being unconfident at |Z| 5.5 among
+   7,777 variants in LD is defensible; funmap returning exactly 1.000 on the
+   same variant is the harder number to justify. Which of the two is better
+   calibrated is an open question, and not one to settle by assuming the
+   confident method is right.
 3. **Funmap and PolyFun both put sum(PIP) ≈ 9.99**, their L = 10 prior, in
    every block. That is SuSiE-like behaviour and means the posterior expected
    number of causal variants is essentially the prior.
