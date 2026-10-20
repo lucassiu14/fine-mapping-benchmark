@@ -255,17 +255,48 @@ All three methods were run on `ldEUR_20_0038` with identical inputs:
 
 | method | sum PIP | max PIP | top variant | \|Z\| | rank |
 |---|---|---|---|---|---|
-| fb_xregion | 1.72 | 0.728 | 62,896,110 | 5.98 | 27* |
+| fb_xregion | 1.55 | 0.561 | 62,362,116 | 6.05 | 1 |
 | funmap | 9.99 | **1.000** | 62,370,732 | 6.00 | 13 |
 | polyfun_susie | 9.04 | 0.407 | 62,370,732 | 6.00 | 13 |
 
-\* The global rank is misleading here. This block holds **two independent
-signals** of near-identical strength 534 kb apart — peak A at 62.36 Mb
-(max |Z| 6.05) and peak B at 62.91 Mb (max |Z| 6.04), with r = 0.097 between
-their leads. 28 of the top 30 |Z| sit in peak A, so anything in peak B ranks
-badly globally while being correct locally. fb_xregion picked peak B at **rank
-2 of the 707 variants within ±100 kb of it**; funmap and PolyFun picked peak A.
-Report per-signal rank, not global rank, in blocks with multiple peaks.
+This block holds **two independent signals** of near-identical strength 534 kb
+apart — peak A at 62.36 Mb (max |Z| 6.05) and peak B at 62.91 Mb (max |Z|
+6.04), r = 0.097 between their leads. All three methods now settle on peak A.
+In blocks with multiple peaks, report per-signal rank rather than global rank:
+a correct call on a second signal scores badly on a global |Z| rank.
+
+### The LD regularisation defect (fixed)
+
+Before `d0fb022`, `regularize_ld` added `(1e-3 − min(eig))` to the LD
+**diagonal**, scaling every implied correlation by `1/(1+c)`. On ldEUR_01_0067
+(min eig −0.069) that turned r = 0.996 into 0.931 — and the approximate Bayes
+factor has a crossover near r = 0.955, above which co-inclusion of collinear
+variants is penalised (−11.1 nats at 0.996) and below which it is **favoured**
+(+8.2 nats at 0.931). 100% of sampled pairs with raw |r| > 0.955 were pushed
+across it.
+
+The effect was real and visible: at SORT1, the single highest-weighted
+configuration in the memo was `{rs12740374, rs7528419}` (r = 0.996), 71% of
+posterior mass sat on configurations containing both, and PIP summed to 1.97
+across the four variants at r > 0.99.
+
+Clipping the eigenvalues and renormalising the diagonal fixes it:
+
+| | sum over r>0.99 | rs12740374 | rs7528419 | rs646776 | rs629301 |
+|---|---|---|---|---|---|
+| diagonal shift | 1.97 | 0.856 | 0.772 | 0.184 | 0.160 |
+| **eigenvalue clip** | **1.00** | **0.942** | 0.059 | 0.002 | 0.000 |
+| PolyFun (published) | 1.02 | 0.917 | 0.064 | 0.022 | 0.016 |
+
+rs12740374 is the functionally validated causal variant for this locus
+(Musunuru et al., *Nature* 2010). The four variants are in r = 0.996–1.000 LD
+with |Z| spanning only 35.04–35.14, so the marginal statistics cannot separate
+them — and fb_xregion and PolyFun, independently, both put ~0.92–0.94 on the
+validated one.
+
+**The benchmark is unaffected.** The shift only fired when the LD was not
+positive definite. Simulated LD is PD (min eig +0.042) and takes the Cholesky
+fast path; `examples/data` reproduces bit-identically after the change.
 
 **ldEUR_22_0024_part** (chr22:50.00–51.24 Mb, p = 7,777, max |Z| = 5.52)
 
