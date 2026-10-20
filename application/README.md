@@ -245,7 +245,11 @@ export APP_ROOT=/rds/general/project/<project>/live/$USER/chol_app
 # there, since they are built against whichever python is active now.
 # NB `module avail` indents, so an anchored pattern like ^R/ never matches.
 module avail 2>&1 | grep -E "^ *(Python|R|awscli)/"
-export APP_MODULES="Python/3.11.3-GCCcore-12.3.0 R/4.3.2-gfbf-2023a"   # use YOUR names
+# On Imperial CX3 these two share GCCcore-12.3.0 (gfbf-2023a IS GCC 12.3.0),
+# so they co-load. Python 3.11 is what the PolyFun pins below were validated
+# against; R 4.3.2 is close to susieR 0.11.92's era, which is the one package
+# here that must be an old version.
+export APP_MODULES="Python/3.11.3-GCCcore-12.3.0 R/4.3.2-gfbf-2023a"
 
 # awscli goes in its own variable, not APP_MODULES: it is typically built
 # against a different toolchain (GCCcore-13.2.0 against Python's 12.3.0) and
