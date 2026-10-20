@@ -36,9 +36,17 @@ trap 'on_err "$LINENO" "$BASH_COMMAND"' ERR
 load_modules() {
   [ -n "${APP_MODULES:-}" ] || return 0
   command -v module >/dev/null 2>&1 || { warn "APP_MODULES is set but 'module' is unavailable"; return 0; }
-  for m in $APP_MODULES; do
-    module load "$m" 2>/dev/null && log "module   : loaded $m" || warn "module load $m failed"
-  done
+  for m in $APP_MODULES; do try_module "$m"; done
+}
+
+# Load one module, for stages that need something the others do not. Keeping
+# such a module out of APP_MODULES matters when it is built against a
+# different toolchain than the rest: EasyBuild will often refuse to load
+# awscli/...-GCCcore-13.2.0 alongside Python/...-GCCcore-12.3.0, and loading
+# it only where it is needed sidesteps the conflict entirely.
+try_module() {
+  command -v module >/dev/null 2>&1 || { warn "cannot load $1: no 'module' command"; return 0; }
+  if module load "$1" 2>/dev/null; then log "module   : loaded $1"; else warn "module load $1 failed"; fi
 }
 
 banner() {

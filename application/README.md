@@ -243,8 +243,21 @@ export APP_ROOT=/rds/general/project/<project>/live/$USER/chol_app
 
 # Modules the COMPUTE nodes need - without these the venvs will not start
 # there, since they are built against whichever python is active now.
-module avail 2>&1 | grep -iE "python|^R/|aws"     # find the right names
-export APP_MODULES="tools/prod Python/3.11.2 R/4.3.2 aws-cli"   # EXAMPLE - use yours
+# NB `module avail` indents, so an anchored pattern like ^R/ never matches.
+module avail 2>&1 | grep -E "^ *(Python|R|awscli)/"
+export APP_MODULES="Python/3.11.3-GCCcore-12.3.0 R/4.3.2-gfbf-2023a"   # use YOUR names
+
+# awscli goes in its own variable, not APP_MODULES: it is typically built
+# against a different toolchain (GCCcore-13.2.0 against Python's 12.3.0) and
+# the two may refuse to load together. Only stage 01 needs it, so it is
+# loaded there alone.
+export AWS_MODULE="awscli/2.17.54-GCCcore-13.2.0"
+
+# Sanity-check before going further - if these do not both work, the jobs
+# will fail in a way that is tedious to diagnose later:
+module purge && module load $APP_MODULES && python3 -V && R --version | head -1
+module purge && module load $AWS_MODULE && aws --version
+module purge && module load $APP_MODULES
 
 bash setup.sh
 ```

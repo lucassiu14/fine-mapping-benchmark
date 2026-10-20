@@ -92,6 +92,9 @@ export APP_ROOT="$APP_ROOT"
 # Modules the COMPUTE nodes need. The venvs below were built against the
 # python active when setup.sh ran, so that python must be loadable there too.
 export APP_MODULES="${APP_MODULES:-}"
+# awscli separately: it is typically built against a different toolchain than
+# Python and the two may refuse to load together. Only stage 01 needs it.
+export AWS_MODULE="${AWS_MODULE:-}"
 export N_LIKELIHOOD=373220
 export APP_VENV="$APP_ROOT/appenv"
 export FUNMAP_VENV="$APP_ROOT/funmapenv"

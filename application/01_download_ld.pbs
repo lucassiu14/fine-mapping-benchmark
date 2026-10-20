@@ -13,6 +13,11 @@ source ./lib.sh
 banner
 mkdir -p ld logs
 
+# awscli is usually built against a different toolchain than Python, so it is
+# loaded here rather than through APP_MODULES where it could conflict.
+[ -n "${AWS_MODULE:-}" ] && try_module "$AWS_MODULE"
+require_cmd aws
+
 W=$(sed -n "${PBS_ARRAY_INDEX}p" ld_windows.txt)
 [ -n "$W" ] || { echo "no window at line ${PBS_ARRAY_INDEX}"; exit 1; }
 
