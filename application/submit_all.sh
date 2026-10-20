@@ -5,16 +5,25 @@
 #   bash submit_all.sh              # submit everything
 #   bash submit_all.sh --dry-run    # print the qsub commands and stop
 #   bash submit_all.sh --from 03    # resume from a stage (deps are dropped)
+#   bash submit_all.sh --prior-only # ONLY the PolyFun-prior chain
+#
+# --prior-only submits 00b -> 00b2 -> 00d -> 00e -> 00f -> 00g and stops: the
+# S-LDSC chain that produces the prior, which is the part of the pipeline that
+# has never been exercised end to end. It deliberately leaves out 01 (the LD
+# download, ~429 GB peak), 02 and the methods, so the chain can be proven for
+# the cost of the ~20 GB annotation download alone. Re-run without the flag
+# afterwards: every stage is idempotent and the finished ones are skipped.
 #
 # Every stage is idempotent, so resubmitting after a partial failure re-runs
 # only what is missing.
 set -euo pipefail
 cd "${APP_ROOT:?source env.sh first}"
 
-DRY=0; FROM=""
+DRY=0; FROM=""; PRIOR_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
+    --prior-only) PRIOR_ONLY=1 ;;
     --from) FROM="$2"; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac; shift
@@ -43,7 +52,11 @@ sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
 
 echo "== downloads (independent, run concurrently) =="
 J_ANNOT=$(sub 00b 00b_download_annot.pbs)   ; echo "  annotations : $J_ANNOT  (Borzoi + baselineLF)"
-J_LD=$(   sub 01  01_download_ld.pbs)       ; echo "  LD          : $J_LD"
+if [ "$PRIOR_ONLY" = 1 ]; then
+  echo "  LD          : SKIPPED (--prior-only)"
+else
+  J_LD=$(sub 01 01_download_ld.pbs)         ; echo "  LD          : $J_LD"
+fi
 J_REF=$(  sub 00d 00d_ldsc_reference.pbs)   ; echo "  LDSC ref    : $J_REF"
 
 echo "== annotation sets =="
@@ -61,6 +74,30 @@ J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_S}[]" ANNOT_SET
 echo "  prior       : $J_PRIOR_S  (sniff)"
 J_PRIOR_C=$(sub 00g 00g_polyfun_prior.pbs "afterokarray:${J_LDSC_C}[]" ANNOT_SET=combined)
 echo "  prior       : $J_PRIOR_C  (combined)"
+
+if [ "$PRIOR_ONLY" = 1 ]; then
+  cat <<'PNOTE'
+
+--prior-only: stopping after the PolyFun-prior chain. Not submitted: 01 (LD
+download), 02 (prep), 03/04/05 (methods).
+
+Watch it with:
+
+  qstat -tu $USER
+  tail -f $APP_ROOT/logs/chol_pf_prior.o*
+
+The prior chain is proven when BOTH sets have 22 chromosomes:
+
+  for S in sniff combined; do
+    echo "$S: $(ls $APP_ROOT/pf_prior_$S/chol.*.snpvar_constrained.gz 2>/dev/null | wc -l) of 22"
+  done
+
+Then submit the rest - finished stages are skipped:
+
+  bash submit_all.sh
+PNOTE
+  exit 0
+fi
 
 echo "== prep (needs annotations + LD) =="
 J_PREP=$(sub 02 02_prep.pbs "afterokarray:${J_ANNOT}[],afterokarray:${J_LD}[]")
