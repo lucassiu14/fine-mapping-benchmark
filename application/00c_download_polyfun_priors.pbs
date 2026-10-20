@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -N chol_pf_priors
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -l walltime=04:00:00
+#PBS -J 1-22
+#PBS -j oe
+#PBS -o logs/
+# PolyFun stage-1 priors, computed by the AUTHORS' implementation on this exact
+# trait and the Borzoi-102 annotations. Downloading these lets us run the real
+# finemapper.py without re-running S-LDSC genome-wide for 102 annotations.
+# Set PF_SET=baseline to fetch the baselineLF priors instead.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"; mkdir -p polyfun_priors logs
+C=${PBS_ARRAY_INDEX}; SET="${PF_SET:-sniff}"
+F="polyfun_priors/${SET}.biochemistry_Cholesterol.${C}.txt.gz"
+[ -s "$F" ] && { echo "skip chr$C"; exit 0; }
+curl -fsS --retry 5 --retry-delay 10 -o "$F.part" \
+  "https://storage.googleapis.com/seqnn-share/sniff/sniff_results_ukb_15/${SET}/biochemistry_Cholesterol.${C}.txt.gz"
+mv "$F.part" "$F"; echo "chr$C done ($(du -h "$F" | cut -f1))"

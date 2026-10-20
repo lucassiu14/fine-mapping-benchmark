@@ -1,0 +1,39 @@
+#!/bin/bash
+#PBS -N chol_fb_xregion
+#PBS -l select=1:ncpus=16:mem=128gb
+#PBS -l walltime=48:00:00
+#PBS -j oe
+#PBS -o logs/
+# fb_xregion: ONE job over all blocks - the prior head is shared across them,
+# so this cannot be an array job.
+#
+# Memory: the trainer holds every block's LD resident. Measured float32 LD for
+# the 252 blocks is ~69 GB; annotations ~0.8 GB; fixed torch/eigensolver
+# overhead ~2 GB. 128 GB leaves comfortable headroom. Mini-batching is NOT
+# needed at this scale.
+#
+# Time: 5 blocks x 2000 iterations took 366 s wall. Setup is O(p^3) per block
+# (regularize_ld always falls through to eigendecomposition on real float32
+# UKBB LD) and will dominate. MEASURE with a 10-block manifest before
+# trusting the 48 h walltime.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"
+mkdir -p joint_out logs
+source "${APP_VENV:?set APP_VENV}/bin/activate"
+
+# Manifest is rebuilt each run so a re-prep is always picked up.
+printf 'z\tLD\tannot\ttarget\tN\n' > manifest.tsv
+while IFS=, read -r rid rest; do
+  [ "$rid" = region_id ] && continue
+  d="regions/$rid"
+  [ -f "$d/DONE" ] || { echo "MISSING prep: $rid" >&2; continue; }
+  printf '%s\t%s\t%s\t%s\t%s\n' "$d/locus.z" "$d/locus_ld.npy" "$d/locus.annot" \
+         "joint_out/$rid" "${N_LIKELIHOOD:-337000}" >> manifest.tsv
+done < blocks.csv
+echo "manifest: $(( $(wc -l < manifest.tsv) - 1 )) blocks"
+
+python "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}/beatrice_joint.py" \
+  --manifest manifest.tsv \
+  --N "${N_LIKELIHOOD:-337000}" \
+  --n_caus 10 --max_iter 2000 --prior_head lassonet \
+  --save_prior_weights joint_out/prior_head.pt

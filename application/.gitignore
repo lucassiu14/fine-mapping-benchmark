@@ -1,0 +1,15 @@
+# Downloaded data and run outputs - everything here is reproducible from the
+# URLs in README.md and is far too large to version.
+ld/
+annot/
+regions/
+joint_out/
+funmap_out/
+polyfun_out/
+polyfun_priors/
+results/
+logs/
+manifest.tsv
+ld_windows.txt
+chol_sumstats.parquet
+gwfm_regions_ldetect_EUR.csv

@@ -1,0 +1,47 @@
+#!/bin/bash
+#PBS -N chol_funmap
+#PBS -l select=1:ncpus=8:mem=32gb
+#PBS -l walltime=12:00:00
+#PBS -J 1-265
+#PBS -j oe
+#PBS -o logs/
+# Funmap, one block per array task. Funmap is per-locus, so unlike fb_xregion
+# it parallelises trivially.
+#
+# We run the AUTHORS' funmap_cmd.py unmodified, from
+# https://github.com/LeeHITsz/Funmap - NOT the edited copy under
+# Beatrice_annot/alt_methods/Funmap_main, whose readers were changed to accept
+# space-separated input. Our prep writes exactly the formats upstream parses:
+#   z    TAB, no header      [name, z]
+#   anno TAB, WITH header    col 0 = SNP id
+#   LD   whitespace matrix   materialised here from the .npy
+#
+# The text LD is ~500-900 MB per block, so it is written to $TMPDIR (node-local)
+# and discarded when the task ends. Never write it into the shared filesystem.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"
+mkdir -p funmap_out logs
+source "${FUNMAP_VENV:?set FUNMAP_VENV - Funmap pins numpy 1.26.2 / scipy 1.11.4 / pandas 2.1.3}/bin/activate"
+
+RID=$(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" 'NR==i{print $1}' blocks.csv)
+[ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
+D="regions/$RID"; OUT="funmap_out/$RID"
+[ -f "$OUT/pip.csv" ] && { echo "$RID already done"; exit 0; }
+[ -f "$D/DONE" ]      || { echo "prep missing for $RID"; exit 1; }
+mkdir -p "$OUT"
+
+W="${TMPDIR:-/tmp}/$RID"; mkdir -p "$W"
+trap 'rm -rf "$W"' EXIT
+python - "$D/locus_ld.npy" "$W/ld.txt" <<'PY'
+import sys, numpy as np
+R = np.load(sys.argv[1])
+np.savetxt(sys.argv[2], R, fmt="%.5f", delimiter=" ")   # upstream: sep='\s+'
+PY
+
+python "${FUNMAP_DIR:?set FUNMAP_DIR to the upstream Funmap checkout}/funmap_cmd.py" \
+  --zdir "$D/funmap.z.txt" \
+  --Rdir "$W/ld.txt" \
+  --Adir "$D/funmap.anno.txt" \
+  --n "${N_LIKELIHOOD:-337000}" \
+  --save "$OUT" --L 10
+echo "$RID done: $(wc -l < "$OUT/pip.csv") variants"

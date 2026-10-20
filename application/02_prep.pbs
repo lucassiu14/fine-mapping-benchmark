@@ -1,0 +1,14 @@
+#!/bin/bash
+#PBS -N chol_prep
+#PBS -l select=1:ncpus=4:mem=24gb
+#PBS -l walltime=04:00:00
+#PBS -J 1-265
+#PBS -j oe
+#PBS -o logs/
+# Build per-block inputs for every method. Idempotent: a block with a DONE
+# marker is skipped, so the array can be resubmitted after a partial failure.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"
+mkdir -p regions logs
+source "${APP_VENV:?set APP_VENV to the python env with numpy/pandas/pyarrow/scipy}/bin/activate"
+python prep_block.py $((PBS_ARRAY_INDEX - 1))        # prep_block.py is 0-based

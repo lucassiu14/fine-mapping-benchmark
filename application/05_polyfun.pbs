@@ -1,0 +1,50 @@
+#!/bin/bash
+#PBS -N chol_polyfun
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=12:00:00
+#PBS -J 1-265
+#PBS -j oe
+#PBS -o logs/
+# PolyFun + SuSiE, one block per array task, using the AUTHORS' finemapper.py.
+#
+# Stage 1 (annotations -> per-SNP prior causal variance, SNPVAR) is NOT re-run:
+# we use the priors PolyFun itself produced on this trait and these
+# annotations, downloaded by 00c. Stage 2 is the real finemapper.py.
+#
+# finemapper.py reads the UKBB .npz/.gz pair natively via load_ld_npz(), so it
+# consumes exactly the LD we already downloaded - no conversion.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT}"
+mkdir -p polyfun_out logs
+source "${POLYFUN_ENV:?set POLYFUN_ENV}/bin/activate" 2>/dev/null || \
+  eval "$(conda shell.bash hook)" && conda activate "${POLYFUN_ENV}"
+
+read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
+  'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)
+[ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
+OUT="polyfun_out/${RID}.txt.gz"
+[ -s "$OUT" ] && { echo "$RID already done"; exit 0; }
+
+# finemapper wants a sumstats file with SNPVAR; the downloaded priors file
+# already carries CHR SNP BP A1 A2 SNPVAR MAF N Z P.
+W="${TMPDIR:-/tmp}/${RID}"; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
+python - "polyfun_priors/${PF_SET:-sniff}.biochemistry_Cholesterol.${CHR}.txt.gz" \
+         "$W/sumstats.parquet" "$BS" "$BE" <<'PY'
+import sys, pandas as pd
+src, dst, bs, be = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+d = pd.read_csv(src, sep='\t')
+d = d[(d.BP >= bs) & (d.BP <= be)]
+d = d[['CHR','SNP','BP','A1','A2','SNPVAR','MAF','N','Z','P']]
+d.to_parquet(dst, index=False)
+print(f'{len(d)} variants with SNPVAR in the block', flush=True)
+PY
+
+python "${POLYFUN_DIR:?set POLYFUN_DIR to the upstream polyfun checkout}/finemapper.py" \
+  --ld "ld/${LDR}" \
+  --sumstats "$W/sumstats.parquet" \
+  --n "${N_LIKELIHOOD:-373220}" \
+  --chr "$CHR" --start "$BS" --end "$BE" \
+  --method susie --max-num-causal 10 \
+  --allow-missing \
+  --out "$OUT"
+echo "$RID done"

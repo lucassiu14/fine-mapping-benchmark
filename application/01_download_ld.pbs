@@ -1,0 +1,25 @@
+#!/bin/bash
+#PBS -N chol_ld_dl
+#PBS -l select=1:ncpus=2:mem=8gb
+#PBS -l walltime=08:00:00
+#PBS -J 1-262
+#PBS -j oe
+#PBS -o logs/
+# Download one UKBB LD window per array task (.npz + .gz).
+# 249 windows, ~1.2 GB each -> ~300 GB total. The bucket is public: no
+# credentials, no requester-pays. Re-running is safe; existing files skip.
+set -euo pipefail
+cd "${APP_ROOT:?set APP_ROOT to the application directory}"
+mkdir -p ld logs
+
+W=$(sed -n "${PBS_ARRAY_INDEX}p" ld_windows.txt)
+[ -n "$W" ] || { echo "no window at line ${PBS_ARRAY_INDEX}"; exit 1; }
+
+for ext in gz npz; do
+  out="ld/${W}.${ext}"
+  if [ -s "$out" ]; then echo "skip $out"; continue; fi
+  aws s3 cp --no-sign-request \
+      "s3://broad-alkesgroup-ukbb-ld/UKBB_LD/${W}.${ext}" "$out.part"
+  mv "$out.part" "$out"          # atomic: a killed job never leaves a half file
+  echo "got $out ($(du -h "$out" | cut -f1))"
+done
