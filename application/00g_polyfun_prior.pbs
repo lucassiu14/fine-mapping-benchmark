@@ -1,10 +1,32 @@
 #!/bin/bash
 #PBS -N chol_pf_prior
-#PBS -l select=1:ncpus=16:mem=64gb
+#PBS -l select=1:ncpus=64:mem=450gb
 #PBS -l walltime=24:00:00
 #PBS -j oe
 #PBS -o logs/
 # Compute the PolyFun prior ourselves, from our own annotations.
+#
+# MEMORY: 450 GB, raised from 64 GB after both jobs were oom-killed (exit 137,
+# "Cgroup mem limit exceeded ... task=python") about 10 minutes in, right after
+# "inputs verified" and inside the first polyfun.py call.
+#
+# The cause is in ldsc_polyfun/parse.ldscore(): with --ref-ld-chr it appends
+# all 22 chromosomes' LD-score frames to a list and only then does
+# pd.concat(chr_ld, axis=0), so the whole genome-wide matrix is held TWICE at
+# the peak. The LD-scores are float64 (hence 27 GB / 38 GB on disk for the two
+# sets), and the panel is ~9.8M SNPs:
+#
+#   sniff     9.8M x 409 x 8B  = 33 GB  -> ~65 GB at the concat peak
+#   combined  9.8M x 596 x 8B  = 48 GB  -> ~95 GB at the concat peak
+#
+# which is why 64 GB died for both. A standard PolyFun run on baselineLF's 187
+# annotations needs ~15 GB at the same peak, so nothing about the published
+# workflow suggests this; it is the quintile expansion (409/596 annotations)
+# that moves it. 450 GB is the v1_medium ceiling and leaves ~4x headroom over
+# the estimate, which is deliberate: the estimate is arithmetic, not a
+# measurement, and the merge with the sumstats that follows adds copies this
+# does not account for. If the 64-cpu request queues badly, v1_small tops out
+# at 128 gb (enough for sniff, not for combined) and v1_large offers 920 gb.
 #
 # Three stages of the authors' polyfun.py, run genome-wide. S-LDSC is a
 # genome-wide regression, so this CANNOT be restricted to the 265 significant
