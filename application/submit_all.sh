@@ -126,7 +126,15 @@ if [ "$PRIOR_ONLY" = 1 ]; then
 Watch it with:
 
   qstat -tu $USER
-  tail -f $APP_ROOT/logs/chol_pf_prior.o*
+
+PBS names each log by JOB ID, not job name - logs/<jobid>.pbs-N.OU - so a
+glob on the job name matches nothing. To follow the newest logs:
+
+  tail -f $(ls -t $APP_ROOT/logs/*.OU | head -2)
+
+or, for one job you have the id of:
+
+  tail -f $APP_ROOT/logs/<jobid>.*.OU
 
 The prior chain is proven when BOTH sets have 22 chromosomes:
 
