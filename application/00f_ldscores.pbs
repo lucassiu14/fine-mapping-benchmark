@@ -35,6 +35,11 @@ case "$SET" in
   *) echo "ANNOT_SET must be sniff or combined, not '$SET'" >&2; exit 2 ;;
 esac
 mkdir -p "ldscores_${SET}" logs
+# NB 00g also places <chr>.annot.parquet SYMLINKS in this directory. PolyFun's
+# --ref-ld-chr prefix resolves both <prefix><chr>.l2.ldscore.parquet and
+# <prefix><chr>.annot.parquet, so the annotations have to sit beside the
+# LD-scores under one prefix. The links are 00g's business, not this stage's;
+# they are mentioned here only so their appearance is not a surprise.
 OUT="ldscores_${SET}/annot.${C}.l2.ldscore.parquet"
 [ -s "$OUT" ] && { echo "chr$C ($SET) already done"; exit 0; }
 [ -s "$ANNOT" ] || { echo "missing annotation file: $ANNOT" >&2; exit 1; }

@@ -34,6 +34,54 @@ OUTP="pf_prior_${SET}/chol"
 mkdir -p "pf_prior_${SET}" logs
 echo "[prior] annotation set: $SET"
 
+# --- PolyFun's --ref-ld-chr prefix locates TWO files per chromosome --------
+# Verified in the authors' source rather than assumed:
+#
+#   polyfun.py check_files()        for --compute-h2-L2, per chromosome:
+#                                     get_file_name('ref-ld')  -> required
+#                                     get_file_name('w-ld')    -> required
+#                                     get_file_name('annot')   -> required
+#   polyfun_utils.get_file_name()   'ref-ld' -> <prefix><chr>.l2.ldscore.parquet
+#                                   'annot'  -> <prefix><chr>.annot.parquet
+#
+# So BOTH live under the single --ref-ld-chr prefix, which is how the authors'
+# own example_data/ is laid out. 00f writes the LD-scores into
+# ldscores_<SET>/ while the annotations sit in their own directory, so without
+# this PolyFun dies ~60 s in with
+#
+#   OSError: annot file not found: ldscores_sniff/annot.1.annot.parquet
+#
+# The annotations are also genuinely READ, not merely checked:
+# load_annotations_file() uses them for the ridge/bins step and asserts their
+# column names match the LD-score columns. Link rather than copy - these are
+# 18 GB. compute_ldscores.py writes no .l2.M file and check_files verifies
+# none, so these two files are everything PolyFun needs under the prefix.
+case "$SET" in
+  sniff)    ASRC="annot/borzoi" ;;
+  combined) ASRC="annot_combined/combined" ;;
+esac
+require_dir "ldscores_${SET}" "run 00f with ANNOT_SET=$SET first"
+NLINK=0
+for C in $(seq 1 22); do
+  SRC="$APP_ROOT/${ASRC}.${C}.annot.parquet"
+  DST="ldscores_${SET}/annot.${C}.annot.parquet"
+  require_file "$SRC" 1000000 "annotations for chr$C - run 00b (and 00b2 for combined)"
+  # absolute target, so the link resolves whatever the cwd
+  [ -e "$DST" ] || { ln -s "$SRC" "$DST" && NLINK=$((NLINK+1)); }
+done
+log "annotations linked beside the LD-scores: $NLINK new, prefix ldscores_${SET}/annot."
+
+# Check every input up front, so a gap fails here with a clear message rather
+# than inside PolyFun after it has loaded the sumstats.
+for C in $(seq 1 22); do
+  require_file "ldscores_${SET}/annot.${C}.l2.ldscore.parquet" 10000 \
+    "LD-scores for chr$C - run 00f with ANNOT_SET=$SET"
+  require_file "ldscores_${SET}/annot.${C}.annot.parquet" 1000000 "annotations for chr$C"
+  require_file "${W}${C}.l2.ldscore.gz" 1000 "HapMap3 LD-score weights for chr$C - run 00d"
+done
+require_file munged.parquet 1000000 "munged sumstats - run 00e"
+log "inputs verified: 22 chromosomes x (LD-scores + annotations + weights), sumstats"
+
 # --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
 if [ ! -s ${OUTP}.22.snpvar_ridge.gz ]; then
   python "$PF/polyfun.py" \
