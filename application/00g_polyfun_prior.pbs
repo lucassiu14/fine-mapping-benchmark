@@ -71,16 +71,29 @@ for C in $(seq 1 22); do
 done
 log "annotations linked beside the LD-scores: $NLINK new, prefix ldscores_${SET}/annot."
 
+# --- the .l2.M files, which compute_ldscores.py does not write ------------
+# parse.M() does a bare open(<prefix><chr>.l2.M).readline(), with no parquet
+# fallback and no way to derive it, and check_files() does not verify it - so
+# without this PolyFun fails later, inside _read_M. Derived from the existing
+# LD-score and annotation files, so nothing is recomputed. See
+# make_ldscore_M.py for the definition and its provenance in ldsc.py.
+section "M files"
+python "$APP_ROOT/make_ldscore_M.py" \
+  --ldscores-dir "ldscores_${SET}" \
+  --annot-prefix "$ASRC" \
+  --polyfun-dir "$PF"
+
 # Check every input up front, so a gap fails here with a clear message rather
 # than inside PolyFun after it has loaded the sumstats.
 for C in $(seq 1 22); do
   require_file "ldscores_${SET}/annot.${C}.l2.ldscore.parquet" 10000 \
     "LD-scores for chr$C - run 00f with ANNOT_SET=$SET"
   require_file "ldscores_${SET}/annot.${C}.annot.parquet" 1000000 "annotations for chr$C"
+  require_file "ldscores_${SET}/annot.${C}.l2.M" 2 "M file for chr$C"
   require_file "${W}${C}.l2.ldscore.gz" 1000 "HapMap3 LD-score weights for chr$C - run 00d"
 done
 require_file munged.parquet 1000000 "munged sumstats - run 00e"
-log "inputs verified: 22 chromosomes x (LD-scores + annotations + weights), sumstats"
+log "inputs verified: 22 chromosomes x (LD-scores + annotations + M + weights), sumstats"
 
 # --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
 if [ ! -s ${OUTP}.22.snpvar_ridge.gz ]; then
