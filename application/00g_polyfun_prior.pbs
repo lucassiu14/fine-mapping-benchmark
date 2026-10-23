@@ -34,42 +34,27 @@ OUTP="pf_prior_${SET}/chol"
 mkdir -p "pf_prior_${SET}" logs
 echo "[prior] annotation set: $SET"
 
-# --- PolyFun's --ref-ld-chr prefix locates TWO files per chromosome --------
-# Verified in the authors' source rather than assumed:
+# --- PolyFun's --ref-ld-chr prefix locates THREE files per chromosome -----
+# Verified in the authors' source, not assumed:
 #
 #   polyfun.py check_files()        for --compute-h2-L2, per chromosome:
-#                                     get_file_name('ref-ld')  -> required
-#                                     get_file_name('w-ld')    -> required
-#                                     get_file_name('annot')   -> required
+#                                     'ref-ld', 'w-ld' AND 'annot'
 #   polyfun_utils.get_file_name()   'ref-ld' -> <prefix><chr>.l2.ldscore.parquet
 #                                   'annot'  -> <prefix><chr>.annot.parquet
+#   ldsc_polyfun/parse.M()          <prefix><chr>.l2.M, via _read_M
 #
-# So BOTH live under the single --ref-ld-chr prefix, which is how the authors'
-# own example_data/ is laid out. 00f writes the LD-scores into
-# ldscores_<SET>/ while the annotations sit in their own directory, so without
-# this PolyFun dies ~60 s in with
+# which is exactly what the authors' example_data/ contains per chromosome.
+# All three live under ldscores_<SET>/annot.:
 #
-#   OSError: annot file not found: ldscores_sniff/annot.1.annot.parquet
+#   .annot.parquet       written by 00h2 (base + quintile indicators)
+#   .l2.ldscore.parquet  written by 00f, FROM that same file
+#   .l2.M                written below
 #
-# The annotations are also genuinely READ, not merely checked:
-# load_annotations_file() uses them for the ridge/bins step and asserts their
-# column names match the LD-score columns. Link rather than copy - these are
-# 18 GB. compute_ldscores.py writes no .l2.M file and check_files verifies
-# none, so these two files are everything PolyFun needs under the prefix.
-case "$SET" in
-  sniff)    ASRC="annot/borzoi" ;;
-  combined) ASRC="annot_combined/combined" ;;
-esac
-require_dir "ldscores_${SET}" "run 00f with ANNOT_SET=$SET first"
-NLINK=0
-for C in $(seq 1 22); do
-  SRC="$APP_ROOT/${ASRC}.${C}.annot.parquet"
-  DST="ldscores_${SET}/annot.${C}.annot.parquet"
-  require_file "$SRC" 1000000 "annotations for chr$C - run 00b (and 00b2 for combined)"
-  # absolute target, so the link resolves whatever the cwd
-  [ -e "$DST" ] || { ln -s "$SRC" "$DST" && NLINK=$((NLINK+1)); }
-done
-log "annotations linked beside the LD-scores: $NLINK new, prefix ldscores_${SET}/annot."
+# The annotations are genuinely read, not merely checked: load_annotations_file()
+# uses them for the ridge/bins step and asserts their column names match the
+# LD-score columns - which holds because 00f computed those LD-scores from this
+# very file.
+require_dir "ldscores_${SET}" "run 00h1, then 00h2 and 00f with ANNOT_SET=$SET"
 
 # --- the .l2.M files, which compute_ldscores.py does not write ------------
 # parse.M() does a bare open(<prefix><chr>.l2.M).readline(), with no parquet
@@ -78,9 +63,12 @@ log "annotations linked beside the LD-scores: $NLINK new, prefix ldscores_${SET}
 # LD-score and annotation files, so nothing is recomputed. See
 # make_ldscore_M.py for the definition and its provenance in ldsc.py.
 section "M files"
+# --annot-prefix is the BUILT file, not the raw annotations: the LD-scores
+# were computed from the built file, so M must be its column sums over the
+# same SNPs.
 python "$APP_ROOT/make_ldscore_M.py" \
   --ldscores-dir "ldscores_${SET}" \
-  --annot-prefix "$ASRC" \
+  --annot-prefix "ldscores_${SET}/annot" \
   --polyfun-dir "$PF"
 
 # Check every input up front, so a gap fails here with a clear message rather
@@ -88,7 +76,8 @@ python "$APP_ROOT/make_ldscore_M.py" \
 for C in $(seq 1 22); do
   require_file "ldscores_${SET}/annot.${C}.l2.ldscore.parquet" 10000 \
     "LD-scores for chr$C - run 00f with ANNOT_SET=$SET"
-  require_file "ldscores_${SET}/annot.${C}.annot.parquet" 1000000 "annotations for chr$C"
+  require_file "ldscores_${SET}/annot.${C}.annot.parquet" 100000 \
+    "built annotations for chr$C - run 00h2 with ANNOT_SET=$SET"
   require_file "ldscores_${SET}/annot.${C}.l2.M" 2 "M file for chr$C"
   require_file "${W}${C}.l2.ldscore.gz" 1000 "HapMap3 LD-score weights for chr$C - run 00d"
 done

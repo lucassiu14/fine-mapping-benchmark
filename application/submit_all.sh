@@ -7,7 +7,8 @@
 #   bash submit_all.sh --from 03    # resume from a stage (deps are dropped)
 #   bash submit_all.sh --prior-only # ONLY the PolyFun-prior chain
 #
-# --prior-only submits 00b -> 00b2 -> 00d -> 00e -> 00f -> 00g and stops: the
+# --prior-only submits 00b -> 00b2 -> 00d -> 00h1 -> 00h2 -> 00e -> 00f -> 00g
+# and stops: the
 # S-LDSC chain that produces the prior, which is the part of the pipeline that
 # has never been exercised end to end. It deliberately leaves out 01 (the LD
 # download, ~429 GB peak), 02 and the methods, so the chain can be proven for
@@ -90,12 +91,25 @@ echo "== annotation sets =="
 J_COMB=$(sub 00b2 00b2_combine_annot.pbs "$(dep_arr "$J_ANNOT")")
 echo "  combined    : $J_COMB  (Borzoi-102 + baselineLF = 289)"
 
+echo "== PolyFun annotations: base + quintile indicators per Borzoi PC =="
+# The raw PCs are signed, so their column sums (= M, which S-LDSC reads as a
+# per-annotation SNP count) came out negative, and neither source set carries
+# a base column. 00h1 computes genome-wide quintile breakpoints once; 00h2
+# builds base + 4 indicators per PC per chromosome. 00f then computes the
+# LD-scores FROM those built files.
+J_BP=$(sub 00h1 00h1_annot_breakpoints.pbs "$(dep_arr "$J_ANNOT")")
+echo "  breakpoints : $J_BP  (genome-wide, shared by both sets)"
+J_BLD_S=$(sub 00h2 00h2_build_annot.pbs "afterok:${J_BP},$(dep_arr "$J_ANNOT")" ANNOT_SET=sniff)
+echo "  build annot : $J_BLD_S  (sniff, 409)"
+J_BLD_C=$(sub 00h2 00h2_build_annot.pbs "afterok:${J_BP},$(dep_arr "$J_COMB")"  ANNOT_SET=combined)
+echo "  build annot : $J_BLD_C  (combined, 596)"
+
 echo "== PolyFun prior, computed from OUR annotations, once per set =="
 J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
 echo "  munge       : $J_MUNGE"
-J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_ANNOT")" ANNOT_SET=sniff)
+J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_BLD_S")" ANNOT_SET=sniff)
 echo "  LD-scores   : $J_LDSC_S  (sniff)"
-J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_COMB")"  ANNOT_SET=combined)
+J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_BLD_C")" ANNOT_SET=combined)
 echo "  LD-scores   : $J_LDSC_C  (combined)"
 J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "$(dep_arr "$J_LDSC_S")" ANNOT_SET=sniff)
 echo "  prior       : $J_PRIOR_S  (sniff)"
@@ -105,8 +119,9 @@ echo "  prior       : $J_PRIOR_C  (combined)"
 if [ "$PRIOR_ONLY" = 1 ]; then
   cat <<'PNOTE'
 
---prior-only: stopping after the PolyFun-prior chain. Not submitted: 01 (LD
-download), 02 (prep), 03/04/05 (methods).
+--prior-only: stopping after the PolyFun-prior chain
+(00b -> 00b2 -> 00d -> 00h1 -> 00h2 -> 00e -> 00f -> 00g). Not submitted:
+01 (LD download), 02 (prep), 03/04/05 (methods).
 
 Watch it with:
 

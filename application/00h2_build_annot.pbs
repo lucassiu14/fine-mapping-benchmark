@@ -1,0 +1,66 @@
+#!/bin/bash
+#PBS -N chol_build_annot
+#PBS -l select=1:ncpus=4:mem=48gb
+#PBS -l walltime=04:00:00
+#PBS -J 1-22
+#PBS -j oe
+#PBS -o logs/
+# Pass 2: build the annotation file PolyFun regresses on, one chromosome per
+# task. Submit once per ANNOT_SET (sniff, combined).
+#
+#   base (all ones) + 4 quintile indicators per Borzoi PC
+#     sniff     102*4 + base                  = 409 annotations
+#     combined  102*4 + base + 187 baselineLF = 596 annotations
+#
+# The lowest quintile of each PC is the dropped reference category: all five
+# indicators of one PC sum to the all-ones vector, so keeping all five AND
+# base would be exactly collinear.
+#
+# The file is written to ldscores_<SET>/annot.<chr>.annot.parquet, i.e. under
+# the same prefix as the LD-scores, because PolyFun's --ref-ld-chr resolves
+# <prefix><chr>.annot.parquet and <prefix><chr>.l2.ldscore.parquet together.
+# 00f then computes the LD-scores FROM this file, so the two always agree.
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
+C=${PBS_ARRAY_INDEX}
+SET="${ANNOT_SET:-sniff}"
+case "$SET" in sniff|combined) ;; *) die "ANNOT_SET must be sniff or combined, not '$SET'" ;; esac
+mkdir -p "ldscores_${SET}" logs
+
+require_file pc_quintiles.tsv 1000 "genome-wide breakpoints - run 00h1 first"
+case "$SET" in
+  sniff)    require_file "annot/borzoi.${C}.annot.parquet" 1000000 "run 00b" ;;
+  combined) require_file "annot_combined/combined.${C}.annot.parquet" 1000000 "run 00b2" ;;
+esac
+
+python "$APP_ROOT/build_polyfun_annot.py" build \
+  --set "$SET" --chr "$C" --breakpoints pc_quintiles.tsv
+
+OUT="ldscores_${SET}/annot.${C}.annot.parquet"
+check_output "$OUT" 100000
+python - "$OUT" "$SET" <<'PY' || die "the built annotation file is unusable"
+import sys
+import numpy as np
+import pyarrow.parquet as pq
+f, s = sys.argv[1], sys.argv[2]
+KEY = {"CHR", "SNP", "BP", "A1", "A2"}
+t = pq.read_table(f)
+ann = [n for n in t.schema.names if n not in KEY]
+want = 409 if s == "sniff" else 596
+assert len(ann) == want, f"{len(ann)} annotations, expected {want}"
+assert "base" in ann, "no base annotation"
+base = t.column("base").to_numpy()
+assert (base == 1).all(), "base is not all ones"
+M = np.array([t.column(n).to_numpy().sum() for n in ann], dtype=np.float64)
+assert np.isfinite(M).all(), "non-finite column sum"
+neg = int((M <= 0).sum())
+print(f"            verified : {len(ann)} annotations x {t.num_rows:,} SNPs, "
+      f"base sums to {base.sum():,.0f}, column sums in "
+      f"[{M.min():.4g}, {M.max():.4g}], {neg} non-positive", flush=True)
+PY
+log "chr$C ($SET) annotation file built"
+finish

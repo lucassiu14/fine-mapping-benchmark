@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -N chol_annot_bp
+#PBS -l select=1:ncpus=4:mem=24gb
+#PBS -l walltime=04:00:00
+#PBS -j oe
+#PBS -o logs/
+# Pass 1 of the PolyFun annotation build: the GENOME-WIDE quintile breakpoints
+# for each Borzoi PC.
+#
+# S-LDSC is one genome-wide regression, so a per-chromosome quintile would make
+# "top quintile of ATAC-PC0" mean a different thing on every chromosome. This
+# pools each PC across all 22 chromosomes and writes its 20/40/60/80th
+# percentiles, one PC column at a time so the job holds ~70 MB rather than the
+# ~7 GB the full 102 x 18M matrix would need.
+#
+# Single job, not an array: the breakpoints are by definition shared across
+# chromosomes, so computing them per chromosome would defeat the purpose.
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p logs
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
+
+for C in $(seq 1 22); do
+  require_file "annot/borzoi.${C}.annot.parquet" 1000000 "annotations for chr$C - run 00b"
+done
+
+if [ -s pc_quintiles.tsv ]; then
+  log "pc_quintiles.tsv already present ($(( $(wc -l < pc_quintiles.tsv) - 1 )) PCs)"
+else
+  python "$APP_ROOT/build_polyfun_annot.py" breakpoints \
+    --annot-dir annot --out pc_quintiles.tsv
+fi
+
+check_output pc_quintiles.tsv 1000
+N_PC=$(( $(wc -l < pc_quintiles.tsv) - 1 ))
+[ "$N_PC" -eq 102 ] || die "expected breakpoints for 102 PCs, got $N_PC"
+log "genome-wide quintile breakpoints ready for $N_PC PCs"
+finish
