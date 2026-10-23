@@ -7,8 +7,8 @@ blocks, comparing four methods on identical loci:
 |---|---|---|
 | `fb_xregion` | Borzoi-102 | LassoNet — sparse **selection** |
 | `funmap` | Borzoi-102 | random effects — **shrinkage**, no selection |
-| `polyfun_sniff` | Borzoi-102 | S-LDSC prior on the same 102 |
-| `polyfun_combined` | Borzoi-102 + baselineLF (289) | S-LDSC prior, standard specification |
+| `polyfun_sniff` | Borzoi-102, quintile-binned (409) | S-LDSC prior on the same features |
+| `polyfun_combined` | + baselineLF v2.2 (596) | S-LDSC prior, standard specification |
 
 The two PolyFun variants separate the method from the annotation set:
 `polyfun_sniff` sees exactly what the other two see, `polyfun_combined` is
@@ -130,13 +130,61 @@ and a reference panel is the conventional S-LDSC choice. The UKB LD is still
 used for the fine-mapping itself, where it matters. EUR is the right panel:
 the GWAS is UK Biobank white-British and the loci are LDetect EUR blocks.
 
+### The PolyFun annotations are binned, and why
+
+PolyFun does **not** regress on the raw Borzoi PCs. Two properties of the raw
+files made that untenable, both measured rather than assumed (chr22):
+
+* every one of the 102 PCs is signed — values span `[-841.8, 4471]` — so the
+  per-column sums run from `-5.6e5` to `1.16e6`; and
+* neither the Borzoi set nor baselineLF contains a `base` column, nor any
+  constant column at all (5 of baselineLF's 187 also carry negatives).
+
+Those column sums *are* `M`, which S-LDSC reads as a per-annotation SNP count:
+`M_tot = sum(M)` sets the regression weights in
+`LD_Score_Regression._update_func`, and the per-annotation `M_j` feed the h2
+and enrichment outputs. A negative count is meaningless, and with no `base`
+column nothing absorbs the genome-wide mean per-SNP heritability. The failure
+would not have been loud: `SNPVAR = annot · taus` would still have been
+produced, from a regression weighted by a quantity that was not a count.
+
+So each PC is replaced by **quintile indicators** and an all-ones `base` is
+added — the standard S-LDSC treatment of a continuous annotation, and exactly
+what the published baselineLD/baselineLF files contain (`base` there is
+literally all ones, so constructing one is a definition, not invented data).
+The lowest quintile of each PC is dropped as the reference category, because
+all five indicators of a PC sum to the all-ones vector and keeping all five
+alongside `base` is exactly collinear.
+
+| set | annotations |
+|---|---|
+| `sniff` | `base` + 102×4 quintile indicators = **409** |
+| `combined` | the same + baselineLF v2.2 as published = **596** |
+
+Breakpoints are **genome-wide**, not per chromosome: S-LDSC is a single
+genome-wide regression, so a per-chromosome quintile would make "top quintile
+of ATAC-PC0" mean a different thing on each chromosome. `00h1` pools each PC
+across all 22 chromosomes one column at a time (~70 MB resident rather than
+the ~7 GB the full matrix needs); `00h2` applies them. baselineLF's own
+columns are kept exactly as published, including the 5 with negative values —
+those are its standardised continuous annotations, and re-binning them would
+depart from the published model.
+
+**This weakens the `polyfun_sniff` framing, and the weakening belongs in the
+paper.** `polyfun_sniff` no longer sees *exactly* what `fb_xregion` and
+`funmap` see; it sees a binned representation of the same 102 underlying
+features. The comparison still holds the feature set fixed, but no longer the
+representation, so it isolates the method less cleanly than first intended.
+The alternative — handing S-LDSC a design matrix whose implied SNP counts are
+negative — is not a comparison at all.
+
 *Two annotation sets, run separately.* `ANNOT_SET=sniff` gives PolyFun the
-102 Borzoi PCs only — non-standard for S-LDSC, since enrichment estimates may
-be biased without baseline controls, but it means PolyFun sees exactly what
-`fb_xregion` and `funmap` see. `ANNOT_SET=combined` adds baselineLF v2.2 for
-289 annotations, the standard specification and PolyFun at its strongest.
+Borzoi features only — non-standard for S-LDSC, since enrichment estimates may
+be biased without baseline controls, but it means PolyFun sees the same
+features as `fb_xregion` and `funmap`. `ANNOT_SET=combined` adds baselineLF
+v2.2, the standard specification and PolyFun at its strongest.
 Running both removes the objection either way: if `polyfun_combined` wins, the
-289-annotation advantage is visible rather than hidden; if `polyfun_sniff`
+extra-annotation advantage is visible rather than hidden; if `polyfun_sniff`
 already wins, the extra annotations were not what mattered.
 
 Each set gets its own LD-scores (`ldscores_<set>/`), prior (`pf_prior_<set>/`)
@@ -316,6 +364,8 @@ before its inputs exist:
        │                                              │
        └─> 00b2 combine (289)                         │
                                                       │
+       └─> 00h1 quintile breakpoints (genome-wide)     │
+             └─> 00h2 build annot[sniff 409 / combined 596] │
   00d LDSC ref ─> 00e munge ─┬─> 00f ldscores[sniff]    ─> 00g prior[sniff]    ─┼─> 05 polyfun[sniff]
                              └─> 00f ldscores[combined] ─> 00g prior[combined] ─┴─> 05 polyfun[combined]
 ```
