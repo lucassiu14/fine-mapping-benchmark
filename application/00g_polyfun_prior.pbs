@@ -107,7 +107,15 @@ require_file munged.parquet 1000000 "munged sumstats - run 00e"
 log "inputs verified: 22 chromosomes x (LD-scores + annotations + M + weights), sumstats"
 
 # --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
-if [ ! -s ${OUTP}.22.snpvar_ridge.gz ]; then
+# Guard on BOTH artifacts stage 1 produces. It writes snpvar_ridge first and
+# the bins afterwards (polyfun_h2_L2: run_ldsc -> compute_snpvar ->
+# save_snpvar_to_disk x2 -> partition_snps_to_bins -> save_bins_to_disk), and
+# the binning is exactly where it failed for want of the R package
+# Ckmeans.1d.dp. Keying on snpvar_ridge alone would declare stage 1 done and
+# skip to stage 2, which then dies in check_files for want of the bins:
+#   if args.compute_ldscores and not args.compute_h2_L2:
+#       get_file_name(args, 'snpvar_ridge', ...); get_file_name(args, 'bins', ...)
+if [ ! -s ${OUTP}.22.snpvar_ridge.gz ] || [ ! -s ${OUTP}.22.bins.parquet ]; then
   python "$PF/polyfun.py" \
     --compute-h2-L2 \
     --output-prefix "$OUTP" \

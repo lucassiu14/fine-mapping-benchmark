@@ -64,7 +64,9 @@ mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-pl
 
 say "susieR 0.11.92 for PolyFun"
 RLIB="$APP_ROOT/Rlib_polyfun"; mkdir -p "$RLIB"
-if [ -d "$RLIB/susieR" ]; then echo "  already installed"; else
+if [ -d "$RLIB/susieR" ] && [ -d "$RLIB/Ckmeans.1d.dp" ]; then
+  echo "  already installed"
+else
   # Install from a CRAN SNAPSHOT contemporary with the R module, not from
   # today's CRAN. Two problems otherwise, both seen in practice:
   #   - the R/4.3.2 module ships no recommended packages, so Matrix must be
@@ -113,6 +115,19 @@ if [ -d "$RLIB/susieR" ]; then echo "  already installed"; else
                        repos = c(CRAN = 'https://cloud.r-project.org'))
     stopifnot(requireNamespace('mixsqp', quietly=TRUE))
     cat('  mixsqp', as.character(packageVersion('mixsqp')), 'available\n')
+    # Ckmeans.1d.dp: PolyFun's DEFAULT SNP-binning step calls it through rpy2
+    # (polyfun.py partition_snps_Ckmedian -> importr('Ckmeans.1d.dp')), and
+    # --compute-h2-L2 dies there, AFTER the ridge regression has already run
+    # and written snpvar_ridge, with
+    #   'Could not load the R package Ckmeans.1d.dp. Either install it or
+    #    rerun PolyFun with --skip-Ckmedian'
+    # The --skip-Ckmedian fallback substitutes sklearn KMeans for the exact 1-D
+    # dynamic-programming k-median, i.e. a different algorithm from the one the
+    # paper describes. Install the package rather than take the fallback.
+    if (!requireNamespace('Ckmeans.1d.dp', quietly=TRUE))
+      install.packages('Ckmeans.1d.dp', lib='$RLIB')
+    stopifnot(requireNamespace('Ckmeans.1d.dp', quietly=TRUE))
+    cat('  Ckmeans.1d.dp', as.character(packageVersion('Ckmeans.1d.dp')), 'available\n')
     if (!requireNamespace('remotes', quietly=TRUE))
       install.packages('remotes', lib='$RLIB')
     remotes::install_github('stephenslab/susieR@v0.11.92', lib='$RLIB', upgrade='never')
