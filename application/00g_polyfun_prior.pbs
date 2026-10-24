@@ -131,12 +131,35 @@ log "inputs verified: 22 chromosomes x (LD-scores + annotations + M + weights), 
 #   if args.compute_ldscores and not args.compute_h2_L2:
 #       get_file_name(args, 'snpvar_ridge', ...); get_file_name(args, 'bins', ...)
 if [ ! -s ${OUTP}.22.snpvar_ridge.gz ] || [ ! -s ${OUTP}.22.bins.parquet ]; then
+  # PF_NUM_BINS pins the number of SNP bins instead of PolyFun's automatic
+  # BIC selection. The binning happens HERE, inside --compute-h2-L2, so this
+  # is where the flag belongs and why changing it re-runs the ridge
+  # regression too.
+  #
+  # Why it is being pinned: left automatic, Ckmedian chose 30 - the TOP of its
+  # default k in [5,30] - and R warned "Max number of clusters used. Consider
+  # increasing k!". Stage 3 then died in regressions.py:348 with
+  #   FloatingPointError: invalid value encountered in divide   (cat / tot)
+  # because about 42% (sniff) / 51% (combined) of the per-SNP h2 estimates are
+  # NEGATIVE, so the bins span negative h2, stage 3's non-negative least
+  # squares clamps those coefficients to zero and tot = sum(M_j * coef_j)
+  # collapses.
+  #
+  # --num-bins is a documented parameter and PolyFun's own log suggests it, so
+  # this is not a departure from the published method. It does NOT address the
+  # negative per-SNP h2, which comes from every SNP carrying ~102 signed
+  # quintile taus that swamp tau_base; it only tests whether fewer, better
+  # separated bins let the NNLS find a non-zero total.
+  NB="${PF_NUM_BINS:-}"
+  if [ -n "$NB" ]; then log "bins    : pinned to $NB (PF_NUM_BINS)"
+  else log "bins    : automatic (PolyFun BIC selection)"; fi
   python "$PF/polyfun.py" \
     --compute-h2-L2 \
     --output-prefix "$OUTP" \
     --sumstats munged.parquet \
     --ref-ld-chr "$LDS" \
     --w-ld-chr "$W" \
+    ${NB:+--num-bins "$NB"} \
     --allow-missing
 else echo "stage 1 already done"; fi
 
