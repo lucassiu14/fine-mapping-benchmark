@@ -112,6 +112,15 @@ done
 require_file munged.parquet 1000000 "munged sumstats - run 00e"
 log "inputs verified: 22 chromosomes x (LD-scores + annotations + M + weights), sumstats"
 
+# NOTE on the binning, for the record rather than as a problem: Ckmedian
+# chose 30 bins, which is the TOP of PolyFun's default search range k in
+# [5,30], and R warned "Max number of clusters used. Consider increasing k!".
+# The optimum landing on the boundary means the per-SNP h2 distribution would
+# have taken more bins if allowed. That is PolyFun's documented default range,
+# so it is left alone, but it is a consequence of the quintile-binned
+# annotations giving a finer-grained SNPVAR distribution than the
+# baselineLF-style sets the default was tuned on.
+#
 # --- stage 1: S-LDSC -> per-SNP h2 (ridge) and the snpvar bins -------------
 # Guard on BOTH artifacts stage 1 produces. It writes snpvar_ridge first and
 # the bins afterwards (polyfun_h2_L2: run_ldsc -> compute_snpvar ->
@@ -133,11 +142,22 @@ else echo "stage 1 already done"; fi
 
 # --- stage 2: LD-scores of the snpvar bins ---------------------------------
 if [ ! -s ${OUTP}.22.l2.ldscore.parquet ]; then
+  # --allow-missing here for the same reason as stages 1 and 3, and as 00f:
+  # the plink panel contains SNPs with no Borzoi annotation, so they were
+  # never assigned a bin, and compute_ldscores_plink_chr refuses to proceed
+  # otherwise:
+  #   ValueError: Not all SNPs were assigned a bin ... please use the flag
+  #   --allow-missing
+  # With the flag it sets keep_snps to the panel SNPs that DO have a bin
+  # (polyfun.py:680), which is exactly the restriction 00f already applied
+  # when computing the annotation LD-scores. Omitting it here was an
+  # inconsistency, not a deliberate stricter check.
   python "$PF/polyfun.py" \
     --compute-ldscores \
     --output-prefix "$OUTP" \
     --bfile-chr 1000G_EUR_Phase3_plink/1000G.EUR.QC. \
-    --ld-wind-cm 1
+    --ld-wind-cm 1 \
+    --allow-missing
 else echo "stage 2 already done"; fi
 
 # --- stage 3: re-estimate h2 per bin -> the final prior --------------------
