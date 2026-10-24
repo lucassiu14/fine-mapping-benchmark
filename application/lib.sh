@@ -127,6 +127,43 @@ require_fb_fixes() {
   echo "[guard] fb checkout has the memo fix, the LD regularisation fix and .npy LD support"
 }
 
+rpy2_env() {
+  # rpy2 embeds R IN-PROCESS, and that embedded R does not inherit a library
+  # the R module did not install. Measured: its .libPaths() is only
+  #   /rds/easybuild/rome/apps/software/R/4.3.2-gfbf-2023a/lib64/R/library
+  # so anything installed into POLYFUN_RLIB is invisible to it unless R_LIBS
+  # says otherwise. This is easy to get wrong because an
+  #   Rscript -e ".libPaths(c('$POLYFUN_RLIB', .libPaths())); library(X)"
+  # test PASSES while rpy2 still fails - the two do not see the same
+  # libraries. 00g reached PolyFun's binning step after 20 minutes of ridge
+  # regression and died with
+  #   PackageNotInstalledError: The R package "Ckmeans.1d.dp" is not installed
+  # while that very package loaded fine under Rscript.
+  export R_HOME="${R_HOME:?set R_HOME to the R installation rpy2 should embed}"
+  export R_LIBS="${POLYFUN_RLIB:?set POLYFUN_RLIB}${R_LIBS:+:$R_LIBS}"
+  # Only needed when the rpy2 wheel was built against a different R minor
+  # version than the one installed; harmless otherwise.
+  export RPY2_CFFI_MODE="${RPY2_CFFI_MODE:-ABI}"
+  log "R_HOME   : $R_HOME"
+  log "R_LIBS   : $R_LIBS"
+}
+
+require_r_package() {
+  # Verify through rpy2's own importr, exactly as PolyFun calls it. Checking
+  # with Rscript instead is what let this through the first time.
+  python - "$1" <<'RPY' || die "the embedded R cannot load '$1' - check R_LIBS above"
+import sys
+import rpy2.robjects as ro
+from rpy2.robjects.packages import importr
+name = sys.argv[1]
+print("            embedded R .libPaths():")
+for p in ro.r('.libPaths()'):
+    print(f"              {p}")
+importr(name)
+print(f"            '{name}' loads under rpy2", flush=True)
+RPY
+}
+
 finish() {
   local el=$(( $(date +%s) - _T0 ))
   section "done in ${el}s ($((el/60)) min)"

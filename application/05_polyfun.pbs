@@ -36,14 +36,12 @@ else
   conda activate "${POLYFUN_ENV}"
 fi
 
-# PolyFun calls susieR through rpy2, which needs three things set explicitly.
-# susieR must be 0.11.92: 0.12+ moved bhat/shat/R/var_y out of
+# PolyFun calls susieR through rpy2. rpy2_env sets R_HOME, R_LIBS and
+# RPY2_CFFI_MODE; it lives in lib.sh so this stage and 00g cannot drift apart
+# on it. susieR must be 0.11.92: 0.12+ moved bhat/shat/R/var_y out of
 # susie_suff_stat into susie_rss, and finemapper.py calls the old signature.
-export R_HOME="${R_HOME:?set R_HOME to the R installation rpy2 should embed}"
-export R_LIBS="${POLYFUN_RLIB:?set POLYFUN_RLIB to the library holding susieR 0.11.92}:${R_LIBS:-}"
-# Only needed when the rpy2 wheel was built against a different R minor
-# version than the one installed; harmless otherwise.
-export RPY2_CFFI_MODE="${RPY2_CFFI_MODE:-ABI}"
+rpy2_env
+require_r_package susieR
 
 read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
   'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)

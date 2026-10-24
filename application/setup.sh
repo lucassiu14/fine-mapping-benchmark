@@ -165,6 +165,11 @@ export FUNMAP_DIR="$APP_ROOT/Funmap"
 export POLYFUN_ENV="$APP_ROOT/polyfunenv"
 export POLYFUN_DIR="$APP_ROOT/polyfun"
 export POLYFUN_RLIB="$RLIB"
+  # The R library rpy2's EMBEDDED R must see. Its .libPaths() is otherwise
+  # just the module's own, so a package installed into Rlib_polyfun is
+  # invisible to it even though Rscript finds it. Each stage also sets this
+  # via lib.sh's rpy2_env, so this is for interactive use.
+  export R_LIBS="$RLIB\${R_LIBS:+:\$R_LIBS}"
 export R_HOME="\${R_HOME:-\$(R RHOME 2>/dev/null)}"
 export RPY2_CFFI_MODE=ABI
 # functional-beatrice: main at d0fb022 or later. 03_fb_xregion.pbs verifies this.

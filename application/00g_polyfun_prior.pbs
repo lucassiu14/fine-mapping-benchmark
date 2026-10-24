@@ -48,6 +48,12 @@ require_env POLYFUN_ENV "the PolyFun python environment"
 source "${POLYFUN_ENV}/bin/activate"
 report_python
 PF="${POLYFUN_DIR:?set POLYFUN_DIR}"
+
+# PolyFun's default binning step calls the R package Ckmeans.1d.dp through
+# rpy2, so the embedded R has to be able to see it. Checked here, in seconds,
+# rather than discovered after the ridge regression has run for 20 minutes.
+rpy2_env
+require_r_package Ckmeans.1d.dp
 W=1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
 SET="${ANNOT_SET:-sniff}"
 case "$SET" in sniff|combined) ;; *) echo "ANNOT_SET must be sniff or combined" >&2; exit 2 ;; esac
