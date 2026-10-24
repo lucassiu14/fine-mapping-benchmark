@@ -140,7 +140,15 @@ rpy2_env() {
   #   PackageNotInstalledError: The R package "Ckmeans.1d.dp" is not installed
   # while that very package loaded fine under Rscript.
   export R_HOME="${R_HOME:?set R_HOME to the R installation rpy2 should embed}"
-  export R_LIBS="${POLYFUN_RLIB:?set POLYFUN_RLIB}${R_LIBS:+:$R_LIBS}"
+  # Prepend only if absent: env.sh exports R_LIBS too, and prepending
+  # unconditionally yields "<rlib>:<rlib>" in the log. R dedupes it, so this
+  # is cosmetic - but a doubled path in a log is a false lead waiting to be
+  # chased.
+  : "${POLYFUN_RLIB:?set POLYFUN_RLIB}"
+  case ":${R_LIBS:-}:" in
+    *":$POLYFUN_RLIB:"*) ;;
+    *) export R_LIBS="$POLYFUN_RLIB${R_LIBS:+:$R_LIBS}" ;;
+  esac
   # Only needed when the rpy2 wheel was built against a different R minor
   # version than the one installed; harmless otherwise.
   export RPY2_CFFI_MODE="${RPY2_CFFI_MODE:-ABI}"
