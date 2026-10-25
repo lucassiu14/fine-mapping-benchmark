@@ -29,14 +29,53 @@ LD_DIR = os.path.join(ROOT, "ld")
 AN_DIR = os.path.join(ROOT, "annot")
 OUT    = os.path.join(ROOT, "regions")
 N_LIK  = int(os.environ.get("N_LIKELIHOOD", 373220))   # GWAS n; the LD panel (~337k) is a subset
-# A block enters the analysis only if it retains at least this fraction of the
-# GWAS variants in its span after the annotation merge. Borzoi has no
-# annotations over the start of the extended MHC, chr8p23.1 or the chr11
-# centromere, and six blocks there retained ZERO variants while still being
-# marked DONE -- every assertion below passes vacuously at zero rows, so
-# preflight reported 265/265 prepared and the empty loci would have entered
-# every method's manifest. Healthy blocks retain 70-90%.
-MIN_COV = float(os.environ.get("PREP_MIN_ANNOT_COVERAGE", "0.25"))
+# THE BLOCK-SET RULE. A block is analysed only if it contains no contiguous
+# stretch longer than this in which GWAS variants exist but none are
+# annotated. Default 100 kb.
+#
+# Why a gap rather than a retained fraction: the variants Borzoi does not
+# annotate are present in both the GWAS and the LD panel, so dropping them
+# hands the methods a locus with a contiguous chunk missing, in which the
+# retained variants flanking the hole look mutually LD-linked without the
+# intervening ones. If the causal variant lies in the hole, its proxies inside
+# the retained set carry the signal and the credible set excludes the truth
+# CONFIDENTLY. A locus thinned uniformly to 60% is fine; a locus missing a
+# contiguous 1 Mb is a truncated search space, and the retained fraction does
+# not distinguish the two.
+#
+# Measured over the 265 blocks: 254 have a largest gap of ~0 (at most a
+# handful of variants), and 11 have holes from 0.18 Mb to the entire span.
+# Nothing lies between 0.00 and 0.18 Mb, so 100 kb sits in an empty interval.
+# The holes are all at three regions Borzoi does not cover at all: the start
+# of the extended MHC, the chr8p23.1 inversion, and the chr11 centromere.
+#
+# This also replaced an earlier retained-fraction rule, which kept three
+# blocks whose holes were 1.00, 0.72 and 0.18 Mb because their overall
+# coverage was 58-72%.
+MAX_GAP_BP = int(float(os.environ.get("PREP_MAX_ANNOT_GAP_BP", "100000")))
+
+
+def longest_unannotated_gap(span_bp, retained_bp):
+    """Longest run of consecutive GWAS variants in a span with none retained.
+
+    Returns (n_variants, bp_extent). Shared with apply_block_filter.py so the
+    rule has one definition; a second copy would be free to drift.
+    """
+    span_bp = np.asarray(span_bp)
+    if span_bp.size == 0:
+        return 0, 0
+    kept = np.isin(span_bp, np.asarray(retained_bp))
+    best_n = best_bp = n = start = 0
+    for i, ok in enumerate(kept):
+        if ok:
+            n = 0
+            continue
+        if n == 0:
+            start = i
+        n += 1
+        if n > best_n:
+            best_n, best_bp = n, int(span_bp[i] - span_bp[start])
+    return best_n, best_bp
 
 
 def ordkey(df, a1, a2, bp="BP"):
@@ -76,11 +115,11 @@ def main(i):
 
     ss = pq.ParquetFile(SUMST).read(
         columns=["SNP", "CHR", "BP", "A1", "A2", "MAF", "N", "Z"]).to_pandas()
-    # the denominator for the coverage rule: GWAS variants in the block's span,
-    # before any of prep's own filtering, so the figure means the same thing
-    # for every block
-    n_ss_span = int(((ss.CHR == ch) & (ss.BP >= r.block_start)
-                     & (ss.BP <= r.block_end)).sum())
+    # GWAS variants in the block's span, before any of prep's own filtering,
+    # so the gap rule means the same thing for every block
+    span_mask = ((ss.CHR == ch) & (ss.BP >= r.block_start) & (ss.BP <= r.block_end))
+    ss_span_bp = np.sort(ss.loc[span_mask, "BP"].values)
+    n_ss_span = int(span_mask.sum())
     ss = ss[(ss.CHR == ch) & biallelic_snv(ss)]
     ss = ss.drop_duplicates("BP", keep=False)
 
@@ -97,20 +136,26 @@ def main(i):
     m["ko"] = ordkey(m, "A1_ld", "A2_ld")
     m = m.merge(an[["ko"] + acols].drop_duplicates("ko"), on="ko", how="inner")
 
-    # Check coverage HERE, before the O(p^2) LD extraction below, so an
+    # Apply the rule HERE, before the O(p^2) LD extraction below, so an
     # excluded block costs nothing and no degenerate inputs are written.
     cov = (len(m) / n_ss_span) if n_ss_span else 0.0
-    if cov < MIN_COV:
+    gap_n, gap_bp = longest_unannotated_gap(ss_span_bp, m.BP.values)
+    if gap_bp > MAX_GAP_BP:
         json.dump(dict(region_id=tag, chrom=ch,
                        block_start=int(r.block_start), block_end=int(r.block_end),
                        p_retained=int(len(m)), gwas_variants_in_span=n_ss_span,
                        annotation_coverage=round(cov, 6),
-                       min_annotation_coverage=MIN_COV,
-                       reason="annotation coverage below the minimum; Borzoi has "
-                              "no annotations covering this span"),
+                       largest_unannotated_gap_bp=gap_bp,
+                       largest_unannotated_gap_variants=gap_n,
+                       max_unannotated_gap_bp=MAX_GAP_BP,
+                       reason="a contiguous stretch of this block has GWAS and "
+                              "LD-panel variants but no Borzoi annotations, so "
+                              "the analysed locus would be a truncated search "
+                              "space rather than a thinned one"),
                   open(os.path.join(d, "EXCLUDED"), "w"), indent=2)
-        print(f"{tag}: EXCLUDED - retained {len(m)} of {n_ss_span} GWAS variants "
-              f"in span = {cov:.2%} < {MIN_COV:.0%}")
+        print(f"{tag}: EXCLUDED - largest unannotated gap {gap_bp/1e6:.2f} Mb "
+              f"({gap_n:,} variants) > {MAX_GAP_BP/1e6:.2f} Mb; "
+              f"retained {len(m)} of {n_ss_span} ({cov:.1%})")
         return
 
     rows = m.row.values
@@ -151,7 +196,8 @@ def main(i):
                 block=f"{int(r.block_start)}-{int(r.block_end)}",
                 max_abs_z=float(np.abs(m.Z).max()), flipped=int(flip.sum()),
                 min_p=float(r.min_p), n_annot=len(acols),
-                gwas_variants_in_span=n_ss_span, annotation_coverage=round(cov, 6))
+                gwas_variants_in_span=n_ss_span, annotation_coverage=round(cov, 6),
+                largest_unannotated_gap_bp=gap_bp)
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
     open(os.path.join(d, "DONE"), "w").close()
     print(f"{tag}: p={len(m)} max|Z|={meta['max_abs_z']:.2f} flips={meta['flipped']}")

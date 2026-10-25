@@ -170,6 +170,61 @@ columns are kept exactly as published, including the 5 with negative values —
 those are its standardised continuous annotations, and re-binning them would
 depart from the published model.
 
+### The analysed block set: 254 of 265
+
+Borzoi annotates no variants at all in three regions, and blocks overlapping
+them cannot be fine-mapped on equal terms:
+
+* the start of the extended MHC (chr6 ~25.7 Mb onward)
+* the chr8p23.1 polymorphic inversion / defensin cluster (~7.2-10.5 Mb)
+* the chr11 centromere (~47-58 Mb)
+
+**The rule.** A block is analysed only if it contains **no contiguous stretch
+longer than 100 kb in which GWAS variants exist but none are annotated**
+(`PREP_MAX_ANNOT_GAP_BP`). That excludes 11 of 265, leaving **254**.
+
+The criterion is a gap rather than a retained fraction on purpose. The
+unannotated variants are present in both the GWAS and the LD panel; prep drops
+them only for want of annotations. So the methods receive a locus with a
+contiguous chunk missing, in which the retained variants flanking the hole
+appear mutually LD-linked without the intervening ones. If the causal variant
+lies in the hole, its proxies inside the retained set carry the signal and the
+credible set excludes the truth *confidently* — the same class of failure as
+handing an RSS model `r = 1` pairs with discordant `z`. A locus thinned
+uniformly to 60% is sound; a locus missing a contiguous 1 Mb is a truncated
+search space, and the retained fraction cannot tell the two apart. An earlier
+retained-fraction rule (≥25%) kept three blocks whose holes were 1.00, 0.72
+and 0.18 Mb because their overall coverage read 58-72%.
+
+The threshold is not doing fine-grained work: of the 265 blocks, 254 have a
+largest gap of ~0 (a handful of variants at most) and 11 have holes from
+0.18 Mb up to the entire span. Nothing falls between 0.00 and 0.18 Mb.
+
+| excluded | span | largest hole | retained |
+|---|---|---|---|
+| ldEUR_11_0029 | chr11:47.0-49.87 Mb | whole span | 0 / 13,842 |
+| ldEUR_11_0030 | chr11:50.0-53.0 Mb | whole span | 0 / 9,182 |
+| ldEUR_11_0031 | chr11:54.70-55.08 Mb | whole span | 0 / 2,338 |
+| ldEUR_08_0012 | chr8:9.15-9.64 Mb | whole span | 0 / 3,903 |
+| ldEUR_08_0013 | chr8:9.64-10.46 Mb | whole span | 0 / 6,617 |
+| ldEUR_06_0020 | chr6:25.68-26.79 Mb | whole span | 0 / 6,632 |
+| ldEUR_08_0011 | chr8:7.15-9.15 Mb | ~2 Mb | 176 / 9,011 |
+| ldEUR_11_0032 | chr11:55.08-58.0 Mb | 1.75 Mb | 4,075 / 17,120 |
+| ldEUR_11_0028 | chr11:44.7-47.0 Mb | 1.00 Mb | 61.8% |
+| ldEUR_08_0015 | chr8:12.0-14.2 Mb | 0.72 Mb | 57.8% |
+| ldEUR_06_0019 | chr6:24.9-25.7 Mb | 0.18 Mb | 71.8% |
+
+`ldEUR_08_0012` carries the GWAS lead with |Z| = 18.05, so this is not a
+negligible corner of the data and the exclusion should be stated explicitly
+rather than implied by a block count.
+
+How it went unnoticed at first: prep marked all six zero-variant blocks `DONE`,
+because every assertion in `prep_block.py` passes vacuously at zero rows and
+pandas' `Series.max()` returns `NaN` rather than raising on an empty frame — so
+`meta.json` recorded `max_abs_z = NaN` and `preflight` reported "all 265 blocks
+prepared". Both now enforce the rule and report exclusions separately from
+failures.
+
 ### Half the per-SNP heritabilities come out negative
 
 A real property of this annotation set, worth reporting — but **not** what

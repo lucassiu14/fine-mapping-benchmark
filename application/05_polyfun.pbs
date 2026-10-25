@@ -47,7 +47,7 @@ read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
   'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)
 [ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
 OUT="polyfun_out_${SET}/${RID}.txt.gz"
-[ -f "regions/$RID/EXCLUDED" ] && { echo "$RID: excluded by the annotation-coverage rule"; cat "regions/$RID/EXCLUDED"; exit 0; }
+[ -f "regions/$RID/EXCLUDED" ] && { echo "$RID: excluded by the unannotated-gap rule"; cat "regions/$RID/EXCLUDED"; exit 0; }
 [ -s "$OUT" ] && { echo "$RID ($SET) already done"; exit 0; }
 
 # finemapper wants a sumstats file with SNPVAR; the downloaded priors file

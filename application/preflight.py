@@ -127,7 +127,7 @@ def check_prep():
         d = os.path.join(ROOT, "regions", r["region_id"])
         # A deliberate exclusion is not a missing prep. apply_block_filter.py
         # and prep_block.py both write EXCLUDED, carrying the numbers, when a
-        # block falls below the annotation-coverage rule.
+        # block contains a contiguous unannotated stretch over the limit.
         if os.path.exists(os.path.join(d, "EXCLUDED")):
             excluded.append(r["region_id"]); continue
         if not os.path.exists(os.path.join(d, "DONE")):
@@ -141,7 +141,7 @@ def check_prep():
     else:
         print(f"  OK  all {len(rows) - len(excluded)} analysed blocks prepared")
     if excluded:
-        print(f"  --  {len(excluded)} excluded by the annotation-coverage rule: "
+        print(f"  --  {len(excluded)} excluded by the unannotated-gap rule: "
               + ", ".join(excluded[:8]) + ("" if len(excluded) <= 8 else ", ..."))
     # The PolyFun prior, computed by 00g from our own annotations. Needed by
     # 05 only. Note S-LDSC is genome-wide, so all 22 must be present even

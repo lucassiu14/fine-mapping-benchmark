@@ -37,7 +37,7 @@ while IFS=, read -r rid rest; do
 done < blocks.csv
 N_MAN=$(( $(wc -l < manifest.tsv) - 1 ))
 N_BLK=$(( $(wc -l < blocks.csv) - 1 - N_EXCL ))
-log "manifest : $N_MAN of $N_BLK analysed blocks ($N_EXCL excluded by the annotation-coverage rule)"
+log "manifest : $N_MAN of $N_BLK analysed blocks ($N_EXCL excluded by the unannotated-gap rule)"
 [ "$N_MAN" -gt 0 ] || die "manifest is empty - run 02_prep first"
 if [ "$N_MAN" -lt "$N_BLK" ]; then
   warn "$(( N_BLK - N_MAN )) blocks are missing from the manifest."
