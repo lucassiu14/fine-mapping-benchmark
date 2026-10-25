@@ -169,7 +169,14 @@ export POLYFUN_RLIB="$RLIB"
   # just the module's own, so a package installed into Rlib_polyfun is
   # invisible to it even though Rscript finds it. Each stage also sets this
   # via lib.sh's rpy2_env, so this is for interactive use.
-  export R_LIBS="$RLIB\${R_LIBS:+:\$R_LIBS}"
+  # Prepend only if absent: env.sh is sourced repeatedly in a shell, and an
+  # unconditional prepend grows R_LIBS by one copy each time (observed at 5x).
+  # R dedupes it so .libPaths() stays correct, but an unbounded variable is a
+  # false lead waiting to be chased. lib.sh's rpy2_env guards the same way.
+  case ":\${R_LIBS:-}:" in
+    *":$RLIB:"*) ;;
+    *) export R_LIBS="$RLIB\${R_LIBS:+:\$R_LIBS}" ;;
+  esac
 export R_HOME="\${R_HOME:-\$(R RHOME 2>/dev/null)}"
 export RPY2_CFFI_MODE=ABI
 # functional-beatrice: main at d0fb022 or later. 03_fb_xregion.pbs verifies this.
