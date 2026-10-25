@@ -6,6 +6,7 @@
 #   bash submit_all.sh --dry-run    # print the qsub commands and stop
 #   bash submit_all.sh --from 03    # resume from a stage (deps are dropped)
 #   bash submit_all.sh --prior-only # ONLY the PolyFun-prior chain
+#   bash submit_all.sh --prep-only  # everything up to and including 02 prep
 #
 # --prior-only submits 00b -> 00b2 -> 00d -> 00h1 -> 00h2 -> 00e -> 00f -> 00g
 # and stops: the
@@ -20,11 +21,12 @@
 set -euo pipefail
 cd "${APP_ROOT:?source env.sh first}"
 
-DRY=0; FROM=""; PRIOR_ONLY=0
+DRY=0; FROM=""; PRIOR_ONLY=0; PREP_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY=1 ;;
     --prior-only) PRIOR_ONLY=1 ;;
+    --prep-only) PREP_ONLY=1 ;;
     --from) FROM="$2"; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac; shift
@@ -152,6 +154,25 @@ fi
 echo "== prep (needs annotations + LD) =="
 J_PREP=$(sub 02 02_prep.pbs "$(dep_arr "$J_ANNOT"),$(dep_arr "$J_LD")")
 echo "  prep        : $J_PREP"
+
+if [ "$PREP_ONLY" = 1 ]; then
+  cat <<'PNOTE'
+
+--prep-only: stopping after 02. Not submitted: 03/04/05 (the methods).
+
+03_fb_xregion is a SINGLE job over all blocks (the prior head is shared, so
+it cannot be an array) with a 48 h request that has never been measured. Time
+it on a stratified subset first, which takes about 15 minutes:
+
+  qsub -v APP_ROOT,APP_MODULES,APP_VENV,FB_DIR,N_LIKELIHOOD 03t_fb_timing.pbs
+
+It reports two extrapolations to the full block set and a suggested walltime.
+Then submit the methods:
+
+  bash submit_all.sh
+PNOTE
+  exit 0
+fi
 
 echo "== methods (independent of each other) =="
 J_FB=$(sub 03 03_fb_xregion.pbs "$(dep_arr "$J_PREP")")
