@@ -6,8 +6,14 @@
 #PBS -j oe
 #PBS -o logs/
 # Download one UKBB LD window per array task (.npz + .gz).
-# 249 windows, ~1.2 GB each -> ~300 GB total. The bucket is public: no
+# 262 windows, ~1.2 GB each -> ~300 GB total. The bucket is public: no
 # credentials, no requester-pays. Re-running is safe; existing files skip.
+#
+# The window list comes from ld_windows.txt, which setup.sh derives from
+# blocks.csv. It is NOT in the repo (it is .gitignore'd as a derived file), and
+# before setup.sh generated it every task here exited with "no window at line
+# N" and downloaded nothing -- so check it explicitly rather than letting an
+# empty sed result look like a missing line.
 cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
 source ./lib.sh
 banner
@@ -18,8 +24,13 @@ mkdir -p ld logs
 [ -n "${AWS_MODULE:-}" ] && try_module "$AWS_MODULE"
 require_cmd aws
 
+require_file ld_windows.txt 10 "run setup.sh to derive it from blocks.csv"
+N_WIN=$(wc -l < ld_windows.txt)
+[ "$N_WIN" -ge "$PBS_ARRAY_INDEX" ] || die \
+  "ld_windows.txt has $N_WIN windows but this is task ${PBS_ARRAY_INDEX}; the #PBS -J range and the window list disagree"
 W=$(sed -n "${PBS_ARRAY_INDEX}p" ld_windows.txt)
-[ -n "$W" ] || { echo "no window at line ${PBS_ARRAY_INDEX}"; exit 1; }
+[ -n "$W" ] || die "ld_windows.txt line ${PBS_ARRAY_INDEX} is empty"
+log "window   : $W  ($PBS_ARRAY_INDEX of $N_WIN)"
 
 for ext in gz npz; do
   out="ld/${W}.${ext}"

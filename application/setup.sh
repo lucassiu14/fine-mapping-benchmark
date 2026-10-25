@@ -24,6 +24,23 @@ else
   echo "  (running from APP_ROOT; scripts already in place)"
 fi
 cp -f "$HERE"/blocks_scored.csv "$HERE"/blocks.csv "$APP_ROOT"/ 2>/dev/null || true
+
+# ld_windows.txt: the distinct LD windows, one per line, which 01's array
+# indexes by line number. It is .gitignore'd (it is derived, not source) and
+# only 00_make_blocks.py wrote it -- so it never reached APP_ROOT, and every
+# task of 01 exited with "no window at line N" having downloaded nothing.
+# Derive it from blocks.csv here instead of committing it, so the two cannot
+# drift. The column is looked up by NAME, not position, and duplicates are
+# dropped in first-appearance order, matching 00_make_blocks.py's
+# drop_duplicates().
+if [ -s "$APP_ROOT/blocks.csv" ]; then
+  awk -F, 'NR==1 { for (i=1; i<=NF; i++) if ($i == "ld_region") c = i;
+                   if (!c) { print "blocks.csv has no ld_region column" > "/dev/stderr"; exit 1 }
+                   next }
+           !seen[$c]++ { print $c }' "$APP_ROOT/blocks.csv" > "$APP_ROOT/ld_windows.txt.tmp" \
+    && mv "$APP_ROOT/ld_windows.txt.tmp" "$APP_ROOT/ld_windows.txt"
+  echo "  ld_windows.txt: $(wc -l < "$APP_ROOT/ld_windows.txt") distinct LD windows"
+fi
 cp -f "$HERE"/../inst/extdata/gwfm_regions_ldetect_EUR.csv "$APP_ROOT"/ 2>/dev/null \
   || echo "  NOTE: copy gwfm_regions_ldetect_EUR.csv here if you want to re-derive blocks_scored.csv"
 
