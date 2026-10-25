@@ -32,13 +32,32 @@ W=$(sed -n "${PBS_ARRAY_INDEX}p" ld_windows.txt)
 [ -n "$W" ] || die "ld_windows.txt line ${PBS_ARRAY_INDEX} is empty"
 log "window   : $W  ($PBS_ARRAY_INDEX of $N_WIN)"
 
+# Four of the 262 windows are published with the extension .npz2 rather than
+# .npz -- chr8_8000001_11000001 and the three consecutive chr11 windows at
+# 47/50/53 Mb. Verified against the bucket: for those four, `aws s3 ls` on the
+# window prefix returns only <window>.gz and <window>.npz2, with no .npz, so
+# this is how the release names them rather than a transient failure. They are
+# saved locally as .npz so prep, preflight and everything downstream stay
+# uniform; whether the contents are usable is settled by the sp.load_npz check
+# below, not assumed here.
+S3=s3://broad-alkesgroup-ukbb-ld/UKBB_LD
 for ext in gz npz; do
   out="ld/${W}.${ext}"
   if [ -s "$out" ]; then echo "skip $out"; continue; fi
-  aws s3 cp --no-sign-request \
-      "s3://broad-alkesgroup-ukbb-ld/UKBB_LD/${W}.${ext}" "$out.part"
+  if ! aws s3 cp --no-sign-request "$S3/${W}.${ext}" "$out.part" 2>"$out.err"; then
+    if [ "$ext" = npz ] && grep -q '404' "$out.err"; then
+      warn "${W}.npz is not in the bucket; falling back to ${W}.npz2"
+      aws s3 cp --no-sign-request "$S3/${W}.npz2" "$out.part" \
+        || { cat "$out.err" >&2; die "neither ${W}.npz nor ${W}.npz2 could be fetched"; }
+    else
+      cat "$out.err" >&2
+      die "could not fetch ${W}.${ext}"
+    fi
+  fi
+  rm -f "$out.err"
   mv "$out.part" "$out"          # atomic: a killed job never leaves a half file
-  log "got $out ($(du -h "$out" | cut -f1))"
+  # byte count, not du: du reports DISK usage and shows 0 for the small .gz
+  log "got $out ($(wc -c < "$out") bytes)"
 done
 
 # A truncated .npz downloads "successfully" and then fails hours later inside
