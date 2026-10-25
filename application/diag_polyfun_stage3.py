@@ -118,6 +118,31 @@ tot_nn = float(np.sum(M * coef_nn))
 print(f"  tot = sum(M*coef) = {tot_nn:.6g}")
 
 print()
+print("=== the two solvers PolyFun can use for the non-negative fit ===")
+print("  (LstsqJackknifeSlow.__init__: --nnls-exact -> scipy nnls, otherwise")
+print("   Lasso(alpha=1e-100, positive=True, precompute=xtx))")
+import warnings
+import sklearn
+from sklearn.linear_model import Lasso
+print(f"  sklearn {sklearn.__version__}")
+with warnings.catch_warnings(record=True) as wl:
+    warnings.simplefilter("always")
+    try:
+        xtx = Xs.T.dot(Xs)
+        las = Lasso(alpha=1e-100, fit_intercept=False, precompute=xtx,
+                    positive=True, max_iter=10000, random_state=0)
+        c_las = las.fit(Xs, y).coef_ / Nbar
+        print(f"  Lasso  : min {np.nanmin(c_las):.4g} max {np.nanmax(c_las):.4g} "
+              f"NaN {int(np.isnan(c_las).sum())}  "
+              f"tot {float(np.sum(M * c_las)):.6g}")
+    except Exception as e:
+        print(f"  Lasso  : RAISED {type(e).__name__}: {str(e)[:140]}")
+    for w in wl[:3]:
+        print(f"           warning: {w.category.__name__}: {str(w.message)[:120]}")
+print(f"  scipy  : min {coef_nn.min():.4g} max {coef_nn.max():.4g} "
+      f"NaN {int(np.isnan(coef_nn).sum())}  tot {tot_nn:.6g}")
+
+print()
 print("=== verdict ===")
 if not np.isfinite(coef_ols).all() or np.isnan(X).any():
     print("  NaN in the inputs or the unconstrained fit -> a DATA problem,")

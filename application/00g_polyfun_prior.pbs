@@ -185,11 +185,34 @@ else echo "stage 2 already done"; fi
 
 # --- stage 3: re-estimate h2 per bin -> the final prior --------------------
 if [ ! -s ${OUTP}.22.snpvar_constrained.gz ]; then
+  # --nnls-exact: use scipy.optimize.nnls rather than PolyFun's DEFAULT
+  # approximation to non-negative least squares, which is
+  #   Lasso(alpha=1e-100, fit_intercept=False, precompute=xtx, positive=True)
+  # at ldsc_polyfun/jackknife.py (LstsqJackknifeSlow.__init__). Only stage 3
+  # takes that path: stage 1 uses the ridge branch, where nn=False.
+  #
+  # Why: stage 3 died at regressions.py:348 on `cat / tot` with
+  # FloatingPointError: invalid value encountered in divide, i.e. NaN, under
+  # both 30 and 10 bins. diag_polyfun_stage3.py then loaded the identical
+  # inputs and found nothing wrong with them -- no NaN or inf in the design
+  # matrix, no zero or non-finite M, cond(X'X) only 1050 (sniff) / 3847
+  # (combined) -- and solving the same regression with scipy's nnls gave
+  # tot = sum(M*coef) of 0.433 and 0.378, both finite and plausible
+  # heritabilities. So the data is fine and the full-sample fit is fine; what
+  # differs is the solver.
+  #
+  # NOT claimed: that the Lasso approximation is definitely where the NaN
+  # arises. It could not be reproduced on sklearn 1.5.1 locally, and this
+  # environment has 1.9.1. The exact solver is used because it is documented
+  # as more accurate, because it demonstrably works on this data, and because
+  # it replaces the approximation in the delete-value loop as well as in the
+  # full-sample estimate -- not because the mechanism is confirmed.
   python "$PF/polyfun.py" \
     --compute-h2-bins \
     --output-prefix "$OUTP" \
     --sumstats munged.parquet \
     --w-ld-chr "$W" \
+    --nnls-exact \
     --allow-missing
 else echo "stage 3 already done"; fi
 
