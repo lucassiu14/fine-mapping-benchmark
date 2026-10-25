@@ -58,7 +58,16 @@ echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
 mkenv () {  # name, then pip args
   local n="$1"; shift
-  if [ -x "$APP_ROOT/$n/bin/python" ]; then echo "  $n already built"; return; fi
+  if [ -x "$APP_ROOT/$n/bin/python" ]; then
+    # Already built - but the package list may have GROWN since. Install into
+    # the existing venv rather than skipping, otherwise a new dependency never
+    # reaches a cluster that ran setup.sh before it was added. pip is a no-op
+    # for anything already satisfied.
+    "$APP_ROOT/$n/bin/python" -m pip install -q "$@" \
+      && echo "  $n already built (package list reconciled)" \
+      || echo "  $n already built (WARNING: could not reconcile packages)"
+    return
+  fi
   "$PY_BOOT" -m venv "$APP_ROOT/$n"
   "$APP_ROOT/$n/bin/python" -m pip install -q --upgrade pip
   "$APP_ROOT/$n/bin/python" -m pip install -q "$@"
@@ -66,7 +75,13 @@ mkenv () {  # name, then pip args
 }
 
 say "python environments"
-mkenv appenv    numpy pandas pyarrow scipy torch
+# absl-py, tqdm and matplotlib are imported by the FB entry points, not just
+# by its plotting: beatrice_joint.py does `from absl import app/flags` at
+# module scope, so without absl-py the run dies immediately with
+# ModuleNotFoundError before any work starts. Found by scanning every import
+# in the FB tree rather than one error at a time. LassoNet needs no package --
+# LassoNetPrior is FB's own class.
+mkenv appenv    numpy pandas pyarrow scipy torch absl-py tqdm matplotlib
 # Funmap pins these exactly; do not relax them.
 mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8.2"
 # PolyFun pins, each found the hard way:
