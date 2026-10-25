@@ -107,7 +107,13 @@ say "python environments"
 # LassoNetPrior is FB's own class.
 mkenv appenv    numpy pandas pyarrow scipy torch absl-py tqdm matplotlib packaging
 # Funmap pins these exactly; do not relax them.
-mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8.2"
+# typing-extensions: funmapenv picked up rich-click transitively, and
+# rich-click 1.7.0 declares typing-extensions, which was not installed. The
+# new `pip check` in mkenv found this on its first run -- a latent break that
+# would have surfaced in 04_funmap rather than here. Satisfying the declared
+# dependency is safer than removing a package something pulled in.
+mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8.2" \
+                typing-extensions
 # PolyFun pins, each found the hard way:
 #   pyarrow<=17   newer pyarrow requires numpy>=2, which conflicts with the rest
 #   rpy2 3.5.x    3.6 turned numpy2ri.activate() into a raised DeprecationWarning
