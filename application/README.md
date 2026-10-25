@@ -229,6 +229,18 @@ the NaN — it could not be reproduced on sklearn 1.5.1, and this environment
 runs 1.9.1 — so the exact solver is used on its own merits: documented as
 more accurate, and demonstrably finite here.)
 
+**Outcome.** With `--nnls-exact`, stage 3 completes in ~11 minutes and both
+priors are produced for all 22 chromosomes:
+
+| set | SNPVAR range (chr22, 209,990 SNPs) | max/min |
+|---|---|---|
+| `sniff` | `[1.178e-08, 9.444e-07]` | 80.2 |
+| `combined` | `[5.456e-09, 3.626e-07]` | 66.5 |
+
+Both strictly positive and finite, and both inside the ratio `--q` (default
+100) permits — so the truncation is not saturated and the spread is not purely
+an artefact of the clamp.
+
 So the methods do differ in what they ingest — `fb_xregion` and `funmap` take
 102 dense continuous annotations directly, while PolyFun needs them
 discretised into categories and yields a per-SNP heritability that is an
