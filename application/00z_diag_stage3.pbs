@@ -1,0 +1,24 @@
+#!/bin/bash
+#PBS -N chol_diag_s3
+#PBS -l select=1:ncpus=8:mem=96gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o logs/
+# Diagnose the stage-3 0/0. Loads exactly what --compute-h2-bins loads and
+# reports whether the non-negative least squares collapses, the inputs carry
+# NaN, or the jackknife is at fault. Minutes, not an hour.
+cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
+source ./lib.sh
+banner; mkdir -p logs
+require_env POLYFUN_ENV "the PolyFun python environment"
+source "${POLYFUN_ENV}/bin/activate"
+report_python
+W=1000G_Phase3_weights_hm3_no_MHC/weights.hm3_noMHC.
+for SET in sniff combined; do
+  section "ANNOT_SET=$SET"
+  python "$APP_ROOT/diag_polyfun_stage3.py" \
+    --prefix "pf_prior_${SET}/chol" \
+    --w-ld-chr "$W" \
+    --polyfun-dir "${POLYFUN_DIR:?set POLYFUN_DIR}" || warn "$SET diagnostic failed"
+done
+finish
