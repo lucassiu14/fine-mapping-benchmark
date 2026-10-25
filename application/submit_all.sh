@@ -32,7 +32,21 @@ while [ $# -gt 0 ]; do
   esac; shift
 done
 
-PASS=APP_ROOT,APP_MODULES,AWS_MODULE,N_LIKELIHOOD,APP_VENV,FB_DIR,FUNMAP_VENV,FUNMAP_DIR,POLYFUN_ENV,POLYFUN_DIR,POLYFUN_RLIB,R_HOME,R_LIBS,RPY2_CFFI_MODE,PF_NUM_BINS
+# Variables the jobs need. Build the -v list from the ones that are ACTUALLY
+# SET: naming an unset variable makes qsub refuse the whole submission with
+#   qsub: cannot send environment with the job
+# which is what happened when PF_NUM_BINS joined this list - it is optional
+# and only set when pinning the bin count, so an ordinary run has it unset.
+PASS_VARS="APP_ROOT APP_MODULES AWS_MODULE N_LIKELIHOOD APP_VENV FB_DIR
+           FUNMAP_VENV FUNMAP_DIR POLYFUN_ENV POLYFUN_DIR POLYFUN_RLIB
+           R_HOME R_LIBS RPY2_CFFI_MODE PF_NUM_BINS"
+PASS=""; PASS_SKIPPED=""
+for v in $PASS_VARS; do
+  if [ -n "${!v:-}" ]; then PASS="${PASS:+$PASS,}$v"
+  else PASS_SKIPPED="${PASS_SKIPPED:+$PASS_SKIPPED }$v"; fi
+done
+[ -n "$PASS" ] || { echo "none of $PASS_VARS is set - source env.sh first" >&2; exit 2; }
+[ -n "$PASS_SKIPPED" ] && echo "note: not set, so not passed: $PASS_SKIPPED"
 
 dep_arr () {
   # Dependency on an ARRAY job. MEASURED on this scheduler with
