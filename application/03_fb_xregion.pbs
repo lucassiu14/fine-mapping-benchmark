@@ -25,17 +25,19 @@ source "${APP_VENV}/bin/activate"
 report_python
 
 # Manifest is rebuilt each run so a re-prep is always picked up.
+N_EXCL=0
 printf 'z\tLD\tannot\ttarget\tN\n' > manifest.tsv
 while IFS=, read -r rid rest; do
   [ "$rid" = region_id ] && continue
   d="regions/$rid"
+  [ -f "$d/EXCLUDED" ] && { N_EXCL=$((N_EXCL+1)); continue; }
   [ -f "$d/DONE" ] || { echo "MISSING prep: $rid" >&2; continue; }
   printf '%s\t%s\t%s\t%s\t%s\n' "$d/locus.z" "$d/locus_ld.npy" "$d/locus.annot" \
          "joint_out/$rid" "${N_LIKELIHOOD:-337000}" >> manifest.tsv
 done < blocks.csv
 N_MAN=$(( $(wc -l < manifest.tsv) - 1 ))
-N_BLK=$(( $(wc -l < blocks.csv) - 1 ))
-log "manifest : $N_MAN of $N_BLK blocks"
+N_BLK=$(( $(wc -l < blocks.csv) - 1 - N_EXCL ))
+log "manifest : $N_MAN of $N_BLK analysed blocks ($N_EXCL excluded by the annotation-coverage rule)"
 [ "$N_MAN" -gt 0 ] || die "manifest is empty - run 02_prep first"
 if [ "$N_MAN" -lt "$N_BLK" ]; then
   warn "$(( N_BLK - N_MAN )) blocks are missing from the manifest."

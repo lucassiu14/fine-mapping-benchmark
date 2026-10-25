@@ -31,6 +31,7 @@ RID=$(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" 'NR==i{print $1}' blocks.csv)
 log "block    : $RID"
 D="regions/$RID"; OUT="funmap_out/$RID"
 [ -f "$OUT/pip.csv" ] && { echo "$RID already done"; exit 0; }
+[ -f "$D/EXCLUDED" ]  && { echo "$RID: excluded by the annotation-coverage rule"; cat "$D/EXCLUDED"; exit 0; }
 [ -f "$D/DONE" ]      || { echo "prep missing for $RID"; exit 1; }
 mkdir -p "$OUT"
 

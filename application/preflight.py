@@ -122,9 +122,14 @@ def check_data():
 def check_prep():
     print("prepared blocks (inputs for 03/04/05):")
     rows = blocks()
-    bad = []
+    bad, excluded = [], []
     for r in rows:
         d = os.path.join(ROOT, "regions", r["region_id"])
+        # A deliberate exclusion is not a missing prep. apply_block_filter.py
+        # and prep_block.py both write EXCLUDED, carrying the numbers, when a
+        # block falls below the annotation-coverage rule.
+        if os.path.exists(os.path.join(d, "EXCLUDED")):
+            excluded.append(r["region_id"]); continue
         if not os.path.exists(os.path.join(d, "DONE")):
             bad.append(r["region_id"]); continue
         for f in ("locus.z", "locus_ld.npy", "locus.annot", "funmap.z.txt",
@@ -134,7 +139,10 @@ def check_prep():
     if bad:
         fail(f"{len(bad)} of {len(rows)} blocks incomplete, e.g. {bad[:3]}")
     else:
-        print(f"  OK  all {len(rows)} blocks prepared")
+        print(f"  OK  all {len(rows) - len(excluded)} analysed blocks prepared")
+    if excluded:
+        print(f"  --  {len(excluded)} excluded by the annotation-coverage rule: "
+              + ", ".join(excluded[:8]) + ("" if len(excluded) <= 8 else ", ..."))
     # The PolyFun prior, computed by 00g from our own annotations. Needed by
     # 05 only. Note S-LDSC is genome-wide, so all 22 must be present even
     # though only 22 chromosomes carry selected blocks.

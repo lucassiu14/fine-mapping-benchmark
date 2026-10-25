@@ -29,6 +29,14 @@ LD_DIR = os.path.join(ROOT, "ld")
 AN_DIR = os.path.join(ROOT, "annot")
 OUT    = os.path.join(ROOT, "regions")
 N_LIK  = int(os.environ.get("N_LIKELIHOOD", 373220))   # GWAS n; the LD panel (~337k) is a subset
+# A block enters the analysis only if it retains at least this fraction of the
+# GWAS variants in its span after the annotation merge. Borzoi has no
+# annotations over the start of the extended MHC, chr8p23.1 or the chr11
+# centromere, and six blocks there retained ZERO variants while still being
+# marked DONE -- every assertion below passes vacuously at zero rows, so
+# preflight reported 265/265 prepared and the empty loci would have entered
+# every method's manifest. Healthy blocks retain 70-90%.
+MIN_COV = float(os.environ.get("PREP_MIN_ANNOT_COVERAGE", "0.25"))
 
 
 def ordkey(df, a1, a2, bp="BP"):
@@ -68,6 +76,11 @@ def main(i):
 
     ss = pq.ParquetFile(SUMST).read(
         columns=["SNP", "CHR", "BP", "A1", "A2", "MAF", "N", "Z"]).to_pandas()
+    # the denominator for the coverage rule: GWAS variants in the block's span,
+    # before any of prep's own filtering, so the figure means the same thing
+    # for every block
+    n_ss_span = int(((ss.CHR == ch) & (ss.BP >= r.block_start)
+                     & (ss.BP <= r.block_end)).sum())
     ss = ss[(ss.CHR == ch) & biallelic_snv(ss)]
     ss = ss.drop_duplicates("BP", keep=False)
 
@@ -83,6 +96,22 @@ def main(i):
     acols = [c for c in an.columns if "-PC" in c]
     m["ko"] = ordkey(m, "A1_ld", "A2_ld")
     m = m.merge(an[["ko"] + acols].drop_duplicates("ko"), on="ko", how="inner")
+
+    # Check coverage HERE, before the O(p^2) LD extraction below, so an
+    # excluded block costs nothing and no degenerate inputs are written.
+    cov = (len(m) / n_ss_span) if n_ss_span else 0.0
+    if cov < MIN_COV:
+        json.dump(dict(region_id=tag, chrom=ch,
+                       block_start=int(r.block_start), block_end=int(r.block_end),
+                       p_retained=int(len(m)), gwas_variants_in_span=n_ss_span,
+                       annotation_coverage=round(cov, 6),
+                       min_annotation_coverage=MIN_COV,
+                       reason="annotation coverage below the minimum; Borzoi has "
+                              "no annotations covering this span"),
+                  open(os.path.join(d, "EXCLUDED"), "w"), indent=2)
+        print(f"{tag}: EXCLUDED - retained {len(m)} of {n_ss_span} GWAS variants "
+              f"in span = {cov:.2%} < {MIN_COV:.0%}")
+        return
 
     rows = m.row.values
     assert len(set(rows)) == len(rows), f"{tag}: two retained variants share one LD row"
@@ -121,7 +150,8 @@ def main(i):
     meta = dict(tag=tag, chrom=ch, p=int(len(m)), n_likelihood=N_LIK,
                 block=f"{int(r.block_start)}-{int(r.block_end)}",
                 max_abs_z=float(np.abs(m.Z).max()), flipped=int(flip.sum()),
-                min_p=float(r.min_p), n_annot=len(acols))
+                min_p=float(r.min_p), n_annot=len(acols),
+                gwas_variants_in_span=n_ss_span, annotation_coverage=round(cov, 6))
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
     open(os.path.join(d, "DONE"), "w").close()
     print(f"{tag}: p={len(m)} max|Z|={meta['max_abs_z']:.2f} flips={meta['flipped']}")
