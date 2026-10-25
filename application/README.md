@@ -170,18 +170,19 @@ columns are kept exactly as published, including the 5 with negative values —
 those are its standardised continuous annotations, and re-binning them would
 depart from the published model.
 
-### PolyFun's S-LDSC prior does not accommodate 102 dense annotations
+### Half the per-SNP heritabilities come out negative
 
-This is a finding about the comparator, not an implementation obstacle, and it
-is probably worth a paragraph in the paper.
+A real property of this annotation set, worth reporting — but **not** what
+broke the pipeline. An earlier version of this section claimed it was; that
+was wrong and is corrected below.
 
 With `base` plus 4 quintile indicators per PC, **every SNP belongs to ~102
-annotation categories at once** (one per PC, bar those falling in a reference
-quintile). A SNP's per-SNP heritability is then
+annotation categories at once** (one per PC, bar those in a reference
+quintile), so its per-SNP heritability is
 
     SNPVAR = tau_base + sum over 102 PCs of tau(PC, that SNP's quintile)
 
-i.e. 102 signed coefficients summed per SNP. Measured on chr1 of the stage-1
+— 102 signed coefficients summed per SNP. Measured on chr1 of the stage-1
 ridge fit:
 
 | | per-SNP h² | negative | annotation taus |
@@ -189,33 +190,51 @@ ridge fit:
 | `sniff` (409) | median `1.10e-08`, range `[-1.79e-07, 3.72e-07]` | **498,899 / 1,198,510 = 41.6%** | 211 of 409 negative, range `±2.4e-08` |
 | `combined` (596) | median **`-3.73e-10`** | **605,712 / 1,198,510 = 50.5%** | 302 of 596 negative |
 
-The taus are tiny and near-symmetric about zero, so their sum swamps
-`tau_base` and about half the per-SNP variances come out negative — and a
-variance cannot be negative.
+The taus are small and near-symmetric about zero, so their sum is comparable
+to `tau_base` and about half the per-SNP variances come out negative — and a
+variance cannot be negative. A standard S-LDSC set does not behave this way,
+because a SNP occupies few of its categories and `base` dominates the sum.
 
-**The S-LDSC fit itself is sound**, which is what makes this a property of the
-annotation set rather than a numerical failure: `_check_ld_condnum` raised no
-warning, and the ridge chose `lambda = 9.3268e-02` at 70/100 of its grid with
-a better score than least squares (`2.59e-02` vs `1.94e-02`). Nothing is
-ill-conditioned or over-parameterised.
+**What this does and does not mean.** PolyFun anticipates *some* negatives:
+that is what `min_snpvar = SNPVAR.max() / q` (`--q`, default 100) and the
+`_constrained` outputs exist for. Half is well beyond that design intent, so
+the prior ultimately rests on heavily clamped values, and any PolyFun number
+from this run carries that caveat. But the fit itself is sound and the
+procedure does complete — see below — so this is a caveat on interpretation,
+not a failure.
 
-PolyFun anticipates *some* negatives — that is exactly what
-`min_snpvar = SNPVAR.max() / q` (`--q`, default 100) and the `_constrained`
-outputs are for — but not half of them. The bins are built from the
-*unconstrained* SNPVAR, so roughly half of them carry negative h²; stage 3
-(`--compute-h2-bins`) runs non-negative least squares, clamps those
-coefficients to zero, and `tot = sum(M_j * coef_j)` collapses, failing at
-`ldsc_polyfun/regressions.py:348`:
+**Correction.** Stage 3 (`--compute-h2-bins`) failed repeatedly at
+`ldsc_polyfun/regressions.py:348` with `FloatingPointError: invalid value
+encountered in divide` on `cat / tot`, and that was initially attributed to
+these negative heritabilities collapsing the non-negative least squares. That
+attribution was wrong, and two runs were spent on it (including pinning the
+bin count, which changed nothing). `diag_polyfun_stage3.py` loaded the
+identical inputs and found:
 
-    prop = jk.RatioJackknife(cat / tot, ...)
-    FloatingPointError: invalid value encountered in divide      # 0/0
+| | `sniff` | `combined` |
+|---|---|---|
+| M zeros / non-finite | 0 / 0 | 0 / 0 |
+| design matrix NaN / inf / all-zero columns | 0 / 0 / 0 | 0 / 0 / 0 |
+| `cond(X'X)` | 1,050 | 3,847 |
+| unconstrained OLS `tot` | 0.410 | −0.027 |
+| **scipy NNLS `tot`** | **0.433** | **0.378** |
 
-A standard S-LDSC set does not behave this way because a SNP belongs to
-relatively few of its categories and `base` dominates the sum. The contrast
-is the point: `fb_xregion` and `funmap` consume 102 dense continuous
-annotations directly, while PolyFun's two-stage S-LDSC prior cannot — not for
-want of tuning, but because its per-SNP heritability is an unconstrained sum
-over however many categories a SNP occupies.
+Finite, well-conditioned, and plausible heritabilities for cholesterol. The
+cause was the *solver*: PolyFun's default non-negative fit is not NNLS but an
+approximation to it, `Lasso(alpha=1e-100, positive=True, precompute=xtx)` in
+`LstsqJackknifeSlow.__init__`. Stage 3 now passes `--nnls-exact`, which
+substitutes `scipy.optimize.nnls` in the delete-value loop as well as the
+full-sample estimate. (The Lasso path was never *proven* to be the source of
+the NaN — it could not be reproduced on sklearn 1.5.1, and this environment
+runs 1.9.1 — so the exact solver is used on its own merits: documented as
+more accurate, and demonstrably finite here.)
+
+So the methods do differ in what they ingest — `fb_xregion` and `funmap` take
+102 dense continuous annotations directly, while PolyFun needs them
+discretised into categories and yields a per-SNP heritability that is an
+unconstrained sum over however many a SNP occupies — but that is a difference
+in representation and interpretation, not a claim that PolyFun cannot be run
+on them.
 
 **This weakens the `polyfun_sniff` framing, and the weakening belongs in the
 paper.** `polyfun_sniff` no longer sees *exactly* what `fb_xregion` and
