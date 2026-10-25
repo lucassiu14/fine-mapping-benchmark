@@ -57,6 +57,21 @@ say "upstream comparators"
 [ -d "$APP_ROOT/polyfun" ] || git clone -q --depth 1 https://github.com/omerwe/polyfun.git "$APP_ROOT/polyfun"
 echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
+# Every pip call below runs with PYTHONPATH and PYTHONHOME CLEARED, and this
+# is the whole point rather than tidiness.
+#
+# EasyBuild's Python modules put their own site-packages on PYTHONPATH, and a
+# venv does NOT shadow PYTHONPATH. So with a module loaded, pip saw
+# `packaging` already present at
+#   /sw-eb/.../Python-bundle-PyPI/2023.10-GCCcore-13.2.0/.../packaging/
+# declared it satisfied, and installed nothing into appenv. pip check agreed,
+# and `import packaging` worked on the login node. The compute node loads only
+# APP_MODULES -- not the awscli bundle that path came from -- so the import
+# failed there, twice, after a queue wait each time. absl-py had the same
+# shape.
+#
+# Clearing PYTHONPATH makes pip see only the venv, so every listed package
+# genuinely lands in it and the venv behaves the same wherever it runs.
 mkenv () {  # name, then pip args
   local n="$1"; shift
   local py="$APP_ROOT/$n/bin/python" log="$APP_ROOT/logs/pip_$n.log"
@@ -70,7 +85,7 @@ mkenv () {  # name, then pip args
     # which, with -q hiding the output, let a broken reconcile pass as a
     # warning and setup continue. appenv then carried matplotlib without
     # `packaging`, and 03 died on the import an hour later.
-    if "$py" -m pip install -q "$@" >"$log" 2>&1; then
+    if env -u PYTHONPATH -u PYTHONHOME "$py" -m pip install -q "$@" >"$log" 2>&1; then
       echo "  $n already built (package list reconciled)"
     else
       sed 's/^/    /' "$log" >&2
@@ -78,8 +93,8 @@ mkenv () {  # name, then pip args
     fi
   else
     "$PY_BOOT" -m venv "$APP_ROOT/$n"
-    "$py" -m pip install -q --upgrade pip >"$log" 2>&1 || true
-    if ! "$py" -m pip install -q "$@" >>"$log" 2>&1; then
+    env -u PYTHONPATH -u PYTHONHOME "$py" -m pip install -q --upgrade pip >"$log" 2>&1 || true
+    if ! env -u PYTHONPATH -u PYTHONHOME "$py" -m pip install -q "$@" >>"$log" 2>&1; then
       sed 's/^/    /' "$log" >&2
       bail "$n: pip install failed - see $log"
     fi
@@ -91,7 +106,7 @@ mkenv () {  # name, then pip args
   # moment and failing it later. A package LIST is not a working environment,
   # and scanning an application's direct imports does not cover its
   # dependencies' dependencies.
-  "$py" -m pip check >"$log.check" 2>&1 || true
+  env -u PYTHONPATH -u PYTHONHOME "$py" -m pip check >"$log.check" 2>&1 || true
   # Two very different findings come out of pip check, and only one has ever
   # broken anything here:
   #   "X requires Y, which is not installed."   -> a MISSING package. This is
@@ -129,21 +144,38 @@ say "verifying appenv can import what fb_xregion needs"
 # package list. Two separate runs have died here: absl (not installed at all)
 # and packaging (a matplotlib dependency that went missing). Failing in setup
 # costs seconds; failing in 03 costs a queue wait.
-"$APP_ROOT/appenv/bin/python" - <<'PYCHK' || bail "appenv cannot import FB's dependencies"
-import importlib, sys
+# PYTHONPATH cleared so this tests what a COMPUTE NODE sees: only the venv.
+# Importing successfully is not enough -- each module must resolve INSIDE the
+# venv. `packaging` imported fine on the login node from a module's
+# site-packages and was absent in the job.
+env -u PYTHONPATH -u PYTHONHOME "$APP_ROOT/appenv/bin/python" - "$APP_ROOT/appenv" <<'PYCHK' \
+  || bail "appenv cannot import FB's dependencies from inside the venv"
+import importlib, sys, os
+venv = os.path.abspath(sys.argv[1])
 mods = ["absl.app", "absl.flags", "matplotlib", "matplotlib.pyplot",
         "tqdm.auto", "torch", "torch.nn", "torch.optim", "numpy", "pandas",
         "pyarrow.parquet", "scipy.sparse", "packaging.version"]
-bad = []
+failed, outside = [], []
 for m in mods:
     try:
-        importlib.import_module(m)
+        mod = importlib.import_module(m)
     except Exception as e:
-        bad.append(f"{m}: {type(e).__name__}: {e}")
-if bad:
-    print("  FAILED imports:"); [print("   ", b) for b in bad]; sys.exit(1)
+        failed.append(f"{m}: {type(e).__name__}: {e}")
+        continue
+    f = getattr(mod, "__file__", None)
+    if f and not os.path.abspath(f).startswith(venv):
+        outside.append(f"{m} -> {f}")
+if failed:
+    print("  FAILED to import:")
+    for b in failed: print("   ", b)
+if outside:
+    print("  resolved OUTSIDE the venv (will not exist on a compute node):")
+    for b in outside: print("   ", b)
+if failed or outside:
+    sys.exit(1)
 import torch, numpy
-print(f"  all {len(mods)} imports OK  (torch {torch.__version__}, numpy {numpy.__version__})")
+print(f"  all {len(mods)} imports OK and inside the venv"
+      f"  (torch {torch.__version__}, numpy {numpy.__version__})")
 PYCHK
 
 # Funmap pins these exactly; do not relax them.
