@@ -14,6 +14,7 @@ mkdir -p "$APP_ROOT"/{ld,annot,regions,polyfun_priors,logs,results}
 cd "$APP_ROOT"
 
 say() { printf '\n=== %s ===\n' "$1"; }
+bail() { printf '\nFATAL  %s\n' "$1" >&2; exit 1; }
 
 say "pipeline scripts"
 # lib.sh in particular: every stage does `source ./lib.sh` relative to
@@ -58,20 +59,43 @@ echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
 mkenv () {  # name, then pip args
   local n="$1"; shift
-  if [ -x "$APP_ROOT/$n/bin/python" ]; then
-    # Already built - but the package list may have GROWN since. Install into
-    # the existing venv rather than skipping, otherwise a new dependency never
-    # reaches a cluster that ran setup.sh before it was added. pip is a no-op
-    # for anything already satisfied.
-    "$APP_ROOT/$n/bin/python" -m pip install -q "$@" \
-      && echo "  $n already built (package list reconciled)" \
-      || echo "  $n already built (WARNING: could not reconcile packages)"
-    return
+  local py="$APP_ROOT/$n/bin/python" log="$APP_ROOT/logs/pip_$n.log"
+  if [ -x "$py" ]; then
+    # Already built - but the package list may have GROWN since, so install
+    # the current list rather than skipping, otherwise a dependency added here
+    # never reaches a cluster that ran setup.sh before it was added.
+    #
+    # The failure is NOT swallowed. This previously read
+    #   pip install -q "$@" && echo ok || echo "WARNING: could not reconcile"
+    # which, with -q hiding the output, let a broken reconcile pass as a
+    # warning and setup continue. appenv then carried matplotlib without
+    # `packaging`, and 03 died on the import an hour later.
+    if "$py" -m pip install -q "$@" >"$log" 2>&1; then
+      echo "  $n already built (package list reconciled)"
+    else
+      sed 's/^/    /' "$log" >&2
+      bail "$n: could not reconcile packages - see $log"
+    fi
+  else
+    "$PY_BOOT" -m venv "$APP_ROOT/$n"
+    "$py" -m pip install -q --upgrade pip >"$log" 2>&1 || true
+    if ! "$py" -m pip install -q "$@" >>"$log" 2>&1; then
+      sed 's/^/    /' "$log" >&2
+      bail "$n: pip install failed - see $log"
+    fi
+    echo "  $n built"
   fi
-  "$PY_BOOT" -m venv "$APP_ROOT/$n"
-  "$APP_ROOT/$n/bin/python" -m pip install -q --upgrade pip
-  "$APP_ROOT/$n/bin/python" -m pip install -q "$@"
-  echo "  $n built"
+  # VERIFY, do not assume. `pip check` reports any installed package whose own
+  # declared dependencies are missing - exactly how appenv ended up holding
+  # matplotlib but not `packaging`, passing an `import matplotlib` test at one
+  # moment and failing it later. A package LIST is not a working environment,
+  # and scanning an application's direct imports does not cover its
+  # dependencies' dependencies.
+  if ! "$py" -m pip check >"$log.check" 2>&1; then
+    sed 's/^/    /' "$log.check" >&2
+    bail "$n: pip check reports unsatisfied dependencies - see $log.check"
+  fi
+  echo "    pip check: dependencies satisfied"
 }
 
 say "python environments"
@@ -81,7 +105,7 @@ say "python environments"
 # ModuleNotFoundError before any work starts. Found by scanning every import
 # in the FB tree rather than one error at a time. LassoNet needs no package --
 # LassoNetPrior is FB's own class.
-mkenv appenv    numpy pandas pyarrow scipy torch absl-py tqdm matplotlib
+mkenv appenv    numpy pandas pyarrow scipy torch absl-py tqdm matplotlib packaging
 # Funmap pins these exactly; do not relax them.
 mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8.2"
 # PolyFun pins, each found the hard way:
@@ -93,6 +117,28 @@ mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8
 #                 and dies with "float() argument must be ... not decodeiterator"
 mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-plink \
                  "bitarray==2.9.2" networkx packaging tqdm "rpy2==3.5.17"
+
+say "verifying appenv can import what fb_xregion needs"
+# beatrice_joint.py and its imports, checked as a real import rather than as a
+# package list. Two separate runs have died here: absl (not installed at all)
+# and packaging (a matplotlib dependency that went missing). Failing in setup
+# costs seconds; failing in 03 costs a queue wait.
+"$APP_ROOT/appenv/bin/python" - <<'PYCHK' || bail "appenv cannot import FB's dependencies"
+import importlib, sys
+mods = ["absl.app", "absl.flags", "matplotlib", "matplotlib.pyplot",
+        "tqdm.auto", "torch", "torch.nn", "torch.optim", "numpy", "pandas",
+        "pyarrow.parquet", "scipy.sparse", "packaging.version"]
+bad = []
+for m in mods:
+    try:
+        importlib.import_module(m)
+    except Exception as e:
+        bad.append(f"{m}: {type(e).__name__}: {e}")
+if bad:
+    print("  FAILED imports:"); [print("   ", b) for b in bad]; sys.exit(1)
+import torch, numpy
+print(f"  all {len(mods)} imports OK  (torch {torch.__version__}, numpy {numpy.__version__})")
+PYCHK
 
 say "susieR 0.11.92 for PolyFun"
 RLIB="$APP_ROOT/Rlib_polyfun"; mkdir -p "$RLIB"
