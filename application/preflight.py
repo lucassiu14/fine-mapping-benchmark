@@ -158,7 +158,14 @@ def check_prep():
 
 def check_methods():
     print("method outputs (inputs for 06_collect):")
-    rows = blocks()
+    # Only the ANALYSED blocks are expected. The 11 excluded by the
+    # unannotated-gap rule carry an EXCLUDED marker, are absent from every
+    # manifest by construction, and 04/05 exit 0 on them without writing -- so
+    # counting them as missing reports a complete run as a failure. check_prep
+    # already knew this; this function did not.
+    rows = [r for r in blocks()
+            if not os.path.exists(os.path.join(ROOT, "regions", r["region_id"], "EXCLUDED"))]
+    n_excl = len(blocks()) - len(rows)
     for name, path, label in [
         ("fb_xregion", lambda r: os.path.join(ROOT, "joint_out", r["region_id"], "pip.csv"), "03"),
         ("funmap", lambda r: os.path.join(ROOT, "funmap_out", r["region_id"], "pip.csv"), "04"),
@@ -170,10 +177,12 @@ def check_methods():
             # this stage gates 06_collect, so an incomplete method is a
             # failure, not just a progress note - collecting now would
             # silently produce a table missing a third of its rows
-            fail(f"{name}: {len(miss)} of {len(rows)} blocks missing from "
-                 f"stage {label}, e.g. {miss[:2]}")
+            fail(f"{name}: {len(miss)} of {len(rows)} analysed blocks missing "
+                 f"from stage {label}, e.g. {miss[:2]}")
         else:
             print(f"  {name:14s} {len(rows):4d}/{len(rows)} done")
+    if n_excl:
+        print(f"  --  {n_excl} blocks excluded by the unannotated-gap rule, not expected")
 
 
 def check_collect():
