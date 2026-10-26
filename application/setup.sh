@@ -53,8 +53,53 @@ if [ -s chol_sumstats.parquet ]; then echo "  already present"; else
 fi
 
 say "upstream comparators"
-[ -d "$APP_ROOT/Funmap"  ] || git clone -q --depth 1 https://github.com/LeeHITsz/Funmap.git  "$APP_ROOT/Funmap"
-[ -d "$APP_ROOT/polyfun" ] || git clone -q --depth 1 https://github.com/omerwe/polyfun.git "$APP_ROOT/polyfun"
+# Upstream comparator commits. `git clone --depth 1` of a default branch gives
+# whatever that branch is on the day, which is not reproducible -- and
+# PolyFun's behaviour demonstrably depends on its exact code: its default
+# non-negative fit is a Lasso(alpha=1e-100) stand-in for NNLS, which returned
+# NaN here and forced --nnls-exact.
+#
+# Empty means UNPINNED: setup.sh then clones the default branch, records what
+# it got in $APP_ROOT/pins/upstream.txt, and says so loudly. Fill these in
+# from that file to pin.
+FUNMAP_COMMIT="${FUNMAP_COMMIT:-}"
+POLYFUN_COMMIT="${POLYFUN_COMMIT:-}"
+
+mkdir -p "$APP_ROOT/pins"
+: > "$APP_ROOT/pins/upstream.txt"
+
+pin_repo () {   # dir, url, wanted-commit ("" = unpinned)
+  local d="$1" url="$2" want="$3" name have
+  name=$(basename "$d")
+  if [ ! -d "$d" ]; then
+    if [ -n "$want" ]; then
+      git clone -q "$url" "$d" || bail "$name: clone failed"
+      git -C "$d" checkout -q "$want" || bail "$name: commit $want not found"
+    else
+      git clone -q --depth 1 "$url" "$d" || bail "$name: clone failed"
+    fi
+  fi
+  have=$(git -C "$d" rev-parse HEAD 2>/dev/null) || bail "$name at $d is not a git checkout"
+  printf '%-10s %s\n' "$name" "$have" >> "$APP_ROOT/pins/upstream.txt"
+  if [ -n "$want" ]; then
+    case "$have" in
+      "$want"*) echo "  $name pinned at ${have:0:12}" ;;
+      *) bail "$name is at ${have:0:12} but the pin is ${want:0:12}. To move it:
+       git -C $d fetch --unshallow 2>/dev/null; git -C $d fetch; git -C $d checkout $want" ;;
+    esac
+  else
+    echo "  $name at ${have:0:12}  (UNPINNED - copy into setup.sh to pin)"
+  fi
+}
+
+pin_repo "$APP_ROOT/Funmap"  https://github.com/LeeHITsz/Funmap.git  "$FUNMAP_COMMIT"
+pin_repo "$APP_ROOT/polyfun" https://github.com/omerwe/polyfun.git  "$POLYFUN_COMMIT"
+# functional-beatrice is cloned by the user (see the "next" note); record it
+# here too if present, so one file holds every upstream revision.
+if [ -d "${FB_DIR:-$APP_ROOT/functional-beatrice}" ]; then
+  pin_repo "${FB_DIR:-$APP_ROOT/functional-beatrice}" \
+           https://github.com/lucassiu14/functional-beatrice.git "${FB_COMMIT:-}"
+fi
 echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
 # Every pip call below runs with PYTHONPATH and PYTHONHOME CLEARED, and this
@@ -75,6 +120,16 @@ echo "  Funmap and polyfun checked out (upstream, unmodified)"
 mkenv () {  # name, then pip args
   local n="$1"; shift
   local py="$APP_ROOT/$n/bin/python" log="$APP_ROOT/logs/pip_$n.log"
+  # A committed requirements file pins the environment exactly and takes
+  # precedence over the loose list below. Without one, pip resolves to
+  # whatever is current -- this run got numpy 2.4.6, pandas 3.0.6,
+  # torch 2.14.1+cu130, none of which a later install would reproduce.
+  # Generate one from $APP_ROOT/pins/<env>.txt, written on every run.
+  local req="$HERE/requirements/$n.txt"
+  if [ -f "$req" ]; then
+    set -- -r "$req"
+    echo "  $n: using the pinned $req"
+  fi
   if [ -x "$py" ]; then
     # Already built - but the package list may have GROWN since, so install
     # the current list rather than skipping, otherwise a dependency added here
@@ -128,6 +183,9 @@ mkenv () {  # name, then pip args
   else
     echo "    pip check: dependencies satisfied"
   fi
+  # Record exactly what this environment ended up as, so it can be pinned.
+  env -u PYTHONPATH -u PYTHONHOME "$py" -m pip freeze > "$APP_ROOT/pins/$n.txt" 2>/dev/null \
+    && echo "    froze $(wc -l < "$APP_ROOT/pins/$n.txt") packages -> pins/$n.txt"
 }
 
 say "python environments"
