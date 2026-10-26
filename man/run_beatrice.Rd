@@ -12,10 +12,10 @@ run_beatrice(
   beatrice_dir,
   python = "python",
   max_iter = 2000,
-  n_caus = 5,
-  sigma_sq = 0.05,
+  n_caus = 10,
+  sigma_sq = 0.0899,
   gamma_coverage = 0.95,
-  sparse_concrete = 50
+  sparse_concrete = 51
 )
 }
 \arguments{
@@ -37,15 +37,15 @@ repository root.}
 \item{max_iter}{Integer. Training iterations. Default: 2000. Minimum: 500.
 Reduce for faster (but noisier) results.}
 
-\item{n_caus}{Integer. Expected number of causal variants. Default: 5.}
+\item{n_caus}{Integer. Expected number of causal variants. Default: 10.}
 
-\item{sigma_sq}{Numeric. Prior variance on effect sizes. Default: 0.05.}
+\item{sigma_sq}{Numeric. Prior variance on effect sizes. Default: 0.0899.}
 
 \item{gamma_coverage}{Numeric. Coverage threshold for credible sets.
 Default: 0.95.}
 
 \item{sparse_concrete}{Integer. Number of non-zero locations sampled per
-iteration (sparsity). Default: 50.}
+iteration (sparsity). Default: 51.}
 }
 \value{
 A list with the standardised fine-mapping output:
@@ -79,3 +79,23 @@ BEATRICE trains a neural network for each region; runtime scales with
 \code{max_iter}. For large-scale benchmarking, reduce \code{max_iter}
 (minimum 500) or run on a machine with GPU support.
 }
+\section{Why these defaults match Functional BEATRICE's}{
+
+\code{max_iter}, \code{n_caus}, \code{sigma_sq} and
+\code{sparse_concrete} are deliberately the same as
+\code{\link{run_functional_beatrice}}'s, which took them from an Optuna
+study on this benchmark's simulated data. The two methods share a
+likelihood, a variational family and the meaning of these parameters, and
+differ only in the prior - this one fixes p0 = 1/p uniform, Functional
+BEATRICE learns p0 = G(v; psi) from annotations. Holding everything else
+equal is what makes a gap between them attributable to the annotation prior
+rather than to one arm being tuned and the other not.
+
+The honest caveat: the values were selected against Functional BEATRICE's
+objective, so they may be suboptimal here and could understate this method.
+The alternative - BEATRICE at its published defaults - confounds the prior
+with the tuning, which is the worse problem for an ablation. If you are
+using BEATRICE on its own rather than as a comparison arm, tune it for your
+data.
+}
+

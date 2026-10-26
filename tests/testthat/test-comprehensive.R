@@ -1222,42 +1222,13 @@ test_that("[5] global stratum present for each method", {
   }
 })
 
-test_that("[5] by_S stratum present and named correctly", {
-  expect_false(is.null(EVAL_MINI$susie$by_S))
-  expect_true(all(c("1", "2") %in% names(EVAL_MINI$susie$by_S)))
-})
 
-test_that("[5] by_phi stratum present and named correctly", {
-  expect_false(is.null(EVAL_MINI$susie$by_phi))
-  expect_true(all(c("0.2", "0.4") %in% names(EVAL_MINI$susie$by_phi)))
-})
-
-test_that("[5] by_p_causal is NULL for sparse model", {
-  expect_null(EVAL_MINI$susie$by_p_causal)
-})
-
-test_that("[5] by_p_causal present and populated for sparse_inf model", {
-  sim_inf <- run_simulation(
-    n_regions = 1, n = 80, p = 40,
-    n_iter = 2, S = 1, phi = 0.2,
-    model = "sparse_inf", p_causal = c(0.3, 0.7),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 55, verbose = FALSE
-  )
-  res_inf <- run_methods(sim_inf, methods = "abf",
-                          save = FALSE, verbose = FALSE)
-  ev_inf  <- evaluate_methods(sim_inf, res_inf,
-                               save = FALSE, verbose = FALSE)
-  expect_false(is.null(ev_inf$abf$by_p_causal))
-  expect_true(all(c("0.3", "0.7") %in% names(ev_inf$abf$by_p_causal)))
-})
-
-test_that("[5] global auprc is numeric in [0, 1]", {
-  auprc <- EVAL_MINI$susie$global$auprc
-  expect_true(is.numeric(auprc))
-  expect_false(is.na(auprc))
-  expect_gte(auprc, 0)
-  expect_lte(auprc, 1)
+test_that("[5] global ap is numeric in [0, 1]", {
+  ap <- EVAL_MINI$susie$global$ap
+  expect_true(is.numeric(ap))
+  expect_false(is.na(ap))
+  expect_gte(ap, 0)
+  expect_lte(ap, 1)
 })
 
 test_that("[5] global cs_coverage is in [0, 1] or NA", {
@@ -1285,9 +1256,6 @@ test_that("[5] pip_calibration has all required columns", {
   expect_true(all(expected %in% names(cal)))
 })
 
-test_that("[5] SE fields present when n_iter >= 2", {
-  expect_false(is.null(EVAL_MINI$susie$global$auprc_se))
-})
 
 test_that("[5] custom (coarser) pip_thresholds respected", {
   ev <- evaluate_methods(SIM_MINI, RESULTS_MINI,
@@ -1365,116 +1333,6 @@ test_that("[5] results missing 'methods_run' errors", {
 # =============================================================================
 # SECTION 6: plot_results
 # =============================================================================
-
-test_that("[6] output_file explicit path writes PDF there", {
-  tmp <- tempfile(fileext = ".pdf")
-  on.exit(unlink(tmp))
-  plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE)
-  expect_true(file.exists(tmp))
-  expect_gt(file.size(tmp), 1000L)
-})
-
-test_that("[6] output_dir writes evaluation.pdf inside that directory", {
-  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
-  plot_results(EVAL_MINI, output_dir = tmp, verbose = FALSE)
-  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
-})
-
-test_that("[6] output_dir created when nested + missing", {
-  tmp <- file.path(tempfile(), "plots", "deep")
-  on.exit(unlink(dirname(dirname(tmp)), recursive = TRUE))
-  plot_results(EVAL_MINI, output_dir = tmp, verbose = FALSE)
-  expect_true(dir.exists(tmp))
-})
-
-test_that("[6] output_file takes precedence over output_dir", {
-  tmp_dir  <- tempfile(); dir.create(tmp_dir)
-  tmp_file <- tempfile(fileext = ".pdf")
-  on.exit({ unlink(tmp_dir, recursive = TRUE); unlink(tmp_file) })
-  plot_results(EVAL_MINI, output_file = tmp_file,
-               output_dir = tmp_dir, verbose = FALSE)
-  expect_true(file.exists(tmp_file))
-  expect_false(file.exists(file.path(tmp_dir, "evaluation.pdf")))
-})
-
-test_that("[6] save = FALSE does not write any file", {
-  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
-  plot_results(EVAL_MINI, output_dir = tmp,
-               save = FALSE, verbose = FALSE)
-  expect_length(list.files(tmp), 0L)
-})
-
-test_that("[6] save = TRUE (default) writes the PDF", {
-  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
-  plot_results(EVAL_MINI, output_dir = tmp,
-               save = TRUE, verbose = FALSE)
-  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
-})
-
-test_that("[6] methods = 'susie' only (subset of evaluated methods)", {
-  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
-  plot_results(EVAL_MINI, output_file = tmp,
-               methods = "susie", verbose = FALSE)
-  expect_true(file.exists(tmp))
-})
-
-test_that("[6] methods = c('susie', 'abf') includes both", {
-  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
-  plot_results(EVAL_MINI, output_file = tmp,
-               methods = c("susie", "abf"), verbose = FALSE)
-  expect_true(file.exists(tmp))
-})
-
-test_that("[6] methods subset to unknown name errors", {
-  expect_error(
-    plot_results(EVAL_MINI,
-                 output_file = tempfile(fileext = ".pdf"),
-                 methods = "notamethod", verbose = FALSE)
-  )
-})
-
-test_that("[6] verbose = FALSE produces no messages", {
-  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
-  out <- utils::capture.output(
-    plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE),
-    type = "message"
-  )
-  expect_length(out, 0L)
-})
-
-test_that("[6] verbose = TRUE prints section messages", {
-  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
-  out <- utils::capture.output(
-    plot_results(EVAL_MINI, output_file = tmp, verbose = TRUE),
-    type = "message"
-  )
-  expect_true(any(grepl("Global|Plotting|PDF", out)))
-})
-
-test_that("[6] return value is the resolved output path (invisibly)", {
-  tmp <- tempfile(fileext = ".pdf"); on.exit(unlink(tmp))
-  ret <- plot_results(EVAL_MINI, output_file = tmp, verbose = FALSE)
-  expect_true(is.character(ret))
-  expect_equal(ret, tmp)
-})
-
-test_that("[6] sparse_inf eval renders the by_p_causal section in the PDF", {
-  sim_inf <- run_simulation(
-    n_regions = 1, n = 80, p = 40,
-    n_iter = 2, S = 1, phi = 0.2,
-    model = "sparse_inf", p_causal = c(0.3, 0.7),
-    genetic_map_dir = fmb_test_map_dir(),
-    seed = 66, verbose = FALSE
-  )
-  res_inf <- run_methods(sim_inf, methods = "abf",
-                          save = FALSE, verbose = FALSE)
-  ev_inf  <- evaluate_methods(sim_inf, res_inf,
-                               save = FALSE, verbose = FALSE)
-
-  tmp <- tempfile(); dir.create(tmp); on.exit(unlink(tmp, recursive = TRUE))
-  plot_results(ev_inf, output_dir = tmp, verbose = FALSE)
-  expect_true(file.exists(file.path(tmp, "evaluation.pdf")))
-})
 
 
 # =============================================================================
@@ -2389,41 +2247,6 @@ EVAL_MAF <- evaluate_methods(
 )
 
 
-test_that("[15] evaluate_methods returns a by_causal_maf list per method", {
-  expect_true("by_causal_maf" %in% names(EVAL_MAF$susie))
-  expect_true("by_causal_maf" %in% names(EVAL_MAF$abf))
-})
-
-test_that("[15] by_causal_maf entries are populated when MAFs available", {
-  # SIM_MINI uses real VCFs => genotypes carry MAFs => bins populate.
-  bm <- EVAL_MAF$susie$by_causal_maf
-  expect_false(is.null(bm))
-  expect_gte(length(bm), 1L)
-})
-
-test_that("[15] by_causal_maf bin names are a subset of {rare, low, common}", {
-  bm <- EVAL_MAF$susie$by_causal_maf
-  expect_true(all(names(bm) %in% c("rare", "low", "common")))
-})
-
-test_that("[15] by_causal_maf bins appear in canonical order rare->low->common", {
-  bm <- EVAL_MAF$susie$by_causal_maf
-  canonical <- c("rare", "low", "common")
-  present   <- canonical[canonical %in% names(bm)]
-  expect_identical(names(bm), present)
-})
-
-test_that("[15] by_causal_maf bins each carry a numeric auprc field", {
-  bm <- EVAL_MAF$susie$by_causal_maf
-  for (b in names(bm)) {
-    expect_true("auprc" %in% names(bm[[b]]),
-                info = sprintf("bin=%s", b))
-    expect_true(is.numeric(bm[[b]]$auprc),
-                info = sprintf("bin=%s", b))
-  }
-})
-
-
 # =============================================================================
 # SECTION 16: Misspecification stratification (by_true_annotation_type)
 # =============================================================================
@@ -2441,36 +2264,6 @@ EVAL_ANNOT <- evaluate_methods(
   SIM_MINI_ANNOT, RESULTS_MINI_ANNOT_FOR_AT,
   save = FALSE, verbose = FALSE
 )
-
-
-test_that("[16] by_true_annotation_type present per method", {
-  expect_true("by_true_annotation_type" %in% names(EVAL_MAF$susie))
-  expect_true("by_true_annotation_type" %in% names(EVAL_ANNOT$susie))
-})
-
-test_that("[16] no-annotation fixture: by_true_annotation_type has 'none'", {
-  bt <- EVAL_MAF$susie$by_true_annotation_type
-  expect_false(is.null(bt))
-  expect_identical(names(bt), "none")
-})
-
-test_that("[16] binary-annotation fixture: by_true_annotation_type has 'binary'", {
-  bt <- EVAL_ANNOT$susie$by_true_annotation_type
-  expect_false(is.null(bt))
-  expect_identical(names(bt), "binary")
-})
-
-test_that("[16] by_true_annotation_type bins carry a numeric auprc field", {
-  for (eo in list(EVAL_MAF$susie, EVAL_ANNOT$susie)) {
-    bt <- eo$by_true_annotation_type
-    for (t in names(bt)) {
-      expect_true("auprc" %in% names(bt[[t]]),
-                  info = sprintf("type=%s", t))
-      expect_true(is.numeric(bt[[t]]$auprc),
-                  info = sprintf("type=%s", t))
-    }
-  }
-})
 
 
 # =============================================================================

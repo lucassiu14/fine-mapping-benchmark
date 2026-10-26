@@ -32,14 +32,28 @@
 #                                       are merged)
 #
 # Each stratum contains:
-#   fdr_power_curve  — data.frame: threshold, tp, fp, fn, fdr, power, precision, recall
-#   auprc            — scalar (area under precision-recall curve)
-#   pip_calibration  — data.frame: bin, bin_lower, bin_upper, bin_mid, n, n_causal,
-#                                  mean_pip, frac_causal
-#   cs_coverage      — proportion of reported CSs containing ≥1 true causal variant
-#   cs_power         — proportion of true causal variants captured by any CS
-#   cs_size_median   — median variants per CS
-#   cs_size_mean     — mean variants per CS
+# EVERY RATE IS REGION-WEIGHTED: computed within each region, then averaged
+# over regions. Fine-mapping is applied to a region, so the question is "how
+# trustworthy are the calls in a locus", not "what fraction of all calls made
+# anywhere were wrong". Each averaged rate ships with the count of regions it
+# rests on, and the call-weighted value under a _pooled suffix.
+#
+#   ap               — mean of the per-region average precisions
+#   ap_n_fits        — regions contributing to it
+#   fdr_power_curve  — data.frame: threshold, fdr, power, precision, recall
+#                                  (region means), n_regions, the _pooled
+#                                  variants, and the tp/fp/fn totals
+#   pip_calibration  — data.frame: bin, bin_lower, bin_upper, bin_mid,
+#                                  mean_pip, frac_causal (region means),
+#                                  n_regions, the _pooled variants, n, n_causal
+#   cs_coverage      — mean over regions of the share of that region's CSs
+#                      holding ≥1 true causal variant
+#   cs_power         — mean over regions of the share of that region's causal
+#                      variants captured by any CS
+#   cs_size_median   — mean over regions of the region's median CS size
+#   cs_size_mean     — mean over regions of the region's mean CS size
+#   cs_coverage_n    — regions reporting ≥1 CS (coverage and the sizes rest on
+#   cs_power_n         these; power rests on regions with ≥1 causal variant)
 #   n_cs_reported    — total CSs reported
 #   runtime_mean     — mean runtime in seconds (successful fits only)
 #   runtime_sd       — SD of runtime
@@ -56,6 +70,10 @@
 #'   curve. Default: seq(0, 1, by = 0.005).
 #' @param n_pip_cal_bins Integer. Number of equal-width bins for PIP
 #'   calibration. Default: 10.
+#' @param per_region Logical. Also attach the per-region table from
+#'   \code{\link{per_region_metrics}} as \code{$per_region}: one row per
+#'   (method, scenario, region), nothing pooled, so it can be aggregated along
+#'   axes this function does not offer. Default: TRUE.
 #' @param save Logical. If TRUE, save the full evaluation object as
 #'   \code{evaluation.rds} inside \code{output_dir}, and write a flat
 #'   per-method summary table as \code{evaluation_summary.csv}.
@@ -65,15 +83,33 @@
 #'   Default: \code{"results"}.
 #' @param verbose Logical. Print progress. Default: TRUE.
 #'
-#' @return A named list, one element per method, each containing
-#'   \code{global}, \code{by_S}, \code{by_phi}, and \code{by_p_causal}
-#'   sub-lists.  See file header for the fields in each stratum.
+#' @return A named list with one element per method, each containing
+#'   \code{global} and the \code{by_*} strata (see the file header for the
+#'   fields in each), plus \code{$per_region}: a single data frame covering
+#'   every method, one row per region-fit.
 #'
+#'   \strong{Every rate is region-weighted}: computed within each region, then
+#'   averaged over regions, because fine-mapping is applied to a region. Each
+#'   comes with the number of regions it rests on - \code{ap_n_fits},
+#'   \code{cs_coverage_n}, \code{cs_power_n}, and \code{n_regions} on the
+#'   curve and calibration tables - which must be read alongside it: at a high
+#'   PIP threshold most regions select nothing. The call-weighted value, in
+#'   which a region making many calls dominates, sits beside each under a
+#'   \code{_pooled} suffix.
+#'
+#'   To summarise on your own axes, group \code{$per_region} by whichever of
+#'   its factor columns you want. Sum the count columns and average the rate
+#'   and scalar columns - see \code{\link{per_region_metrics}} for which is
+#'   which, and why a standard error has to be taken across iterations rather
+#'   than across regions.
+#'
+#' @seealso \code{\link{per_region_metrics}}
 #' @export
 evaluate_methods <- function(simulation,
                              results,
                              pip_thresholds = seq(0, 1, by = 0.005),
                              n_pip_cal_bins = 10L,
+                             per_region     = TRUE,
                              save           = FALSE,
                              output_dir     = "results",
                              verbose        = TRUE) {
@@ -96,16 +132,21 @@ evaluate_methods <- function(simulation,
     fits_raw <- results[[method]]$results
     fits     <- .annotate_fits_with_truth(fits_raw, simulation)
 
+    # `global` is the metrics over every one of this method's fits. Any other
+    # grouping - by S, by phi, by region size, by causal MAF, by annotation
+    # type, or any combination - comes from $per_region, which carries those
+    # factors as columns. A fixed set of strata computed here would only be one
+    # analysis's choice of axes baked into the package.
     output[[method]] <- list(
-      global      = .metrics_with_se(fits, pip_thresholds, n_pip_cal_bins),
-      by_S                    = .stratify_metrics(fits, "S",           pip_thresholds, n_pip_cal_bins),
-      by_phi                  = .stratify_metrics(fits, "phi",         pip_thresholds, n_pip_cal_bins),
-      by_p_causal             = .stratify_metrics(fits, "p_causal",    pip_thresholds, n_pip_cal_bins),
-      by_region_size          = .stratify_metrics(fits, "region_size", pip_thresholds, n_pip_cal_bins),
-      by_causal_maf           = .stratify_metrics_by_maf(fits, pip_thresholds, n_pip_cal_bins),
-      by_true_annotation_type = .stratify_metrics_by_annotation_type(fits, pip_thresholds, n_pip_cal_bins)
+      global = .metrics_for_fits(fits, pip_thresholds, n_pip_cal_bins)
     )
   }
+
+  # The per-region table: one row per (method, scenario, region), nothing pooled
+  # across regions, so a caller can aggregate along axes this function does not
+  # offer. See per_region_metrics() for the aggregation rule.
+  output$per_region <- if (isTRUE(per_region))
+    per_region_metrics(simulation, results, verbose = FALSE) else NULL
 
   output$methods_evaluated   <- methods
   output$simulation_params   <- simulation$params
@@ -132,19 +173,16 @@ evaluate_methods <- function(simulation,
       g <- output[[m]]$global
       data.frame(
         method              = m,
-        auprc               = g$auprc,
-        auprc_se            = g$auprc_se,
+        ap                  = g$ap,
+        ap_n_fits           = g$ap_n_fits,
         cs_coverage         = g$cs_coverage,
-        cs_coverage_se      = g$cs_coverage_se,
+        cs_coverage_n       = g$cs_coverage_n,
         cs_power            = g$cs_power,
-        cs_power_se         = g$cs_power_se,
+        cs_power_n          = g$cs_power_n,
         cs_size_median      = g$cs_size_median,
-        cs_size_median_se   = g$cs_size_median_se,
         cs_size_mean        = g$cs_size_mean,
-        cs_size_mean_se     = g$cs_size_mean_se,
         n_cs_reported       = g$n_cs_reported,
         runtime_mean        = g$runtime_mean,
-        runtime_mean_se     = g$runtime_mean_se,
         runtime_sd          = g$runtime_sd,
         n_fits              = g$n_fits,
         n_failed            = g$n_failed,
@@ -234,110 +272,6 @@ evaluate_methods <- function(simulation,
 
 
 # =============================================================================
-# Internal: stratify fits by a scenario-level variable and compute metrics
-# =============================================================================
-
-.stratify_metrics <- function(fits, by_var, pip_thresholds, n_pip_cal_bins) {
-  values <- sort(unique(sapply(fits, function(f) {
-    v <- f[[by_var]]
-    if (is.null(v)) NA_real_ else v
-  })))
-  values <- values[!is.na(values)]
-
-  if (length(values) == 0) return(NULL)
-
-  result <- lapply(values, function(v) {
-    subset <- Filter(function(f) {
-      fv <- f[[by_var]]
-      !is.null(fv) && !is.na(fv) && fv == v
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- as.character(values)
-  result
-}
-
-
-# =============================================================================
-# Internal: stratify fits by causal-variant MAF bin
-#
-# Groups fits by `causal_maf_bin` (attached in .annotate_fits_with_truth) and
-# computes metrics per bin. Bins are kept in the canonical order
-# "rare" -> "low" -> "common" rather than alphabetical, so downstream plots
-# read left-to-right by increasing MAF.
-#
-# Returns NULL when no fit has a valid bin assignment (e.g. simulation with
-# no causal variants assigned to any region, or genotypes without an attached
-# `maf` field).
-# =============================================================================
-
-.stratify_metrics_by_maf <- function(fits, pip_thresholds, n_pip_cal_bins) {
-  bin_order <- c("rare", "low", "common")
-
-  present <- unique(vapply(fits, function(f) {
-    b <- f$causal_maf_bin
-    if (is.null(b) || length(b) == 0L) NA_character_ else as.character(b[[1L]])
-  }, character(1L)))
-  present <- present[!is.na(present)]
-  present <- bin_order[bin_order %in% present]
-
-  if (length(present) == 0L) return(NULL)
-
-  result <- lapply(present, function(b) {
-    subset <- Filter(function(f) {
-      bv <- f$causal_maf_bin
-      !is.null(bv) && !is.na(bv) && bv == b
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- present
-  result
-}
-
-
-# =============================================================================
-# Internal: stratify fits by the true annotation type used in simulation
-#
-# Groups fits by `true_annotation_type` (attached in
-# .annotate_fits_with_truth from simulation$params$annotation_type) and
-# computes metrics per type. Kept in canonical order
-# "none" -> "binary" -> "continuous" -> "user_supplied" so plots read from
-# the misspecified annotation-null case through to richer annotation
-# regimes.
-#
-# Within a single evaluate_methods() call this typically produces a
-# single bin, because annotation_type is scenario-level. The axis
-# becomes meaningful when evaluation objects from differently-annotated
-# simulations are merged.
-# =============================================================================
-
-.stratify_metrics_by_annotation_type <- function(fits, pip_thresholds,
-                                                  n_pip_cal_bins) {
-  type_order <- c("none", "binary", "continuous", "user_supplied")
-
-  present <- unique(vapply(fits, function(f) {
-    v <- f$true_annotation_type
-    if (is.null(v) || length(v) == 0L) NA_character_ else as.character(v[[1L]])
-  }, character(1L)))
-  present <- present[!is.na(present)]
-  present <- c(type_order[type_order %in% present],
-               setdiff(present, type_order))  # tolerate unknown labels
-
-  if (length(present) == 0L) return(NULL)
-
-  result <- lapply(present, function(t) {
-    subset <- Filter(function(f) {
-      tv <- f$true_annotation_type
-      !is.null(tv) && !is.na(tv) && tv == t
-    }, fits)
-    .metrics_with_se(subset, pip_thresholds, n_pip_cal_bins)
-  })
-  names(result) <- present
-  result
-}
-
-
-# =============================================================================
 # Internal: compute all metrics for a collection of annotated fits
 # =============================================================================
 
@@ -350,13 +284,19 @@ evaluate_methods <- function(simulation,
   if (length(valid) == 0) {
     return(list(
       fdr_power_curve = NULL,
-      auprc           = NA_real_,
       ap              = NA_real_,
+      ap_n_fits       = 0L,
       pip_calibration = NULL,
       cs_coverage     = NA_real_,
       cs_power        = NA_real_,
       cs_size_median  = NA_real_,
       cs_size_mean    = NA_real_,
+      cs_coverage_n   = 0L,
+      cs_power_n      = 0L,
+      cs_coverage_pooled    = NA_real_,
+      cs_power_pooled       = NA_real_,
+      cs_size_median_pooled = NA_real_,
+      cs_size_mean_pooled   = NA_real_,
       n_cs_reported   = NA_integer_,
       runtime_mean    = NA_real_,
       runtime_sd      = NA_real_,
@@ -373,15 +313,71 @@ evaluate_methods <- function(simulation,
     v
   }))
 
-  # Power / FDR curve
-  fdr_power <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
+  # Power / FDR curve, REGION-WEIGHTED: one curve per region, averaged
+  # pointwise. The practitioner's question is about the region in front of
+  # them, so the quantity to report is the FDR of a typical region, not the
+  # fraction of all calls made anywhere that were wrong. The two differ
+  # whenever regions make unequal numbers of calls, which they always do.
+  #
+  # `n_regions` travels with it: regions selecting nothing at a threshold are
+  # excluded from the mean rather than scored FDR 0, because averaging that
+  # convention would reward abstention.
+  fdr_power <- .fdr_power_curve_per_region(valid, pip_thresholds)
 
-  # AUPRC (trapezoid, legacy) + AP (correct estimator)
-  auprc <- .compute_auprc(fdr_power$precision, fdr_power$recall)
-  ap    <- .compute_ap(fdr_power$precision, fdr_power$recall)
+  # The call-weighted curve, kept because it is what most of the literature
+  # reports, and because its tp/fp/fn totals are counts a reader can
+  # re-aggregate.
+  fdr_power_pooled <- .fdr_power_curve(pip_vals, is_causal, pip_thresholds)
+  if (!is.null(fdr_power)) {
+    # tp/fp/fn are TOTALS over the stratum's regions, so they are counts and
+    # belong with the pooled columns - they are what the pooled rates are
+    # formed from, and are kept because a count is the one thing a reader can
+    # re-aggregate any way they like.
+    fdr_power$tp <- fdr_power_pooled$tp
+    fdr_power$fp <- fdr_power_pooled$fp
+    fdr_power$fn <- fdr_power_pooled$fn
+    fdr_power$fdr_pooled       <- fdr_power_pooled$fdr
+    fdr_power$precision_pooled <- fdr_power_pooled$precision
+    fdr_power$power_pooled     <- fdr_power_pooled$power
+    fdr_power$recall_pooled    <- fdr_power_pooled$recall
+  } else {
+    fdr_power <- fdr_power_pooled
+  }
 
-  # PIP calibration
-  pip_cal <- .pip_calibration(pip_vals, is_causal, n_pip_cal_bins)
+  # AP is a PER-REGION quantity and is averaged over regions, never read off
+  # the pooled curve. The AP of several regions' merged ranked list is not the
+  # mean of their APs: merging lets one region's false positives outrank
+  # another region's true positive, which describes an analysis nobody
+  # performs. Computing it on the pooled curve also reads it off the threshold
+  # grid, which biases AP downward by more at low heritability than at high -
+  # a bias in exactly the dependence one usually wants to measure.
+  ap_per_fit <- vapply(valid, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    compute_ap_exact(f$pip, y)
+  }, numeric(1))
+  ap        <- if (any(is.finite(ap_per_fit)))
+                 mean(ap_per_fit[is.finite(ap_per_fit)]) else NA_real_
+  ap_n_fits <- sum(is.finite(ap_per_fit))
+
+
+  # PIP calibration, REGION-WEIGHTED for the same reason: "are this region's
+  # PIPs trustworthy" is the question being asked. The pooled columns are kept
+  # beside it.
+  pip_cal        <- .pip_calibration_per_region(valid, n_pip_cal_bins)
+  pip_cal_pooled <- .pip_calibration(pip_vals, is_causal, n_pip_cal_bins)
+  if (!is.null(pip_cal) && !is.null(pip_cal_pooled) &&
+      nrow(pip_cal) == nrow(pip_cal_pooled)) {
+    # n / n_causal are totals over the stratum's regions, hence counts; they
+    # stay so the binning can be re-aggregated.
+    pip_cal$bin_mid            <- pip_cal_pooled$bin_mid
+    pip_cal$n                  <- pip_cal_pooled$n
+    pip_cal$n_causal           <- pip_cal_pooled$n_causal
+    pip_cal$mean_pip_pooled    <- pip_cal_pooled$mean_pip
+    pip_cal$frac_causal_pooled <- pip_cal_pooled$frac_causal
+  } else if (is.null(pip_cal)) {
+    pip_cal <- pip_cal_pooled
+  }
 
   # Credible set metrics
   cs <- .cs_metrics(valid)
@@ -392,13 +388,19 @@ evaluate_methods <- function(simulation,
 
   list(
     fdr_power_curve = fdr_power,
-    auprc           = auprc,
     ap              = ap,
+    ap_n_fits       = ap_n_fits,
     pip_calibration = pip_cal,
     cs_coverage     = cs$coverage,
     cs_power        = cs$power,
     cs_size_median  = cs$size_median,
     cs_size_mean    = cs$size_mean,
+    cs_coverage_n   = cs$coverage_n,
+    cs_power_n      = cs$power_n,
+    cs_coverage_pooled    = cs$coverage_pooled,
+    cs_power_pooled       = cs$power_pooled,
+    cs_size_median_pooled = cs$size_median_pooled,
+    cs_size_mean_pooled   = cs$size_mean_pooled,
     n_cs_reported   = cs$n_cs,
     runtime_mean    = if (length(rts) > 0) mean(rts) else NA_real_,
     runtime_sd      = if (length(rts) > 1) sd(rts)   else NA_real_,
@@ -409,96 +411,17 @@ evaluate_methods <- function(simulation,
 
 
 # =============================================================================
-# Internal: per-replicate SE wrapper around .metrics_for_fits
-#
-# Groups fits by iter value, computes .metrics_for_fits for each iter, then
-# adds SE fields:
-#   <metric>_se            — SE of each scalar metric across iters
-#   fdr_power_curve$power_se, $precision_se — pointwise SE across iters
-#   pip_calibration$frac_causal_se          — per-bin SE across iters
-#
-# When n_iter < 2 all SE fields are NA.
-# =============================================================================
-
-.metrics_with_se <- function(fits, pip_thresholds, n_pip_cal_bins) {
-
-  main <- .metrics_for_fits(fits, pip_thresholds, n_pip_cal_bins)
-
-  .se <- function(x) {
-    n <- sum(!is.na(x))
-    if (n > 1L) stats::sd(x, na.rm = TRUE) / sqrt(n) else NA_real_
-  }
-
-  scalar_fields <- c("auprc", "cs_coverage", "cs_power",
-                     "cs_size_median", "cs_size_mean", "runtime_mean")
-
-  # Identify unique iter values present in these fits
-  iter_vals <- sort(unique(vapply(fits, function(f) {
-    v <- f$iter
-    if (is.null(v) || length(v) == 0L) NA_integer_ else as.integer(v[[1L]])
-  }, integer(1L))))
-  iter_vals <- iter_vals[!is.na(iter_vals)]
-
-  if (length(iter_vals) < 2L) {
-    # Cannot compute SE — attach NA placeholders
-    for (fld in scalar_fields)
-      main[[paste0(fld, "_se")]] <- NA_real_
-    if (!is.null(main$fdr_power_curve)) {
-      main$fdr_power_curve$power_se     <- NA_real_
-      main$fdr_power_curve$precision_se <- NA_real_
-    }
-    if (!is.null(main$pip_calibration))
-      main$pip_calibration$frac_causal_se <- NA_real_
-    return(main)
-  }
-
-  # Per-iter metrics (pooling across regions / S / phi within each iter)
-  per_iter <- lapply(iter_vals, function(it) {
-    sub <- Filter(function(f) {
-      !is.null(f$iter) && !is.na(f$iter) && f$iter == it
-    }, fits)
-    .metrics_for_fits(sub, pip_thresholds, n_pip_cal_bins)
-  })
-
-  # Scalar SEs
-  for (fld in scalar_fields) {
-    vals <- vapply(per_iter, function(m) {
-      v <- m[[fld]]; if (is.null(v) || length(v) == 0L) NA_real_ else as.numeric(v[[1L]])
-    }, numeric(1L))
-    main[[paste0(fld, "_se")]] <- .se(vals)
-  }
-
-  # Pointwise SE on fdr_power_curve
-  if (!is.null(main$fdr_power_curve)) {
-    n_t <- nrow(main$fdr_power_curve)
-    pow_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$fdr_power_curve)) rep(NA_real_, n_t) else m$fdr_power_curve$power
-    }, numeric(n_t))
-    prec_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$fdr_power_curve)) rep(NA_real_, n_t) else m$fdr_power_curve$precision
-    }, numeric(n_t))
-    main$fdr_power_curve$power_se     <- apply(pow_mat,  1L, .se)
-    main$fdr_power_curve$precision_se <- apply(prec_mat, 1L, .se)
-  }
-
-  # Per-bin SE on pip_calibration
-  if (!is.null(main$pip_calibration)) {
-    n_b <- nrow(main$pip_calibration)
-    frac_mat <- vapply(per_iter, function(m) {
-      if (is.null(m$pip_calibration)) rep(NA_real_, n_b) else m$pip_calibration$frac_causal
-    }, numeric(n_b))
-    main$pip_calibration$frac_causal_se <- apply(frac_mat, 1L, .se)
-  }
-
-  main
-}
-
-
-# =============================================================================
 # Internal: power / FDR curve
 #
 # Uses a sort + cumsum approach: O(N log N + T) rather than O(N * T).
-# Pools all variants across all fits in the supplied collection.
+#
+# This computes the CALL-WEIGHTED curve over whatever (pip, is_causal) pairs it
+# is given. .fdr_power_curve_per_region() below calls it once per region and
+# averages, which is the REGION-WEIGHTED curve - the one reported, because the
+# practitioner's question is "I fine-mapped my region; how trustworthy are
+# these calls?", not "across every call made anywhere in the benchmark, what
+# fraction were wrong". A region that makes many calls dominates the
+# call-weighted rate; under the region-weighted one every region counts once.
 # =============================================================================
 
 .fdr_power_curve <- function(pip_vals, is_causal, thresholds) {
@@ -546,47 +469,92 @@ evaluate_methods <- function(simulation,
 
 
 # =============================================================================
-# Internal: AUPRC via the trapezoidal rule
+# Internal: REGION-WEIGHTED power / FDR curve
+#
+# One curve per region, then averaged pointwise. Two conventions matter:
+#
+#   - FDR and precision are NA for a region that selected nothing at that
+#     threshold, not 0 and 1. The "FDR is 0 when nothing is selected"
+#     convention is harmless when pooling (it contributes no calls), but under
+#     averaging it REWARDS ABSTENTION: a method selecting nothing anywhere
+#     would average to a perfect FDR of 0. So such regions are excluded from
+#     the mean and counted in `n_regions`, which must be read alongside it.
+#
+#   - power and recall are defined for any region with a causal variant, so
+#     they average over all such regions.
 # =============================================================================
 
-.compute_auprc <- function(precision, recall) {
-  if (length(recall) < 2) return(NA_real_)
+.fdr_power_curve_per_region <- function(fits, thresholds) {
+  n_t <- length(thresholds)
+  if (!length(fits)) return(NULL)
 
-  # Sort by increasing recall; at recall ties keep the higher precision
-  ord   <- order(recall, -precision)
-  prec  <- precision[ord]
-  rec   <- recall[ord]
+  acc <- lapply(fits, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    if (sum(y) == 0L || !all(is.finite(f$pip))) return(NULL)
+    cur <- .fdr_power_curve(f$pip, y, thresholds)
+    n_sel <- cur$tp + cur$fp
+    cur$fdr[n_sel == 0L]       <- NA_real_
+    cur$precision[n_sel == 0L] <- NA_real_
+    cur
+  })
+  acc <- Filter(Negate(is.null), acc)
+  if (!length(acc)) return(NULL)
 
-  # Trapezoidal rule: sum of trapezoids.
-  # NOTE: linear interpolation in PR space is not valid (Davis & Goadrich
-  # 2006) - the segment between two PR points is not achievable by any
-  # classifier. This estimator is RETAINED for backwards comparability with
-  # earlier runs, but .compute_ap() below is the correct one and is what
-  # downstream analysis should use. Empirically the trapezoid understates by
-  # ~29% in the weak-signal regime and ~0% at strong signal, i.e. the error
-  # is signal-dependent, not a constant offset.
-  sum(diff(rec) * (head(prec, -1) + tail(prec, -1)) / 2)
+  grab <- function(col) vapply(acc, function(d) d[[col]], numeric(n_t))
+  mrow <- function(m) rowMeans(m, na.rm = TRUE)
+  nrow_def <- function(m) rowSums(!is.na(m))
+
+  fdr_m  <- grab("fdr")
+  prec_m <- grab("precision")
+  out <- data.frame(
+    threshold  = thresholds,
+    # Region-weighted: the mean over regions, which is what gets reported.
+    fdr        = mrow(fdr_m),
+    precision  = mrow(prec_m),
+    power      = mrow(grab("power")),
+    recall     = mrow(grab("recall")),
+    # How many regions the fdr/precision means rest on. Never report the rate
+    # without this: at a high threshold most regions select nothing.
+    n_regions          = nrow_def(fdr_m),
+    n_regions_with_causal = length(acc)
+  )
+  out$fdr[out$n_regions == 0L]       <- NA_real_
+  out$precision[out$n_regions == 0L] <- NA_real_
+  out
 }
 
 
-#' Average precision (the correct PR-curve summary)
-#'
-#' Step-function integral of precision over recall - no interpolation, so it
-#' avoids the invalid linear interpolation the trapezoidal rule performs in
-#' PR space. Computed from the same (precision, recall) grid as
-#' \code{.compute_auprc}, which recovers the exact ranking-based AP to
-#' within ~1-5%.
-#'
-#' @param precision,recall Numeric vectors from the FDR/power curve.
-#' @return Scalar average precision, or NA if the curve is degenerate.
-#' @keywords internal
-.compute_ap <- function(precision, recall) {
-  if (length(recall) < 2) return(NA_real_)
-  ord  <- order(recall, -precision)
-  prec <- precision[ord]
-  rec  <- recall[ord]
-  # sum over steps: (R_i - R_{i-1}) * P_i, with R_0 = 0
-  sum(diff(c(0, rec)) * prec)
+# =============================================================================
+# Internal: REGION-WEIGHTED PIP calibration
+#
+# Per-bin observed frequency computed within each region, then averaged over
+# the regions that have any variant in that bin. `n_regions` per bin is part of
+# the answer: the top bin is usually populated in only a minority of regions.
+# =============================================================================
+
+.pip_calibration_per_region <- function(fits, n_bins) {
+  if (!length(fits)) return(NULL)
+  acc <- lapply(fits, function(f) {
+    y <- logical(f$n_variants)
+    y[f$causal_indices] <- TRUE
+    if (!all(is.finite(f$pip)) || !length(f$pip)) return(NULL)
+    .pip_calibration(f$pip, y, n_bins)
+  })
+  acc <- Filter(function(d) !is.null(d) && nrow(d) > 0L, acc)
+  if (!length(acc)) return(NULL)
+
+  base <- acc[[1L]][, c("bin", "bin_lower", "bin_upper")]
+  n_b  <- nrow(base)
+  grab <- function(col) vapply(acc, function(d) d[[col]], numeric(n_b))
+
+  frac <- grab("frac_causal")
+  base$mean_pip    <- rowMeans(grab("mean_pip"),  na.rm = TRUE)
+  base$frac_causal <- rowMeans(frac,              na.rm = TRUE)
+  base$n_regions   <- rowSums(!is.na(frac))
+  base$mean_pip[base$n_regions == 0L]    <- NA_real_
+  base$frac_causal[base$n_regions == 0L] <- NA_real_
+  base
 }
 
 
@@ -639,40 +607,69 @@ evaluate_methods <- function(simulation,
 
 .cs_metrics <- function(valid_fits) {
 
-  cs_hits  <- logical(0)   # per-CS: did it contain a causal?
-  cs_sizes <- integer(0)   # per-CS: how many variants?
-  causal_captured <- logical(0)  # per-causal-variant: was it in any CS?
+  # Pooled accumulators: one entry per credible SET, one per CAUSAL VARIANT,
+  # across every region.
+  cs_hits  <- logical(0)
+  cs_sizes <- integer(0)
+  causal_captured <- logical(0)
+
+  # Region-weighted accumulators: one entry per REGION. These are the reported
+  # values, because fine-mapping is applied to a region and the question is "of
+  # the sets I got for my locus, how many hold a causal variant". Pooling over
+  # sets weights a region reporting five sets five times as heavily as one
+  # reporting a single set.
+  r_cov <- numeric(0); r_pow <- numeric(0)
+  r_sz_mean <- numeric(0); r_sz_med <- numeric(0)
 
   for (f in valid_fits) {
     n_causal <- length(f$causal_indices)
 
     if (length(f$credible_sets) == 0) {
-      # No CSs: no causal variants captured
+      # No sets reported: coverage and set size are UNDEFINED for this region
+      # rather than 0 - there is no set to be right or wrong about, and
+      # scoring it 0 would punish abstention as hard as a wrong call. Power IS
+      # defined: none of the causal variants were captured.
       causal_captured <- c(causal_captured, rep(FALSE, n_causal))
+      if (n_causal > 0L) r_pow <- c(r_pow, 0)
       next
     }
 
-    # Variants covered by any CS in this fit
     all_cs_variants <- unique(unlist(f$credible_sets))
+    sizes <- vapply(f$credible_sets, length, integer(1))
+    hits  <- vapply(f$credible_sets,
+                    function(cs) any(cs %in% f$causal_indices), logical(1))
 
-    for (cs in f$credible_sets) {
-      cs_hits  <- c(cs_hits,  any(cs %in% f$causal_indices))
-      cs_sizes <- c(cs_sizes, length(cs))
-    }
+    cs_hits         <- c(cs_hits,  hits)
+    cs_sizes        <- c(cs_sizes, sizes)
+    causal_captured <- c(causal_captured,
+                         f$causal_indices %in% all_cs_variants)
 
-    causal_captured <- c(
-      causal_captured,
-      f$causal_indices %in% all_cs_variants
-    )
+    r_cov     <- c(r_cov,     mean(hits))
+    r_sz_mean <- c(r_sz_mean, mean(sizes))
+    r_sz_med  <- c(r_sz_med,  stats::median(sizes))
+    if (n_causal > 0L)
+      r_pow <- c(r_pow, sum(f$causal_indices %in% all_cs_variants) / n_causal)
   }
 
   n_cs <- length(cs_hits)
+  mn   <- function(v) if (length(v)) mean(v) else NA_real_
 
   list(
-    coverage    = if (n_cs > 0L)                   mean(cs_hits)       else NA_real_,
-    power       = if (length(causal_captured) > 0L) mean(causal_captured) else NA_real_,
-    size_median = if (n_cs > 0L)                   median(cs_sizes)    else NA_real_,
-    size_mean   = if (n_cs > 0L)                   mean(cs_sizes)      else NA_real_,
+    # Region-weighted - reported.
+    coverage    = mn(r_cov),
+    power       = mn(r_pow),
+    size_median = mn(r_sz_med),
+    size_mean   = mn(r_sz_mean),
+    # Regions each mean rests on. coverage and the sizes count only regions
+    # that reported at least one set.
+    coverage_n  = length(r_cov),
+    power_n     = length(r_pow),
+    # Call-weighted, over sets and over causal variants respectively.
+    coverage_pooled    = if (n_cs > 0L) mean(cs_hits) else NA_real_,
+    power_pooled       = if (length(causal_captured) > 0L)
+                           mean(causal_captured) else NA_real_,
+    size_median_pooled = if (n_cs > 0L) stats::median(cs_sizes) else NA_real_,
+    size_mean_pooled   = if (n_cs > 0L) mean(cs_sizes) else NA_real_,
     n_cs        = n_cs
   )
 }

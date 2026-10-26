@@ -632,10 +632,23 @@ run_methods(sim, methods = "beatrice",
 | `beatrice_dir` | *(required)* | Path to cloned Beatrice-Finemapping repository |
 | `python` | `"python"` | Path to Python executable |
 | `max_iter` | `2000` | Training iterations. Minimum 500. Reduce for speed at the cost of noise. |
-| `n_caus` | `5` | Expected number of causal variants |
-| `sigma_sq` | `0.05` | Prior variance on effect sizes |
+| `n_caus` | `10` | Expected number of causal variants |
+| `sigma_sq` | `0.0899` | Prior variance on effect sizes |
 | `gamma_coverage` | `0.95` | Coverage threshold for credible sets |
-| `sparse_concrete` | `50` | Sparsity parameter (top-K variants sampled per iteration) |
+| `sparse_concrete` | `51` | Sparsity parameter (top-K variants sampled per iteration) |
+
+> **Why these defaults.** `max_iter`, `n_caus`, `sigma_sq` and
+> `sparse_concrete` are deliberately the same as Functional BEATRICE's, which
+> took them from an Optuna study on this benchmark's simulated data. The two
+> share a likelihood, a variational family and the meaning of these parameters
+> and differ only in the prior — BEATRICE fixes p₀ = 1/p uniform, Functional
+> BEATRICE learns p₀ = G(v; ψ) from annotations — so holding everything else
+> equal is what makes a gap between them attributable to the annotation prior
+> rather than to one arm being tuned and the other not. The caveat to state when
+> reporting: the values were selected against Functional BEATRICE's objective,
+> so they may be suboptimal here and could understate BEATRICE. The
+> alternative, BEATRICE at its published defaults, confounds the prior with the
+> tuning, which is worse for an ablation.
 
 > **Note on runtime:** With `max_iter = 500`, BEATRICE takes ~10 s per region on a laptop CPU. At the default `max_iter = 2000` expect ~30–40 s per region. For large benchmarks consider reducing `max_iter` or running on a machine with a GPU.
 
