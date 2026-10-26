@@ -194,16 +194,16 @@ echo "  fb_xregion  : $J_FB"
 J_FM=$(sub 04 04_funmap.pbs     "$(dep_arr "$J_PREP")")
 echo "  funmap      : $J_FM"
 J_PF_S=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
-echo "  polyfun     : $J_PF_S  (sniff, 102 annotations)"
+echo "  polyfun     : $J_PF_S  (sniff, 409 annotations)"
 J_PF_C=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_C}" ANNOT_SET=combined)
-echo "  polyfun     : $J_PF_C  (combined, 289 annotations)"
+echo "  polyfun     : $J_PF_C  (combined, 596 annotations)"
 
 cat <<NOTE
 
 Submitted. Useful checks while it runs:
 
   python preflight.py data      # before prep: downloads complete?
-  python preflight.py prep      # before the methods: all 265 blocks built?
+  python preflight.py prep      # before the methods: the 254 analysed blocks built?
   python preflight.py methods   # progress per method
   qstat -tu \$USER
 
