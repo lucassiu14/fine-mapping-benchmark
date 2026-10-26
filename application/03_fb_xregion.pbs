@@ -1,21 +1,36 @@
 #!/bin/bash
 #PBS -N chol_fb_xregion
 #PBS -l select=1:ncpus=16:mem=128gb
-#PBS -l walltime=48:00:00
+#PBS -l walltime=72:00:00
 #PBS -j oe
 #PBS -o logs/
 # fb_xregion: ONE job over all blocks - the prior head is shared across them,
 # so this cannot be an array job.
 #
-# Memory: the trainer holds every block's LD resident. Measured float32 LD for
-# the 252 blocks is ~69 GB; annotations ~0.8 GB; fixed torch/eigensolver
-# overhead ~2 GB. 128 GB leaves comfortable headroom. Mini-batching is NOT
-# needed at this scale.
+# Memory: the trainer holds every block's LD resident. See the measured figures
+# below; mini-batching is NOT needed at this scale, but the headroom is
+# narrower than the original estimate suggested.
 #
-# Time: 5 blocks x 2000 iterations took 366 s wall. Setup is O(p^3) per block
-# (regularize_ld always falls through to eigendecomposition on real float32
-# UKBB LD) and will dominate. MEASURE with a 10-block manifest before
-# trusting the 48 h walltime.
+# Time: MEASURED by 03t_fb_timing.pbs on 10 blocks sampled across the size
+# distribution of the 254 analysed blocks (p 2,759-16,003):
+#
+#     3,338 s for 10 blocks
+#     -> 23.6 h for 254 if cost is linear in block count
+#     -> 19.1 h for 254 if scaled by the sum of p^3
+#
+# so 19-24 h. The earlier estimate of ~5.4 h came from an old "5 blocks x 2000
+# iterations took 366 s" datapoint and was out by 4x, because those 5 blocks
+# were far smaller than the real ones. Hence 72 h rather than 48: this is a
+# SINGLE job over all blocks (the prior head is shared, so it cannot be an
+# array), so an overrun loses the whole run, and 72 h is the ceiling of the
+# same queue class as 48 h at these resources - the extra margin is free.
+#
+# Memory: measured 15.3 GB for those 10 blocks with 3.6 GB of LD resident.
+# Across 254 blocks the LD is 83 GB, plus ~12 GB of fixed overhead, plus the
+# largest block's O(p^3) solve (p = 16,003: a 2 GB float64 matrix and its eigh
+# workspace) -> roughly 100 GB against the 128 GB requested. That is ~27%
+# headroom, which is adequate but not generous; if this OOMs, 450 GB is
+# available in v1_medium at 64 cpus.
 cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
 source ./lib.sh
 banner
