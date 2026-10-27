@@ -1,6 +1,19 @@
 #!/bin/bash
 #PBS -N chol_fb_xregion
-#PBS -l select=1:ncpus=4:mem=112gb
+# mem is set just ABOVE v1_small*'s 128gb cap on purpose. The cx routing
+# queue sends a job to the first destination whose limits it satisfies, and
+# its order is v1_gpu72, v1_small24, v1_small24a, v1_small72, v1_small72a,
+# then the medium queues. At 112gb this job fitted the small tier and sat
+# there unplaceable: PBS reported
+#   Insufficient amount of resource: mem (R: 112gb A: 12712mb T: 30846221mb)
+# - the small placement set had 12.4 GB free of 30.8 TB, against 490 jobs
+# queued and 318 running. The job needs ~94gb (measured vmem 93.3 GiB, job
+# 4470340) and cannot be made small: the joint trainer holds all 254 regions'
+# Z, LD and S at once, which is why it is one job and not an array.
+# 130gb skips the small tier entirely and lands in medium, where the cap is
+# 450gb (so this is a small ask, not a near-whole node) and the queues hold
+# 44/159 and 6/37 rather than 490/318.
+#PBS -l select=1:ncpus=4:mem=130gb
 #PBS -l walltime=72:00:00
 #PBS -j oe
 #PBS -o logs/
