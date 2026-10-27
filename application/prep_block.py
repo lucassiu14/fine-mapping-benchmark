@@ -199,6 +199,14 @@ def main(i):
                 gwas_variants_in_span=n_ss_span, annotation_coverage=round(cov, 6),
                 largest_unannotated_gap_bp=gap_bp)
     json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
+    # The annotation names in the exact column order every method is handed.
+    # 06_collect.py needs these to label fb_xregion's feature importances --
+    # without them they are bare indices and a named prediction such as
+    # RNAGTEX-PC5 cannot be checked. Written once, at APP_ROOT.
+    npath = os.path.join(ROOT, "annot_names.txt")
+    if not os.path.exists(npath):
+        with open(npath, "w") as fh:
+            fh.write("\n".join(acols) + "\n")
     open(os.path.join(d, "DONE"), "w").close()
     print(f"{tag}: p={len(m)} max|Z|={meta['max_abs_z']:.2f} flips={meta['flipped']}")
 

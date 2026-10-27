@@ -62,8 +62,10 @@ say "upstream comparators"
 # Empty means UNPINNED: setup.sh then clones the default branch, records what
 # it got in $APP_ROOT/pins/upstream.txt, and says so loudly. Fill these in
 # from that file to pin.
-FUNMAP_COMMIT="${FUNMAP_COMMIT:-}"
-POLYFUN_COMMIT="${POLYFUN_COMMIT:-}"
+# The commits the published results were produced with, read off the cluster
+# that produced them ($APP_ROOT/pins/upstream.txt), not chosen here.
+FUNMAP_COMMIT="${FUNMAP_COMMIT:-73835fcd2b950fef307c3a0929255f7309dbe21b}"
+POLYFUN_COMMIT="${POLYFUN_COMMIT:-8b17b4ec87fde11f8d216c049c08d1420cd25de6}"
 
 mkdir -p "$APP_ROOT/pins"
 : > "$APP_ROOT/pins/upstream.txt"
@@ -98,7 +100,8 @@ pin_repo "$APP_ROOT/polyfun" https://github.com/omerwe/polyfun.git  "$POLYFUN_CO
 # here too if present, so one file holds every upstream revision.
 if [ -d "${FB_DIR:-$APP_ROOT/functional-beatrice}" ]; then
   pin_repo "${FB_DIR:-$APP_ROOT/functional-beatrice}" \
-           https://github.com/lucassiu14/functional-beatrice.git "${FB_COMMIT:-}"
+           https://github.com/lucassiu14/functional-beatrice.git \
+           "${FB_COMMIT:-d0fb02244659ebdad716b460c2d0bfa9a88b0c18}"
 fi
 echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
@@ -371,14 +374,15 @@ export POLYFUN_RLIB="$RLIB"
   esac
 export R_HOME="\${R_HOME:-\$(R RHOME 2>/dev/null)}"
 export RPY2_CFFI_MODE=ABI
-# functional-beatrice: main at d0fb022 or later. 03_fb_xregion.pbs verifies this.
+# functional-beatrice pinned at d0fb0224465 (the commit the results used).
+# 03_fb_xregion.pbs additionally greps for the three fixes it depends on.
 export FB_DIR="\${FB_DIR:-$APP_ROOT/functional-beatrice}"
 ENVEOF
 echo "  wrote $APP_ROOT/env.sh"
 
 say "next"
 cat <<'NEXT'
-  1. Put functional-beatrice at $FB_DIR (main at d0fb022 or later):
+  1. Put functional-beatrice at $FB_DIR (pinned at d0fb02244659):
        git clone https://github.com/lucassiu14/functional-beatrice.git "$FB_DIR"
   2. source "$APP_ROOT/env.sh"
   3. bash submit_all.sh

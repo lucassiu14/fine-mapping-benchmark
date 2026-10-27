@@ -15,13 +15,22 @@ ROOT = os.environ.get("APP_ROOT", os.path.dirname(os.path.abspath(__file__)))
 RES  = os.path.join(ROOT, "results"); os.makedirs(RES, exist_ok=True)
 blocks = pd.read_csv(os.path.join(ROOT, "blocks.csv"))
 
-rows, missing = [], []
+chrom_of = dict(zip(blocks.region_id, blocks.chrom))
+
+rows, missing, excluded = [], [], []
 for rid in blocks.region_id:
     d = os.path.join(ROOT, "regions", rid)
+    # A block excluded by the unannotated-gap rule is not a missing output:
+    # it is absent from every manifest by construction and no method wrote it.
+    if os.path.exists(os.path.join(d, "EXCLUDED")):
+        excluded.append(rid); continue
     if not os.path.exists(os.path.join(d, "DONE")):
         missing.append((rid, "prep")); continue
     snps = pd.read_csv(os.path.join(d, "snps.csv"))
-    base = dict(region_id=rid, chrom=int(snps.BP.notna() and blocks.loc[blocks.region_id == rid, "chrom"].iloc[0]))
+    # `int(snps.BP.notna() and ...)` was here and raises
+    # "truth value of a Series is ambiguous" on every block -- this script had
+    # never been run. The chromosome comes from blocks.csv, not from the SNPs.
+    base = dict(region_id=rid, chrom=int(chrom_of[rid]))
 
     src = {
         "fb_xregion":    (os.path.join(ROOT, "joint_out", rid, "pip.csv"), "csv_named"),
@@ -61,8 +70,11 @@ if rows:
 else:
     print("no results found")
 
+if excluded:
+    print(f"\n{len(excluded)} blocks excluded by the unannotated-gap rule, not collected:")
+    print("  " + ", ".join(excluded))
 if missing:
-    print(f"\n{len(missing)} missing outputs (first 20):")
+    print(f"\n{len(missing)} MISSING outputs among the analysed blocks (first 20):")
     for rid, why in missing[:20]:
         print(f"  {rid:20s} {why}")
 
@@ -72,8 +84,32 @@ if missing:
 fi = glob.glob(os.path.join(ROOT, "joint_out", "*", "feature_importance.csv"))
 if fi:
     w = pd.read_csv(fi[0])
-    names = [l.strip() for l in open(os.path.join(ROOT, "annot_names.txt"))] \
-            if os.path.exists(os.path.join(ROOT, "annot_names.txt")) else None
+    # Annotation names, in the column order the methods saw. annot_names.txt
+    # was only ever READ by this script and never written by anything, so the
+    # importances would have come out as bare indices and the pre-registered
+    # RNAGTEX-PC5 check would have been impossible. prep_block.py writes the
+    # names as the header of funmap.anno.txt (SNP + the 102 PCs, in acols
+    # order), so take them from there, and check every block agrees.
+    names = None
+    npath = os.path.join(ROOT, "annot_names.txt")
+    if os.path.exists(npath):
+        names = [l.strip() for l in open(npath) if l.strip()]
+    else:
+        heads = glob.glob(os.path.join(ROOT, "regions", "*", "funmap.anno.txt"))
+        seen = {}
+        for h in heads[:40]:                     # a sample is enough to detect disagreement
+            with open(h) as fh:
+                cols = tuple(fh.readline().rstrip("\n").split("\t")[1:])
+            seen.setdefault(cols, []).append(os.path.basename(os.path.dirname(h)))
+        if len(seen) == 1:
+            names = list(next(iter(seen)))
+            with open(npath, "w") as fh:
+                fh.write("\n".join(names) + "\n")
+            print(f"\nderived {len(names)} annotation names from funmap.anno.txt "
+                  f"-> annot_names.txt")
+        elif len(seen) > 1:
+            print(f"\nWARNING annotation column order differs between blocks "
+                  f"({len(seen)} distinct orders); importances left unnamed")
     if names and len(names) == len(w):
         w["annotation"] = [names[i] for i in w.annotation_index]
     w.to_csv(os.path.join(RES, "annotation_weights.csv"), index=False)
