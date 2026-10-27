@@ -36,10 +36,12 @@ NULL_Z    = 2.0
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--root", default=os.environ.get("APP_ROOT", "."))
+ap.add_argument("--joint-out", default=None,
+                help="fb_xregion output dir; default <root>/joint_out. Point it at a\n                     preserved run (e.g. joint_out.pre_fix_d0fb022) to compare\n                     against the current one.")
 ap.add_argument("--limit", type=int, default=0, help="0 = every region")
 a = ap.parse_args()
 
-jd = os.path.join(a.root, "joint_out")
+jd = a.joint_out or os.path.join(a.root, "joint_out")
 rids = sorted(d for d in os.listdir(jd)
                if os.path.isfile(os.path.join(jd, d, "res"))
                and os.path.isfile(os.path.join(jd, d, "pip.csv")))

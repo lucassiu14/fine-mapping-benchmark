@@ -31,6 +31,8 @@ import torch
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--root", default=os.environ.get("APP_ROOT", "."))
+ap.add_argument("--joint-out", default=None,
+                help="fb_xregion output dir; default <root>/joint_out. Point it at a\n                     preserved run (e.g. joint_out.pre_fix_d0fb022) to compare\n                     against the current one.")
 ap.add_argument("--region", default="ldEUR_08_0045")
 ap.add_argument("--n-sub", type=float, default=337000.0)   # 03_fb_xregion.pbs N_LIKELIHOOD
 ap.add_argument("--sigma-sq", type=float, default=0.0899)  # beatrice_joint.py default
@@ -92,7 +94,8 @@ def logbf(ind, tz, tl, S, p0, dtype):
     pr = float(prior.sum())
     return ldet + quad + pr, ldet, quad, pr
 
-with open(os.path.join(a.root, "joint_out", a.region, "res"), "rb") as fh:
+jd = a.joint_out or os.path.join(a.root, "joint_out")
+with open(os.path.join(jd, a.region, "res"), "rb") as fh:
     res = pickle.load(fh)
 memo, mean_memo = res["memo"], float(np.asarray(res["mean_memo"]).squeeze())
 
