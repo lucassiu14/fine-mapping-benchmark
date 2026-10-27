@@ -60,6 +60,37 @@ for rid in blocks.region_id:
 
 if rows:
     df = pd.concat(rows, ignore_index=True)
+
+    # fb_xregion QC. sum(PIP) is the posterior mean number of causal variants,
+    # so a value above the model's own prior cap (n_caus, default 10) is
+    # self-contradictory and the region's PIPs are not a posterior.
+    #
+    # It happens when the variational posterior saturates its sparsity cap
+    # (sparse_concrete, default 51). mean_memo is then the log-BF of a
+    # ~51-variant configuration, so every configuration the credible-set sweep
+    # proposes lands more than 745 nats below it, is stored as exactly 0.0 by
+    # abf(), and cannot shift the normaliser. The sweep runs and is inert, and
+    # the surviving PIP is a variational selection frequency: 1.0 for whatever
+    # the sampler always picked, 0 for the true lead, with |Z| never entering.
+    # Measured on the UKBB cholesterol run: 14 of 254 regions, all 14 placing
+    # PIP 1.0 on a variant with |Z| < 2 while the lead -- |Z| up to 13.05 --
+    # got PIP 0. The likelihood gain per added variant scales with n while the
+    # per-variant prior penalty is fixed near log(p0), so this binds at
+    # n ~ 3e5 and not at the n ~ 1e3-1e4 the default was tuned on.
+    #
+    # Flagged, never dropped: which regions to exclude is the analyst's call.
+    N_CAUS = 10
+    sumpip = df.groupby(["method", "region_id"]).pip.transform("sum")
+    df["valid"] = ~((df.method == "fb_xregion") & (sumpip > N_CAUS))
+
+    bad = (df[~df.valid].groupby("region_id").pip.agg(["sum", "max"])
+             .sort_values("sum", ascending=False))
+    if len(bad):
+        print(f"\nQC: {len(bad)} fb_xregion regions have sum(PIP) > n_caus={N_CAUS} "
+              f"and are marked valid=False (not dropped):")
+        for rid, r in bad.iterrows():
+            print(f"  {rid:20s} sum(PIP)={r['sum']:8.2f}  max(PIP)={r['max']:.4f}")
+
     df.to_parquet(os.path.join(RES, "pips.parquet"), index=False)
     print(f"wrote {len(df):,} rows for {df.region_id.nunique()} regions, "
           f"methods: {sorted(df.method.unique())}")
