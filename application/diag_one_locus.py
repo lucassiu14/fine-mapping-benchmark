@@ -197,19 +197,24 @@ print(f"\n=== spectrum of R[ind,ind] for the winning |k|={len(ind)} configuratio
 print(f"  eigenvalues: min {sv.min():.3e}  median {np.median(sv):.3e}  max {sv.max():.3e}")
 print(f"  |Z| of its members: min {np.abs(zi).min():.2f}  median "
       f"{np.median(np.abs(zi)):.2f}  max {np.abs(zi).max():.2f}")
-nfloor = int((sv <= 1.05e-3).sum())
+# "at the floor" needs slack: on ldEUR_08_0045 the DOMINANT direction
+# (382.8 of 764.9) sits at 1.060e-3, just above a 1.05e-3 cutoff, so a
+# tight test called it False and made the clip look innocent. What
+# matters is being in the near-singular tail, not exactly at the clip.
+nfloor = int((sv <= 2e-3).sum())
 contrib = 0.5 * proj / sv
-print(f"  {nfloor} of {len(sv)} directions sit AT the 1e-3 floor")
+print(f"  {nfloor} of {len(sv)} directions lie in the near-singular tail "
+      f"(eigenvalue < 2e-3, i.e. >500x amplification)")
 print(f"  top 6 directions by CONTRIBUTION (not by eigenvalue: the smallest "
       f"eigenvalues\n  carry near-zero projection, so ranking by eigenvalue "
       f"hides the mechanism)")
-print(f"  {'eigenvalue':>12} {'(q.z)^2':>10} {'contribution':>14} {'at floor?':>10}")
+print(f"  {'eigenvalue':>12} {'(q.z)^2':>10} {'contribution':>14} {'in tail?':>10}")
 for j in np.argsort(-contrib)[:6]:
     print(f"  {sv[j]:>12.3e} {proj[j]:>10.3f} {contrib[j]:>14.1f} "
-          f"{str(bool(sv[j] <= 1.05e-3)):>10}")
+          f"{str(bool(sv[j] <= 2e-3)):>10}")
 tot_q = 0.5 * float(zi @ np.linalg.solve(sub, zi))
 print(f"  total (0.5 zT Rinv z) = {tot_q:.1f}")
-print(f"  of which {contrib[sv <= 1.05e-3].sum():.1f} comes from directions at the floor")
+print(f"  of which {contrib[sv <= 2e-3].sum():.1f} comes from that tail")
 print("  Evidence carried by directions pinned at the clip is manufactured by\n"
       "  the clip, not carried by the data. Compare quad across the two floors\n"
       "  above: that difference is the experiment, this is the anatomy.")
