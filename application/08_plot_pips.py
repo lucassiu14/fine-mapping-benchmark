@@ -21,6 +21,10 @@ import os, sys, argparse
 import numpy as np, pandas as pd
 import matplotlib
 matplotlib.use("Agg")
+# Use DejaVu for mathtext as well as text. The default STIX fontset is absent
+# on this cluster, so every $...$ label emitted a findfont fallback warning and
+# the maths rendered in a different family from the surrounding text.
+matplotlib.rcParams["mathtext.fontset"] = "dejavusans"
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 from scipy.stats import norm
@@ -137,7 +141,9 @@ axes[-1].set_xlabel(xlabel, fontsize=9)
 title = (f"Cholesterol (UKBB) — {one.region_id.nunique()} LDetect blocks"
          if not a.region else f"{a.region}")
 fig.suptitle(title, fontsize=11, fontweight="bold", x=0.5, y=0.995)
-fig.tight_layout(rect=(0, 0, 1, 0.985))
+# Not tight_layout: with sharex plus an explicit gridspec hspace it warns
+# "Axes that are not compatible with tight_layout" and may shift the panels.
+fig.subplots_adjust(left=0.055, right=0.995, top=0.96, bottom=0.07, hspace=0.16)
 
 stem = f"fig_pips_{'genome' if not a.region else a.region}"
 for ext in ("pdf", "png"):
