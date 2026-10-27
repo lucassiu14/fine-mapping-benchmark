@@ -157,13 +157,22 @@ print(f"\n=== spectrum of R[ind,ind] for the winning |k|={len(ind)} configuratio
 print(f"  eigenvalues: min {sv.min():.3e}  median {np.median(sv):.3e}  max {sv.max():.3e}")
 print(f"  |Z| of its members: min {np.abs(zi).min():.2f}  median "
       f"{np.median(np.abs(zi)):.2f}  max {np.abs(zi).max():.2f}")
-print(f"  {'eigenvalue':>12} {'(q.z)^2':>10} {'contribution':>14}")
-for j in np.argsort(sv)[:6]:
-    print(f"  {sv[j]:>12.3e} {proj[j]:>10.3f} {0.5*proj[j]/sv[j]:>30.1f}")
+nfloor = int((sv <= 1.05e-3).sum())
+contrib = 0.5 * proj / sv
+print(f"  {nfloor} of {len(sv)} directions sit AT the 1e-3 floor")
+print(f"  top 6 directions by CONTRIBUTION (not by eigenvalue: the smallest "
+      f"eigenvalues\n  carry near-zero projection, so ranking by eigenvalue "
+      f"hides the mechanism)")
+print(f"  {'eigenvalue':>12} {'(q.z)^2':>10} {'contribution':>14} {'at floor?':>10}")
+for j in np.argsort(-contrib)[:6]:
+    print(f"  {sv[j]:>12.3e} {proj[j]:>10.3f} {contrib[j]:>14.1f} "
+          f"{str(bool(sv[j] <= 1.05e-3)):>10}")
 tot_q = 0.5 * float(zi @ np.linalg.solve(sub, zi))
 print(f"  total (0.5 zT Rinv z) = {tot_q:.1f}")
-print("  If the smallest eigenvalues dominate that total, the evidence is\n"
-      "  manufactured by the eigenvalue clip, not carried by the data.")
+print(f"  of which {contrib[sv <= 1.05e-3].sum():.1f} comes from directions at the floor")
+print("  Evidence carried by directions pinned at the clip is manufactured by\n"
+      "  the clip, not carried by the data. Compare quad across the two floors\n"
+      "  above: that difference is the experiment, this is the anatomy.")
 
 tz, tl, S, p0, _, _ = build(torch.float64, 1e-3)
 pen = float(np.log(1.0 / p) - np.log(1 - 1.0 / p))
