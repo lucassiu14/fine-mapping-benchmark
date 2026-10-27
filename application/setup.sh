@@ -101,7 +101,7 @@ pin_repo "$APP_ROOT/polyfun" https://github.com/omerwe/polyfun.git  "$POLYFUN_CO
 if [ -d "${FB_DIR:-$APP_ROOT/functional-beatrice}" ]; then
   pin_repo "${FB_DIR:-$APP_ROOT/functional-beatrice}" \
            https://github.com/lucassiu14/functional-beatrice.git \
-           "${FB_COMMIT:-fc82a9c8071bb964bb198048e4b2a033de43f4e3}"
+           "${FB_COMMIT:-f3bd29ac7e7944ba0b12a8bb2433a20327c1f791}"
 fi
 echo "  Funmap and polyfun checked out (upstream, unmodified)"
 
@@ -374,7 +374,7 @@ export POLYFUN_RLIB="$RLIB"
   esac
 export R_HOME="\${R_HOME:-\$(R RHOME 2>/dev/null)}"
 export RPY2_CFFI_MODE=ABI
-# functional-beatrice pinned at fc82a9c8071 (the commit the results used).
+# functional-beatrice pinned at f3bd29ac7e7 (the commit the results used).
 # 03_fb_xregion.pbs additionally greps for the three fixes it depends on.
 export FB_DIR="\${FB_DIR:-$APP_ROOT/functional-beatrice}"
 ENVEOF
@@ -382,7 +382,7 @@ echo "  wrote $APP_ROOT/env.sh"
 
 say "next"
 cat <<'NEXT'
-  1. Put functional-beatrice at $FB_DIR (pinned at fc82a9c8071b):
+  1. Put functional-beatrice at $FB_DIR (pinned at f3bd29ac7e79):
        git clone https://github.com/lucassiu14/functional-beatrice.git "$FB_DIR"
   2. source "$APP_ROOT/env.sh"
   3. bash submit_all.sh
