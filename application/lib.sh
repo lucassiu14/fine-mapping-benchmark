@@ -113,18 +113,43 @@ require_fb_fixes() {
     echo "       Update the checkout to main at d0fb022 or later." >&2
     exit 1
   }
-  grep -q 'nearest PD correlation matrix' "${FB_DIR}/scripts/trainer_annot.py" || {
+  # Search the whole scripts dir, not trainer_annot.py: regularize_ld existed
+  # as two byte-identical copies (trainer_annot and generate_credible_sets) and
+  # now lives once in scripts/ld_regularisation.py. Pinning this check to one
+  # file made it fail on a checkout that HAS the fix.
+  grep -rq 'nearest PD correlation matrix' "${FB_DIR}/scripts/" || {
     echo "FATAL: ${FB_DIR} is missing the LD regularisation fix." >&2
     echo "       The diagonal shift scales every implied correlation by 1/(1+c)," >&2
     echo "       which makes the Bayes factor FAVOUR co-including collinear variants." >&2
     echo "       Update the checkout to main at d0fb022 or later." >&2
     exit 1
   }
+  # The adaptive eigenvalue floor. A fixed 1e-3 clip lets near-singular
+  # directions amplify z-noise ~1000x: on ldEUR_08_0045 a 36-variant
+  # configuration scored a quadratic term of 745.88 against 85.12 for the true
+  # lead at |Z|=13.05, and took PIP 1.0 on a variant at |Z|=0.04.
+  grep -q 'eig_floor' "${FB_DIR}/scripts/ld_regularisation.py" 2>/dev/null || {
+    echo "FATAL: ${FB_DIR} is missing the adaptive LD eigenvalue floor." >&2
+    echo "       A fixed 1e-3 clip manufactures evidence in near-singular" >&2
+    echo "       directions. Update to fc82a9c or later." >&2
+    exit 1
+  }
+  # The learned prior must reach the credible-set sweep. prior_location is ''
+  # on every path, so generate_credible_sets' bare except silently substituted
+  # a UNIFORM prior and the annotation prior never reached a reported PIP.
+  grep -q 'p0_t' "${FB_DIR}/scripts/generate_credible_sets.py" \
+    && grep -q "'p0_t'" "${FB_DIR}/scripts/joint_trainer.py" || {
+    echo "FATAL: ${FB_DIR} does not pass the learned prior to the sweep." >&2
+    echo "       Without it the reported PIPs are computed under a UNIFORM" >&2
+    echo "       prior and the annotations do not enter them." >&2
+    echo "       Update to fc82a9c or later." >&2
+    exit 1
+  }
   grep -q 'def read_ld' "${FB_DIR}/scripts/joint_trainer.py" || {
     echo "FATAL: ${FB_DIR} is missing .npy LD support; the manifest points at .npy files." >&2
     exit 1
   }
-  echo "[guard] fb checkout has the memo fix, the LD regularisation fix and .npy LD support"
+  echo "[guard] fb checkout has: memo fix, LD regularisation + adaptive eigenvalue floor, learned prior passed to the sweep, .npy LD support"
 }
 
 rpy2_env() {
