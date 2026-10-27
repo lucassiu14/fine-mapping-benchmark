@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N chol_fb_xregion
-#PBS -l select=1:ncpus=16:mem=128gb
+#PBS -l select=1:ncpus=4:mem=112gb
 #PBS -l walltime=72:00:00
 #PBS -j oe
 #PBS -o logs/
@@ -67,6 +67,22 @@ print(f"            {tot/1e9:.0f} GB across the manifest", flush=True)
 PY
 
 require_fb_fixes
+
+# Match the thread pools to the allocation. Nothing in FB or this script pinned
+# them, so on a 16-cpu request torch and the BLAS were free to spawn 16 threads
+# - and the measured run (job 4470340) got nothing for it: cput 21:02:42
+# against walltime 21:17:16, a ratio of 0.988, so no measurable parallelism at
+# any point in 21 hours. The 16 cpus only made the job hard to place
+# ("Placement set is too small"), so the request is now 4.
+#
+# Pinning matters BECAUSE of that reduction: left unset, the libraries size
+# their pools from the node's core count, not the cgroup's, and would
+# oversubscribe 4 cores with 16+ threads. Pinning to NCPUS cannot slow a
+# workload already measured at one thread.
+export OMP_NUM_THREADS="${NCPUS:-4}"
+export MKL_NUM_THREADS="${NCPUS:-4}"
+export OPENBLAS_NUM_THREADS="${NCPUS:-4}"
+log "threads  : OMP/MKL/OPENBLAS = ${NCPUS:-4} (matched to the allocation)"
 
 python "${FB_DIR}/beatrice_joint.py" \
   --manifest manifest.tsv \
