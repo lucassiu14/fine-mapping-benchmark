@@ -69,7 +69,25 @@ dep_arr () {
   # stages do not rely on it either way - each one verifies its own inputs
   # (00f checks its annotation file exists, 00g requires all 22
   # snpvar_constrained files) and dies rather than running on partial data.
+  # A stage skipped by --from echoes a human-readable note instead of a job
+  # id, and an unsubmitted stage leaves the variable empty. Joining either
+  # into a dependency expression built `-W depend=afterok:skip 02_prep.pbs`,
+  # which PBS rejects - so `--from 03` submitted 03 and then FAILED to submit
+  # 04 and 05 at all. A resumed run has no dependency to express: whatever it
+  # depended on has already finished.
+  case "${1:-}" in
+    ''|skip*|SKIP*) return ;;
+  esac
   printf 'afterok:%s' "$1"
+}
+
+dep_join () {  # dep_join <term>... -> comma-joined, empty terms dropped
+  # Every call site used to hardcode the comma, so one skipped dependency
+  # left a leading, trailing or doubled comma even once dep_arr returned
+  # empty. Join here instead and an all-skipped list yields no -W at all.
+  local out="" t
+  for t in "$@"; do [ -n "$t" ] && out="${out:+$out,}$t"; done
+  printf '%s' "$out"
 }
 
 sub () {  # sub <stage> <script> [dependency-expression] [VAR=value ...]
@@ -115,17 +133,17 @@ echo "== PolyFun annotations: base + quintile indicators per Borzoi PC =="
 # LD-scores FROM those built files.
 J_BP=$(sub 00h1 00h1_annot_breakpoints.pbs "$(dep_arr "$J_ANNOT")")
 echo "  breakpoints : $J_BP  (genome-wide, shared by both sets)"
-J_BLD_S=$(sub 00h2 00h2_build_annot.pbs "afterok:${J_BP},$(dep_arr "$J_ANNOT")" ANNOT_SET=sniff)
+J_BLD_S=$(sub 00h2 00h2_build_annot.pbs "$(dep_join "$(dep_arr "$J_BP")" "$(dep_arr "$J_ANNOT")")" ANNOT_SET=sniff)
 echo "  build annot : $J_BLD_S  (sniff, 409)"
-J_BLD_C=$(sub 00h2 00h2_build_annot.pbs "afterok:${J_BP},$(dep_arr "$J_COMB")"  ANNOT_SET=combined)
+J_BLD_C=$(sub 00h2 00h2_build_annot.pbs "$(dep_join "$(dep_arr "$J_BP")" "$(dep_arr "$J_COMB")")"  ANNOT_SET=combined)
 echo "  build annot : $J_BLD_C  (combined, 596)"
 
 echo "== PolyFun prior, computed from OUR annotations, once per set =="
-J_MUNGE=$(sub 00e 00e_munge.pbs "afterok:${J_REF}")
+J_MUNGE=$(sub 00e 00e_munge.pbs "$(dep_arr "$J_REF")")
 echo "  munge       : $J_MUNGE"
-J_LDSC_S=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_BLD_S")" ANNOT_SET=sniff)
+J_LDSC_S=$(sub 00f 00f_ldscores.pbs "$(dep_join "$(dep_arr "$J_MUNGE")" "$(dep_arr "$J_BLD_S")")" ANNOT_SET=sniff)
 echo "  LD-scores   : $J_LDSC_S  (sniff)"
-J_LDSC_C=$(sub 00f 00f_ldscores.pbs "afterok:${J_MUNGE},$(dep_arr "$J_BLD_C")" ANNOT_SET=combined)
+J_LDSC_C=$(sub 00f 00f_ldscores.pbs "$(dep_join "$(dep_arr "$J_MUNGE")" "$(dep_arr "$J_BLD_C")")" ANNOT_SET=combined)
 echo "  LD-scores   : $J_LDSC_C  (combined)"
 J_PRIOR_S=$(sub 00g 00g_polyfun_prior.pbs "$(dep_arr "$J_LDSC_S")" ANNOT_SET=sniff)
 echo "  prior       : $J_PRIOR_S  (sniff)"
@@ -166,7 +184,7 @@ PNOTE
 fi
 
 echo "== prep (needs annotations + LD) =="
-J_PREP=$(sub 02 02_prep.pbs "$(dep_arr "$J_ANNOT"),$(dep_arr "$J_LD")")
+J_PREP=$(sub 02 02_prep.pbs "$(dep_join "$(dep_arr "$J_ANNOT")" "$(dep_arr "$J_LD")")")
 echo "  prep        : $J_PREP"
 
 if [ "$PREP_ONLY" = 1 ]; then
@@ -193,9 +211,9 @@ J_FB=$(sub 03 03_fb_xregion.pbs "$(dep_arr "$J_PREP")")
 echo "  fb_xregion  : $J_FB"
 J_FM=$(sub 04 04_funmap.pbs     "$(dep_arr "$J_PREP")")
 echo "  funmap      : $J_FM"
-J_PF_S=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_S}" ANNOT_SET=sniff)
+J_PF_S=$(sub 05 05_polyfun.pbs "$(dep_join "$(dep_arr "$J_PREP")" "$(dep_arr "$J_PRIOR_S")")" ANNOT_SET=sniff)
 echo "  polyfun     : $J_PF_S  (sniff, 409 annotations)"
-J_PF_C=$(sub 05 05_polyfun.pbs "$(dep_arr "$J_PREP"),afterok:${J_PRIOR_C}" ANNOT_SET=combined)
+J_PF_C=$(sub 05 05_polyfun.pbs "$(dep_join "$(dep_arr "$J_PREP")" "$(dep_arr "$J_PRIOR_C")")" ANNOT_SET=combined)
 echo "  polyfun     : $J_PF_C  (combined, 596 annotations)"
 
 cat <<NOTE
