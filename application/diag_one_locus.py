@@ -113,6 +113,43 @@ print(f"top training config: |k|={len(top)}  stored value={vals[top]:.6g}")
 print(f"lead  idx={lead} {names[lead]} |Z|={abs(z_np[lead]):.2f} trainPIP={pip[lead]:.4g}")
 print(f"seed  idx={seed} {names[seed]} |Z|={abs(z_np[seed]):.2f} trainPIP={pip[seed]:.4g}")
 
+# --- Does the learned prior account for the self-check gap? ----------------
+# logbf(top training config) must equal mean_memo if this reimplementation is
+# faithful. It does not: the gap was 96.09 nats on ldEUR_08_0045, which I
+# attributed to the trainer scoring under the LEARNED per-variant prior while
+# this script (like generate_credible_sets) uses a UNIFORM one. That was an
+# inference, not a measurement. Here is the measurement.
+#
+# reformat_memo sets memo[()] = sum(log(1 - p0_LEARNED)) and then normalises
+# by mean_memo, so the stored empty-set value recovers the learned prior's
+# null term exactly:
+#     log(memo[()]) = sum(log(1 - p0_learned)) - mean_memo
+# If that differs from the uniform sum(log(1-p0)) by about the gap, the
+# explanation holds. If it is ~equal to the uniform value, the gap is NOT the
+# prior and this reimplementation has a bug -- in which case fix A's evidence
+# needs redoing.
+tz0, tl0, S0, p00, _, _ = build(torch.float64, 1e-3)
+lbf_top, _, _, _ = logbf(sorted(top), tz0, tl0, S0, p00, torch.float64)
+gap = mean_memo - lbf_top
+print(f"\n=== self-check gap: is it the learned prior? ===")
+print(f"  mean_memo                      {mean_memo:12.3f}")
+print(f"  logbf(top config), uniform p0   {lbf_top:12.3f}")
+print(f"  gap to explain                  {gap:12.3f}")
+v_empty = vals.get(tuple([]), None)
+if v_empty is None or v_empty <= 0:
+    print(f"  memo[()] = {v_empty} - cannot recover the learned null term")
+else:
+    learned_null = float(np.log(v_empty)) + mean_memo
+    uniform_null = float(np.sum(np.log(1.0 - 1.0/p)))
+    print(f"  sum(log(1-p0)) learned          {learned_null:12.3f}   (from memo[()] = {v_empty:.6g})")
+    print(f"  sum(log(1-p0)) uniform          {uniform_null:12.3f}")
+    print(f"  difference in the null term     {learned_null - uniform_null:12.3f}")
+    print("\n  The learned prior shifts EVERY configuration's prior term, and the")
+    print("  null term is the part that applies to all of them. If this")
+    print("  difference is the same order as the gap, the explanation holds;")
+    print("  if it is ~0, the gap is a bug in this script and fix A's locus")
+    print("  evidence must be recomputed.")
+
 by_z = list(np.argsort(-np.abs(z_np)))
 cands = {
     "{} (empty)":            [],
