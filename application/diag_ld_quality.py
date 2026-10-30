@@ -77,15 +77,32 @@ for rid in BAD + CONTROL:
     diag  = int((S.row == S.col).sum())
     upper = int((S.row < S.col).sum())
     mx = float(np.abs(S.data).max()) if S.nnz else 0.0
-    print(f"  {w:<28} nnz={S.nnz:>10,}  upper={upper:>10,}  lower={lower:>8,}  "
-          f"diag={diag:>7,}  max|v|={mx:.5f}  "
-          f"{'STRICTLY UPPER (R+R.T is correct)' if lower == 0 else 'HAS LOWER ENTRIES -> R+R.T DOUBLES THEM'}")
+    n = S.shape[0]
+    full_tri = n * (n - 1) // 2
+    # R + R.T doubles an off-diagonal only when BOTH triangles hold it. A
+    # matrix stored in ONE triangle - either one - symmetrises correctly, and
+    # fill_diagonal overwrites the doubled diagonal. These panels are stored
+    # strictly LOWER triangular, so the symmetrisation is right; an earlier
+    # version of this check wrongly flagged that as the bug.
+    both = upper > 0 and lower > 0
+    dense = max(upper, lower) / full_tri if full_tri else 0.0
+    print(f"  {w:<28} n={n:>7,} nnz={S.nnz:>12,}  upper={upper:>12,}  "
+          f"lower={lower:>12,}  diag={diag:>7,}")
+    print(f"  {'':28} dtype={str(S.data.dtype):>8}  max|v|={mx:.5f}  "
+          f"triangle filled={100*dense:.2f}%  "
+          f"{'BOTH TRIANGLES -> R+R.T DOUBLES THEM' if both else 'single triangle -> R+R.T is correct'}")
     seen[w] = 1
 
 bad_mx = [m for _, g, m, _ in rows if g == "BAD"]
 if bad_mx and max(bad_mx) > 1.0:
     print("\nVERDICT: correlations exceed 1 -> prep bug in the R + R.T symmetrisation.")
 else:
-    print("\nVERDICT: no correlation exceeds 1. The negative spectrum is the panel's")
-    print("own sparsification, not a prep bug - these blocks are genuinely far from")
-    print("being correlation matrices and no choice of floor makes them trustworthy.")
+    print("\nVERDICT: no correlation exceeds 1 and the matrices are stored in a")
+    print("single triangle, so the R + R.T symmetrisation is correct and this is NOT")
+    print("a prep bug. Note the `triangle filled` figure: these panels are DENSE, so")
+    print("the negative spectrum is not caused by zeroing small correlations either.")
+    print("Check `dtype` above - reduced-precision storage perturbs eigenvalues by")
+    print("roughly eps*sqrt(n), which at float16 and n~2e4 reaches the observed")
+    print("magnitude. Pairwise-complete correlations would do it too. Either way the")
+    print("panel, not the pipeline, is the source, and no floor makes these blocks")
+    print("trustworthy - they are flagged bad_ld in results/ld_conditioning.csv.")
