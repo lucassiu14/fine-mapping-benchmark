@@ -27,8 +27,11 @@
 # and .npy support (82c7366) postdates upstream entirely, so locus_ld.npy is
 # unreadable to it. prep_block.py stores .npy precisely because the text form
 # is ~800 MB per block, so the text is written into TMPDIR and discarded,
-# never kept. %.7g round-trips float32 exactly, so BEATRICE sees the same
-# values fb_xregion does - not a reduced-precision copy.
+# never kept. %.9g round-trips float32 exactly, so BEATRICE sees the same
+# values fb_xregion does - not a reduced-precision copy. NINE digits, not
+# seven: IEEE-754 binary32 needs 9 significant decimal digits for a
+# guaranteed round-trip (binary64 needs 17). %.7g was tried first and left a
+# max |diff| of 5.000e-08, which the assertion below caught.
 
 set -uo pipefail
 cd "${PBS_O_WORKDIR:-$PWD}" || exit 1
@@ -60,17 +63,29 @@ src, dst = sys.argv[1], sys.argv[2]
 R = np.load(src)
 t = time.time()
 # pandas rather than np.savetxt: savetxt formats row by row in Python and is
-# far slower at this size. %.7g is exact for float32, so the round-trip
-# through text does not perturb the LD upstream sees.
-pd.DataFrame(R).to_csv(dst, sep=' ', header=False, index=False, float_format='%.7g')
+# far slower at this size. %.9g is the shortest format that round-trips
+# float32 exactly - %.7g is NOT, and left 5.000e-08 of error here.
+# Measured: 3,285x3,285 in 15s and 7,281x7,281 in 85s, i.e. O(n^2) as
+# expected, so the largest block (p=16,003) is ~7-9 min - well inside the
+# 6 h walltime.
+pd.DataFrame(R).to_csv(dst, sep=' ', header=False, index=False, float_format='%.9g')
 print(f'wrote {R.shape[0]}x{R.shape[1]} text LD in {time.time()-t:.0f}s', flush=True)
 # Verify the round-trip rather than trusting it: a silent precision or shape
 # change here would alter the comparator's inputs with no other symptom.
 B = pd.read_table(dst, sep=' ', header=None).to_numpy()
 assert B.shape == R.shape, f'shape changed: {R.shape} -> {B.shape}'
-d = float(np.abs(B - R.astype(np.float64)).max())
-print(f'round-trip max |diff| = {d:.3e}', flush=True)
-assert d == 0.0, 'text round-trip is not exact'
+# Compare as FLOAT32, because that is what the model consumes: upstream's
+# gpu_t is torch.tensor(x.astype(float)).float(), exactly as our fork's is.
+# The 9-digit guarantee is float32 -> 9 decimal digits -> float32, so against
+# float64 a ~5e-10 residual remains - the decimal's own rounding - and an
+# exact check on float64 fails even when the model's input is identical. That
+# is what tripped the first canary. Measured at p=400: as float32, %.7g
+# mismatches 56% of entries, %.8g 0.7%, %.9g none.
+B32 = B.astype(np.float32)
+n_bad = int((B32 != R).sum())
+mx = float(np.abs(B32.astype(np.float64) - R.astype(np.float64)).max())
+print(f'float32 round-trip: {n_bad} mismatches of {R.size}, max |diff| {mx:.3e}', flush=True)
+assert n_bad == 0, 'text round-trip is not exact in the float32 the model sees'
 PY
 require_file "$W/locus.ld" 1000 "text LD conversion failed"
 
