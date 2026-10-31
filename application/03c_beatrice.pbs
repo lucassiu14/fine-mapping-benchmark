@@ -38,8 +38,10 @@ cd "${PBS_O_WORKDIR:-$PWD}" || exit 1
 source ./lib.sh
 banner
 mkdir -p beatrice_out logs
-require_env APP_VENV "the prep/fb python environment"
-source "${APP_VENV}/bin/activate"
+# beatriceenv, not appenv: upstream imports imageio and seaborn, which appenv
+# does not have, and pins/appenv.txt is the record of what produced joint_out.
+require_env BEATRICE_VENV "the upstream BEATRICE python environment"
+source "${BEATRICE_VENV}/bin/activate"
 report_python
 
 BU="${BEATRICE_DIR:-$PWD/beatrice_upstream}"

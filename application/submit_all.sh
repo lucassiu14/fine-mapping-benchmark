@@ -38,6 +38,7 @@ done
 # which is what happened when PF_NUM_BINS joined this list - it is optional
 # and only set when pinning the bin count, so an ordinary run has it unset.
 PASS_VARS="APP_ROOT APP_MODULES AWS_MODULE N_LIKELIHOOD APP_VENV FB_DIR
+           BEATRICE_VENV BEATRICE_DIR
            FUNMAP_VENV FUNMAP_DIR POLYFUN_ENV POLYFUN_DIR POLYFUN_RLIB
            R_HOME R_LIBS RPY2_CFFI_MODE PF_NUM_BINS"
 PASS=""; PASS_SKIPPED=""

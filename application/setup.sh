@@ -66,6 +66,7 @@ say "upstream comparators"
 # that produced them ($APP_ROOT/pins/upstream.txt), not chosen here.
 FUNMAP_COMMIT="${FUNMAP_COMMIT:-73835fcd2b950fef307c3a0929255f7309dbe21b}"
 POLYFUN_COMMIT="${POLYFUN_COMMIT:-8b17b4ec87fde11f8d216c049c08d1420cd25de6}"
+BEATRICE_COMMIT="${BEATRICE_COMMIT:-02dd5af}"
 
 mkdir -p "$APP_ROOT/pins"
 : > "$APP_ROOT/pins/upstream.txt"
@@ -102,6 +103,8 @@ pin_repo () {   # dir, url, wanted-commit ("" = unpinned)
 
 pin_repo "$APP_ROOT/Funmap"  https://github.com/LeeHITsz/Funmap.git  "$FUNMAP_COMMIT"
 pin_repo "$APP_ROOT/polyfun" https://github.com/omerwe/polyfun.git  "$POLYFUN_COMMIT"
+pin_repo "$APP_ROOT/beatrice_upstream" \
+         https://github.com/sayangsep/Beatrice-Finemapping.git "$BEATRICE_COMMIT"
 # functional-beatrice is cloned by the user (see the "next" note); record it
 # here too if present, so one file holds every upstream revision.
 if [ -d "${FB_DIR:-$APP_ROOT/functional-beatrice}" ]; then
@@ -260,6 +263,24 @@ mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8
 #   bitarray<3    3.x changed bitarray.decode() to return an iterator; PolyFun's
 #                 plink reader passes the result straight to np.array(dtype=float64)
 #                 and dies with "float() argument must be ... not decodeiterator"
+# Upstream BEATRICE gets its own env, like Funmap and PolyFun do, rather than
+# additions to appenv: pins/appenv.txt is the record of what produced
+# joint_out, and appending a package it never imports makes that record
+# describe something other than the run.
+#
+# The dependency list is what the code actually imports, taken from
+# beatrice.py and scripts/*.py: absl, imageio, matplotlib, numpy, pandas,
+# seaborn, torch, tqdm. imageio is NOT optional - scripts/trainer.py:18
+# imports it at module level for the training-loss GIF, so --plot_loss False
+# does not avoid it.
+#
+# NOT the authors' environment, and this is a documented deviation rather
+# than an oversight: conda_environment.yml pins python 3.7.13 with torch
+# 1.12.1 and is a full workstation export (Spyder, Qt, Sphinx). The cluster's
+# module stack has no python 3.7, so upstream's CODE runs unmodified on a
+# modern interpreter. Nothing about BEATRICE's inputs or flags is changed.
+mkenv beatriceenv numpy pandas torch absl-py tqdm matplotlib imageio seaborn
+
 mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-plink \
                  "bitarray==2.9.2" networkx packaging tqdm "rpy2==3.5.17"
 
@@ -363,6 +384,8 @@ export N_LIKELIHOOD=373220
 export APP_VENV="$APP_ROOT/appenv"
 export FUNMAP_VENV="$APP_ROOT/funmapenv"
 export FUNMAP_DIR="$APP_ROOT/Funmap"
+export BEATRICE_VENV="$APP_ROOT/beatriceenv"
+export BEATRICE_DIR="$APP_ROOT/beatrice_upstream"
 export POLYFUN_ENV="$APP_ROOT/polyfunenv"
 export POLYFUN_DIR="$APP_ROOT/polyfun"
 export POLYFUN_RLIB="$RLIB"
