@@ -164,7 +164,15 @@ rpy2_env() {
   # regression and died with
   #   PackageNotInstalledError: The R package "Ckmeans.1d.dp" is not installed
   # while that very package loaded fine under Rscript.
-  export R_HOME="${R_HOME:?set R_HOME to the R installation rpy2 should embed}"
+  # Resolve R_HOME here if the caller has not. env.sh computes it at SOURCE
+  # time with `R RHOME`, so sourcing env.sh BEFORE `module load $APP_MODULES`
+  # leaves it empty; submit_all's PASS_VARS filter then drops it as unset and
+  # the job dies on the line below. That is how 00g jobs 4481723/4481724 died
+  # after 67 and 54 seconds without computing anything, which went unnoticed
+  # for two days and left the PolyFun priors un-recomputed. By this point
+  # lib.sh has loaded APP_MODULES, so R is on PATH and we can simply ask it.
+  : "${R_HOME:=$(R RHOME 2>/dev/null)}"
+  export R_HOME="${R_HOME:?R_HOME is unset and \"R RHOME\" failed - is the R module in APP_MODULES?}"
   # Prepend only if absent: env.sh exports R_LIBS too, and prepending
   # unconditionally yields "<rlib>:<rlib>" in the log. R dedupes it, so this
   # is cosmetic - but a doubled path in a log is a false lead waiting to be

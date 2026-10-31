@@ -152,7 +152,12 @@ if [ ! -s ${OUTP}.22.snpvar_ridge.gz ] || [ ! -s ${OUTP}.22.bins.parquet ]; then
   # separated bins let the NNLS find a non-zero total.
   NB="${PF_NUM_BINS:-}"
   if [ -n "$NB" ]; then log "bins    : pinned to $NB (PF_NUM_BINS)"
-  else log "bins    : automatic (PolyFun BIC selection)"; fi
+  else log "bins    : automatic (PolyFun Ckmedian selection)"; fi
+  # Record it beside the priors. Recovering this afterwards meant reading
+  # PolyFun's own chol.log, which is appended across runs and does not say
+  # whether a bin count was chosen or imposed - so the provenance of a
+  # published prior was not answerable from the outputs alone.
+  printf '%s\n' "${NB:-automatic}" > "pf_prior_${SET}/BINS.txt"
   python "$PF/polyfun.py" \
     --compute-h2-L2 \
     --output-prefix "$OUTP" \
