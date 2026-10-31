@@ -108,6 +108,18 @@ require_fb_fixes() {
   # quietly, looks like a modelling result, and is the single most expensive
   # mistake available here - so check for it rather than trusting the checkout.
   : "${FB_DIR:?set FB_DIR to the functional-beatrice checkout}"
+  # Deliberate ablations need to run against a checkout that is MISSING a fix,
+  # which every check below exists to prevent. Opt out explicitly and loudly
+  # rather than by deleting the guard: an ablation is the one case where
+  # "this checkout is broken" is the point.
+  if [ -n "${FB_ABLATION:-}" ]; then
+    warn "FB_ABLATION=${FB_ABLATION} - the fb fix guard is DISABLED for this run."
+    warn "This checkout may be missing fixes. Its PIPs are an ablation and must"
+    warn "NOT be reported as the method. Set JOINT_OUT so they land apart from"
+    warn "the reported results."
+    log  "guard    : SKIPPED (FB_ABLATION), fb at $(git -C "$FB_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    return 0
+  fi
   grep -q 'm0 = max(' "${FB_DIR}/scripts/trainer_annot.py" || {
     echo "FATAL: ${FB_DIR} is missing the reformat_memo max-offset fix." >&2
     echo "       Update the checkout to main at d0fb022 or later." >&2

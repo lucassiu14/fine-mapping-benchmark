@@ -47,7 +47,12 @@
 cd "${APP_ROOT:?set APP_ROOT (then: source $APP_ROOT/env.sh)}"
 source ./lib.sh
 banner
-mkdir -p joint_out logs
+# JOINT_OUT lets an ablation write somewhere else, so a run against a
+# deliberately-unfixed FB checkout cannot overwrite the reported results.
+# Pair it with FB_DIR pointing at the ablation checkout and FB_ABLATION=1.
+JO="${JOINT_OUT:-joint_out}"
+mkdir -p "$JO" logs
+log "output   : $JO${JOINT_OUT:+  (JOINT_OUT override)}"
 require_env APP_VENV "the prep/fb python environment"
 source "${APP_VENV}/bin/activate"
 report_python
@@ -61,7 +66,7 @@ while IFS=, read -r rid rest; do
   [ -f "$d/EXCLUDED" ] && { N_EXCL=$((N_EXCL+1)); continue; }
   [ -f "$d/DONE" ] || { echo "MISSING prep: $rid" >&2; continue; }
   printf '%s\t%s\t%s\t%s\t%s\n' "$d/locus.z" "$d/locus_ld.npy" "$d/locus.annot" \
-         "joint_out/$rid" "${N_LIKELIHOOD:-337000}" >> manifest.tsv
+         "$JO/$rid" "${N_LIKELIHOOD:-337000}" >> manifest.tsv
 done < blocks.csv
 N_MAN=$(( $(wc -l < manifest.tsv) - 1 ))
 N_BLK=$(( $(wc -l < blocks.csv) - 1 - N_EXCL ))
@@ -101,7 +106,7 @@ python "${FB_DIR}/beatrice_joint.py" \
   --manifest manifest.tsv \
   --N "${N_LIKELIHOOD:-337000}" \
   --n_caus 10 --max_iter 2000 --prior_head lassonet \
-  --save_prior_weights joint_out/prior_head.pt
+  --save_prior_weights "$JO/prior_head.pt"
 
 section "verifying output"
 MISS=0
@@ -109,6 +114,6 @@ while IFS=$'\t' read -r _ _ _ tgt _; do
   [ -s "$tgt/pip.csv" ] || { warn "no pip.csv for $(basename "$tgt")"; MISS=$((MISS+1)); }
 done < <(tail -n +2 manifest.tsv)
 [ "$MISS" -eq 0 ] || die "$MISS of $N_MAN blocks produced no pip.csv"
-check_output joint_out/prior_head.pt 1000
+check_output "$JO/prior_head.pt" 1000
 log "all $N_MAN blocks produced PIPs"
 finish
