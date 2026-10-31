@@ -17,6 +17,29 @@ blocks = pd.read_csv(os.path.join(ROOT, "blocks.csv"))
 
 chrom_of = dict(zip(blocks.region_id, blocks.chrom))
 
+# Comparator runs that may or may not be present. Gated on the directory so a
+# run that has not happened yet does not report 254 missing outputs, which
+# would bury the genuine misses in the summary at the end.
+#
+#   beatrice      upstream BEATRICE, unmodified, on its own defaults: no
+#                 annotations, no shared prior head. The literature baseline.
+#   fb_memomean   fb_xregion with ONLY the mean-vs-max memo normalisation
+#                 reverted (ablation/memo-mean-offset, 9494664). Isolates that
+#                 fix as a single variable against fb_xregion.
+#   fb_prefix     the d0fb022 run, kept when the fixes were applied: max
+#                 offset but a uniform prior in the sweep and the fixed 1e-3
+#                 LD clip. Isolates the prior pass-through and the floor.
+#
+# These are ABLATIONS, not methods. 10_analyse_pips reports them separately.
+OPTIONAL = {
+    "beatrice":    (os.path.join(ROOT, "beatrice_out"),              "{rid}/pip.csv", "csv_named"),
+    "fb_memomean": (os.path.join(ROOT, "joint_out.memomean"),        "{rid}/pip.csv", "csv_named"),
+    "fb_prefix":   (os.path.join(ROOT, "joint_out.pre_fix_d0fb022"), "{rid}/pip.csv", "csv_named"),
+}
+PRESENT = {k: v for k, v in OPTIONAL.items() if os.path.isdir(v[0])}
+if PRESENT:
+    print("also collecting: " + ", ".join(sorted(PRESENT)))
+
 rows, missing, excluded = [], [], []
 for rid in blocks.region_id:
     d = os.path.join(ROOT, "regions", rid)
@@ -38,6 +61,8 @@ for rid in blocks.region_id:
         "polyfun_sniff": (os.path.join(ROOT, "polyfun_out_sniff", f"{rid}.txt.gz"), "finemapper"),
         "polyfun_combined": (os.path.join(ROOT, "polyfun_out_combined", f"{rid}.txt.gz"), "finemapper"),
     }
+    for meth, (root, tmpl, kind) in PRESENT.items():
+        src[meth] = (os.path.join(root, tmpl.format(rid=rid)), kind)
     for meth, (path, kind) in src.items():
         if not os.path.exists(path):
             missing.append((rid, meth)); continue
@@ -51,7 +76,19 @@ for rid in blocks.region_id:
             col = "PIP" if "PIP" in fm.columns else "pip"
             p = snps.SNP.map(dict(zip(fm.SNP, fm[col]))).fillna(0.0).to_numpy(float)
         else:
-            p = pd.read_csv(path)["pip"].to_numpy(float)
+            # Upstream BEATRICE writes pip.csv too (generate_credible_sets.py:360)
+            # but is not guaranteed to name the column exactly as our fork does,
+            # so find it case-insensitively and fall back to the last numeric
+            # column rather than raising a KeyError on a whole run.
+            t = pd.read_csv(path)
+            col = next((c for c in t.columns if c.strip().lower() == "pip"), None)
+            if col is None:
+                num = [c for c in t.columns if pd.api.types.is_numeric_dtype(t[c])]
+                if not num:
+                    missing.append((rid, f"{meth}: no numeric column in {os.path.basename(path)}"))
+                    continue
+                col = num[-1]
+            p = t[col].to_numpy(float)
         if len(p) != len(snps):
             missing.append((rid, f"{meth}:length {len(p)} != {len(snps)}")); continue
         rows.append(pd.DataFrame(dict(

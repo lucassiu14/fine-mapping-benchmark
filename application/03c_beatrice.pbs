@@ -1,0 +1,87 @@
+#!/bin/bash
+#PBS -N chol_beatrice
+#PBS -l select=1:ncpus=4:mem=48gb
+#PBS -l walltime=06:00:00
+#PBS -j oe
+#PBS -o logs/
+#PBS -J 1-265
+
+# Upstream BEATRICE (sayangsep/Beatrice-Finemapping), UNMODIFIED, as the
+# literature baseline: no functional annotations and no cross-region prior
+# head, so this is the "does functional information help" reference point.
+#
+# Run on ITS OWN defaults, not ours. Upstream ships sigma_sq 0.05,
+# sparse_concrete 50, n_caus 20; our fork's are 0.0899, 51 and 10 (Optuna
+# trial 401), and 03_fb_xregion passes --n_caus 10 explicitly. Nothing is
+# passed here beyond the data and N, so the published configuration applies.
+# Consequence for interpretation: an fb_xregion vs beatrice contrast moves
+# the annotations, the memo normalisation AND three hyperparameters at once.
+# joint_out.memomean isolates the memo normalisation on its own.
+#
+# This is a 265-way ARRAY, not one long job: upstream has no shared prior
+# head, so each locus is independent. That is itself a difference from
+# fb_xregion, which must be a single job because its head is shared.
+#
+# LD has to be materialised as TEXT. Upstream reads it with
+#   pd.read_table(options['LD'], sep=' ', header=None)      (trainer.py:351)
+# and .npy support (82c7366) postdates upstream entirely, so locus_ld.npy is
+# unreadable to it. prep_block.py stores .npy precisely because the text form
+# is ~800 MB per block, so the text is written into TMPDIR and discarded,
+# never kept. %.7g round-trips float32 exactly, so BEATRICE sees the same
+# values fb_xregion does - not a reduced-precision copy.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$PWD}" || exit 1
+source ./lib.sh
+banner
+mkdir -p beatrice_out logs
+require_env APP_VENV "the prep/fb python environment"
+source "${APP_VENV}/bin/activate"
+report_python
+
+BU="${BEATRICE_DIR:-$PWD/beatrice_upstream}"
+require_file "$BU/beatrice.py" 1000 "clone sayangsep/Beatrice-Finemapping to $BU"
+log "beatrice : $BU at $(git -C "$BU" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+read -r RID CHR BS BE LDR < <(awk -F, -v i="$((PBS_ARRAY_INDEX + 1))" \
+  'NR==i{print $1, $2, $3, $4, $5}' blocks.csv)
+[ -n "$RID" ] || { echo "no block at index ${PBS_ARRAY_INDEX}"; exit 1; }
+D="regions/$RID"
+[ -f "$D/EXCLUDED" ] && { echo "$RID: excluded by the unannotated-gap rule"; exit 0; }
+[ -f "$D/DONE" ]     || { echo "MISSING prep: $RID" >&2; exit 1; }
+[ -s "beatrice_out/$RID/pip.csv" ] && { echo "$RID already done"; exit 0; }
+
+W="${TMPDIR:-/tmp}/${RID}"; mkdir -p "$W"; trap 'rm -rf "$W"' EXIT
+section "materialising text LD for $RID"
+python - "$D/locus_ld.npy" "$W/locus.ld" <<'PY'
+import sys, time
+import numpy as np, pandas as pd
+src, dst = sys.argv[1], sys.argv[2]
+R = np.load(src)
+t = time.time()
+# pandas rather than np.savetxt: savetxt formats row by row in Python and is
+# far slower at this size. %.7g is exact for float32, so the round-trip
+# through text does not perturb the LD upstream sees.
+pd.DataFrame(R).to_csv(dst, sep=' ', header=False, index=False, float_format='%.7g')
+print(f'wrote {R.shape[0]}x{R.shape[1]} text LD in {time.time()-t:.0f}s', flush=True)
+# Verify the round-trip rather than trusting it: a silent precision or shape
+# change here would alter the comparator's inputs with no other symptom.
+B = pd.read_table(dst, sep=' ', header=None).to_numpy()
+assert B.shape == R.shape, f'shape changed: {R.shape} -> {B.shape}'
+d = float(np.abs(B - R.astype(np.float64)).max())
+print(f'round-trip max |diff| = {d:.3e}', flush=True)
+assert d == 0.0, 'text round-trip is not exact'
+PY
+require_file "$W/locus.ld" 1000 "text LD conversion failed"
+
+section "running upstream BEATRICE on $RID"
+mkdir -p "beatrice_out/$RID"
+python "$BU/beatrice.py" \
+  --z "$D/locus.z" \
+  --LD "$W/locus.ld" \
+  --target "beatrice_out/$RID" \
+  --N "${N_LIKELIHOOD:-337000}"
+
+section "verifying output"
+check_output "beatrice_out/$RID/pip.csv" 100
+log "done: beatrice_out/$RID"
