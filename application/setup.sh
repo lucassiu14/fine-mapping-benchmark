@@ -81,6 +81,12 @@ pin_repo () {   # dir, url, wanted-commit ("" = unpinned)
       git clone -q --depth 1 "$url" "$d" || bail "$name: clone failed"
     fi
   fi
+  # RDS project space does not preserve the executable bit, so git reports
+  # every tracked script as modified (100755 -> 100644) the instant it is
+  # cloned. A checkout then refuses with "Your local changes would be
+  # overwritten", on a tree nobody has edited. Ignore mode here so a pin can
+  # always be moved; it changes no file contents.
+  git -C "$d" config core.fileMode false 2>/dev/null || true
   have=$(git -C "$d" rev-parse HEAD 2>/dev/null) || bail "$name at $d is not a git checkout"
   printf '%-10s %s\n' "$name" "$have" >> "$APP_ROOT/pins/upstream.txt"
   if [ -n "$want" ]; then
