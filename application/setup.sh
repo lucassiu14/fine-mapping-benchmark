@@ -279,7 +279,30 @@ mkenv funmapenv "numpy==1.26.2" "scipy==1.11.4" "pandas==2.1.3" "matplotlib==3.8
 # 1.12.1 and is a full workstation export (Spyder, Qt, Sphinx). The cluster's
 # module stack has no python 3.7, so upstream's CODE runs unmodified on a
 # modern interpreter. Nothing about BEATRICE's inputs or flags is changed.
-mkenv beatriceenv numpy pandas torch absl-py tqdm matplotlib imageio seaborn
+# numpy<2 is REQUIRED, not caution. Upstream's calculate_pip does
+#   pip[i] += M[k]                       (scripts/trainer.py:280)
+# where M[k] is an ARRAY, and numpy 2 refuses that with "setting an array
+# element with a sequence". Measured: the run trains for 7-33 min and then
+# dies at trainer.py:417 on exactly this. Our fork fixed that line with
+# float(np.asarray(memo[k]).squeeze()); upstream is run UNMODIFIED, so it
+# needs the numpy it was written against. Upstream declares numpy==1.21.5;
+# polyfunenv pins "numpy<2" for the same class of reason.
+mkenv beatriceenv "numpy<2" pandas torch absl-py tqdm matplotlib imageio seaborn
+
+say "verifying beatriceenv can run upstream BEATRICE"
+env -u PYTHONPATH -u PYTHONHOME "$APP_ROOT/beatriceenv/bin/python" - <<'PYCHK' \
+  || bail "beatriceenv cannot run upstream BEATRICE"
+import numpy, pandas, torch, absl, tqdm, matplotlib, imageio, seaborn
+major = int(numpy.__version__.split('.')[0])
+assert major == 1, (
+    f"numpy {numpy.__version__} is installed but upstream BEATRICE needs 1.x: "
+    "its calculate_pip accumulates an ARRAY into a scalar slot "
+    "(scripts/trainer.py:280) and numpy 2 raises ValueError there, after "
+    "training has already run. Upstream declares numpy==1.21.5.")
+print(f"  numpy {numpy.__version__}, torch {torch.__version__}, "
+      f"pandas {pandas.__version__}, imageio {imageio.__version__}")
+print("  all 8 imports OK")
+PYCHK
 
 mkenv polyfunenv "numpy<2" scipy pandas "pyarrow==17.0.0" scikit-learn pandas-plink \
                  "bitarray==2.9.2" networkx packaging tqdm "rpy2==3.5.17"

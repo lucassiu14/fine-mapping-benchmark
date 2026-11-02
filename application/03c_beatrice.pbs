@@ -1,7 +1,12 @@
 #!/bin/bash
 #PBS -N chol_beatrice
 #PBS -l select=1:ncpus=4:mem=48gb
-#PBS -l walltime=06:00:00
+# 10 h, not 6. BEATRICE's cost is O(p^2): measured 7 min at p=3,285 and
+# 33 min at p=7,281 (ratio 4.91 against a predicted 4.91), so the largest
+# block at p=16,003 extrapolates to ~2.7 h, plus ~9 min to write its text LD.
+# 6 h left under 2x headroom on an untested extrapolation; 10 h stays in the
+# same 24 h queue tier and costs nothing extra.
+#PBS -l walltime=10:00:00
 #PBS -j oe
 #PBS -o logs/
 #PBS -J 1-265
