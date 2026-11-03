@@ -115,10 +115,13 @@ for ax, m in zip(axes, ORDER):
 axes[-1].set_xticks([offset[c] + chrom_len[c] / 2 for c in sorted(offset)])
 axes[-1].set_xticklabels([str(c) for c in sorted(offset)])
 axes[-1].set_xlabel("chromosome")
+# y=1.002 / 0.986 put these 11 pt apart on a 695 pt canvas and the two lines
+# overlapped. Both sit above the axes now, with the subtitle clear of the title.
 fig.suptitle("Posterior inclusion probabilities across 254 LDetect blocks, "
-             "UK Biobank total cholesterol", y=1.002, fontsize=10, ha="center")
-fig.text(0.5, 0.986, "four methods (coloured) above the rule; three ablations of "
-         "functional BEATRICE (grey) below it", ha="center", fontsize=7.5, color=MUTED)
+             "UK Biobank total cholesterol", y=1.030, fontsize=10, ha="center")
+fig.text(0.5, 1.008, "four methods (coloured) above the rule; three ablations of "
+         "functional BEATRICE (grey) below it", ha="center", va="top",
+         fontsize=7.5, color=MUTED)
 fig.subplots_adjust(hspace=0.34)
 fig.savefig(os.path.join(OUT, "fig1_pips_genome.pdf"))
 fig.savefig(os.path.join(OUT, "fig1_pips_genome.png"), dpi=200)
@@ -221,7 +224,10 @@ for m in ORDER:
 ax.set_xscale("log"); ax.set_xlabel("95% credible-set size (variants)")
 ax.set_ylabel("fraction of signal regions")
 ax.set_title("d  95% credible-set size", loc="left")
-ax.legend(loc="lower right", frameon=False, fontsize=6.5)
+# frameon=False let the mean-offset curve run straight through the labels.
+ax.legend(loc="lower right", fontsize=6.5, frameon=True, framealpha=1.0,
+          facecolor="white", edgecolor="none", borderpad=0.5,
+          handlelength=1.8, labelspacing=0.32).set_zorder(5)
 recede(ax, grid="both")
 
 fig.tight_layout(pad=1.1)
