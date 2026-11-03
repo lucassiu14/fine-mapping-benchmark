@@ -742,22 +742,64 @@ construction, not missing: `ldEUR_06_0019/0020`, `ldEUR_08_0011/0012/0013/0015`,
 
 ### 6.1 What the seven columns are
 
-Four are methods; three are ablations of our own code and must not be read as
-methods.
+Four are methods; three are states of our own code and must never be quoted as
+methods. The three functional-BEATRICE columns are **not a ladder** — they are
+two ablation arms off the full method, and the commit graph is the authority:
 
-| column | what it is |
-|---|---|
-| `fb_xregion` | functional BEATRICE, all fixes: max memo offset, adaptive LD floor, learned per-variant prior |
-| `funmap` | upstream Funmap, unmodified |
-| `polyfun_sniff` | PolyFun + SuSiE on the Borzoi/Sniff annotation set |
-| `polyfun_combined` | PolyFun + SuSiE on Borzoi + baselineLF |
-| `fb_prefix` | *ablation*: FB at `d0fb022` — max offset, but a **uniform** prior in the credible-set sweep and the fixed `1e-3` LD clip |
-| `fb_memomean` | *ablation*: FB with only the **mean** memo offset restored (`ablation/memo-mean-offset`, `9494664`) |
-| `beatrice` | upstream `sayangsep/Beatrice-Finemapping` @ `02dd5af`, **unmodified**, on its own published defaults (`sigma_sq` 0.05, `sparse_concrete` 50, `n_caus` 20) |
+```
+upstream sayangsep/Beatrice-Finemapping @ 02dd5af  ─────────────►  beatrice
+  │  no annotations, no shared prior head,
+  │  upstream defaults: sigma_sq 0.05, sparse_concrete 50, n_caus 20
+  │
+  │  our fork adds, before any of the columns below:
+  │    • 102 Borzoi/Sniff annotations per variant
+  │    • a LassoNet prior head SHARED across all 254 blocks (one set of
+  │      annotation weights for the genome, not one per block)
+  │    • tuned hyperparameters (f9b089a): n_caus 20→10, sigma_sq
+  │      0.05→0.0899, sparse_concrete 50→51
+  │    • a single-logit prior head (de18eda)
+  │
+8d59368   memo offset: mean → max  (the log-sum-exp trick)
+74c76a1   LD: project onto the nearest PD correlation matrix, fixed 1e-3 floor
+  │
+d0fb022  ───────────────────────────────────────────►  fb_prefix
+  │
+fc82a9c   pass the LEARNED per-variant prior into the credible-set sweep;
+  │       make the LD eigenvalue floor ADAPTIVE (the panel's own error scale)
+f3bd29a  ───────────────────────────────────────────►  fb_xregion
+  │
+9494664   ABLATION: revert ONLY the memo offset, max → mean
+         ───────────────────────────────────────────►  fb_memomean
+```
 
-A `fb_xregion` vs `beatrice` contrast therefore moves annotations, the
-cross-region prior head, the memo normalisation *and* three hyperparameters at
-once. Only `fb_memomean` → `fb_prefix` is a single-variable ablation.
+`f3bd29a` is an **ancestor** of `9494664`, so `fb_memomean` sits *downstream* of
+`fb_xregion`, not between it and `fb_prefix`.
+
+| column | kind | what it is, exactly |
+|---|---|---|
+| `fb_xregion` | method | functional BEATRICE at `f3bd29a`. Annotations + shared LassoNet head + max memo offset + nearest-PD LD with an adaptive floor + the learned per-variant prior carried into the credible-set sweep. **The full method.** |
+| `funmap` | method | upstream Funmap, unmodified. `L = 10`. |
+| `polyfun_sniff` | method | PolyFun + SuSiE, prior from the Borzoi/Sniff annotations only — the same information `fb_xregion`'s head sees, binned. `--max-num-causal 10`. |
+| `polyfun_combined` | method | PolyFun + SuSiE, prior from Borzoi + baselineLF (baselineLF adds explicit coding and conserved categories; see §6.12). |
+| `fb_prefix` | **state, not a method** | FB at `d0fb022`: everything `fb_xregion` has **except** the learned prior (the sweep runs under a **uniform** prior) and **except** the adaptive floor (a fixed `1e-3` clip). Two variables from `fb_xregion`. |
+| `fb_memomean` | **state, not a method** | FB at `9494664`: `fb_xregion` with **one line reverted** — `reformat_memo` subtracts the **mean** log-BF instead of the **max**. Everything else, learned prior and adaptive floor included, is identical. **One variable from `fb_xregion`.** |
+| `beatrice` | method (literature baseline) | upstream `sayangsep/Beatrice-Finemapping` @ `02dd5af`, unmodified, on its own published defaults. No annotations, no shared head. |
+
+**What each ablation isolates, and what it does not.**
+
+- `fb_xregion` vs `fb_memomean` — **the only single-variable comparison here.**
+  It isolates the memo normalisation and nothing else. Subtracting the mean
+  rather than the max leaves every above-average configuration positive, so
+  anything above `mean + log(1e15)` saturates; `calculate_pip` then returns a
+  count of configurations rather than a posterior.
+- `fb_xregion` vs `fb_prefix` — isolates **two** changes together, the learned
+  prior pass-through and the adaptive LD floor. They were committed together in
+  `fc82a9c` and have not been separated, so no statement here attributes an
+  effect to one of them alone.
+- `fb_xregion` vs `beatrice` — moves annotations, the shared head, three
+  hyperparameters, the memo normalisation **and** the LD treatment at once. It
+  is a literature baseline, not an ablation, and nothing causal should be read
+  into the gap.
 
 **Row alignment is checked, not assumed.** `06_collect.py` asserts that every
 method's PIP vector matches `snps.csv` in length but never in order, and upstream
@@ -853,20 +895,36 @@ the strongest loci in the genome and nothing about them generalises.
 
 ### 6.5 Two different fixes, two different effects
 
-The ladder separates cleanly, and the two axes are not the same axis.
+Both arms off `fb_xregion` (§6.1) degrade it, but along different axes, and the
+two axes are not the same axis.
 
-**Calibration is the mean → max memo offset, on its own.** `fb_memomean` →
-`fb_prefix` changes exactly one thing, and median max PIP goes 0.026 → 0.88,
-per-region Spearman against `fb_xregion` goes 0.012 → 0.898, and confident calls go
-1 → 87. With the mean offset the normaliser saturates, every proposed configuration
-lands more than 745 nats below it, is stored as exactly 0.0, and the sweep runs
-inert — the surviving PIP is a variational selection frequency, not a posterior.
+**Calibration is the mean → max memo offset, on its own.** The single-variable
+comparison is `fb_xregion` vs `fb_memomean` (§6.1) — one reverted line, everything
+else held fixed. Reverting it takes median max PIP from **0.917 to 0.026**,
+confident variants from **136 to 1**, near-lead localisation from **134/185 to
+54/185**, and the median credible set from **2 to 72**. The per-region Spearman
+between the two is **+0.012**: with the mean offset the method does not agree
+even with itself. The mechanism is saturation — subtracting the mean leaves every
+above-average configuration positive, anything above `mean + log(1e15)` saturates,
+every other proposed configuration lands more than 745 nats below and is stored as
+exactly 0.0, and the sweep runs inert. The surviving PIP is a variational selection
+frequency, not a posterior.
 
-**Localisation is the annotations and the learned prior.** Along the four rungs,
-the count of blocks where the top variant carries ≥ 99% of the lead's |Z| runs
-6 → 54 → 95 → 134, and the count where it carries |Z| < 2 runs 153 → 62 → 37 → 1.
+(An earlier draft of this section compared `fb_memomean` to `fb_prefix` and called
+that the single-variable ablation. It is not: that pair differs by the memo offset
+**and** the learned prior **and** the floor, because `fb_memomean` branches off
+`fb_xregion` rather than sitting between the two.)
 
-The prior/floor rung (`fb_prefix` → `fb_xregion`) trades quantity for quality,
+**Localisation responds to the learned prior and the floor.** Blocks where the
+top variant carries ≥ 99% of the lead's |Z|, out of 185: `fb_xregion` 134,
+`fb_prefix` 95, `fb_memomean` 54, `beatrice` 6. Blocks where it carries |Z| < 2:
+1, 37, 62, 153 respectively. Read these as four separate values, **not** as a
+sequence — only the `fb_xregion`/`fb_memomean` pair differs by a single variable,
+`fb_xregion`/`fb_prefix` differs by two, and `beatrice` differs by everything
+(§6.1). In particular, nothing here isolates the contribution of the annotations:
+no column has our annotations removed while holding the rest of the fork fixed.
+
+The prior/floor arm (`fb_prefix` → `fb_xregion`) trades quantity for quality,
 and per variant (§6.3) the trade is far larger than the region-level view shows:
 confident calls **653 → 136**, calls on |Z| < 2 **540 → 1**, calls below genome-wide
 significance 563 → 21, calls in blocks with no signal 218 → 12, median |Z| of a
