@@ -1039,12 +1039,61 @@ evidence. `fb_xregion`'s corresponding ranks are 5 and 9.
 carries |Z| < 2 in 153 of 185 signal regions (§6.4). Report it as a coincidence
 of the extreme locus, not as a capability.
 
-### 6.12 What this does and does not establish
+### 6.12 Coding-consequence enrichment: a check that needs no truth set
+
+Seven controls cannot separate methods. This one scales to every call and
+needs no known causals: of the variants a method declares causal at PIP ≥ 0.95,
+what share are protein-altering? The reference is the set of GWAS lead variants
+— what you would pick with no fine-mapping at all. Consequences come from the
+Ensembl VEP REST endpoint queried **by rsID**, so no GRCh37/38 liftover enters;
+cached in `vep_consequences.json`, reproduced by `13_coding_enrichment.py`.
+All 1,040 ids resolved.
+
+| set | calls | protein-altering | % | 95% CI | × lead rate |
+|---|---|---|---|---|---|
+| `polyfun_combined` | 69 | 23 | **33.3%** | [23.4, 45.1] | 4.4× |
+| `polyfun_sniff` | 83 | 25 | **30.1%** | [21.3, 40.7] | 4.0× |
+| `fb_xregion` | 136 | 23 | 16.9% | [11.5, 24.1] | 2.2× |
+| `funmap` | 263 | 33 | 12.5% | [9.1, 17.1] | 1.7× |
+| `fb_prefix` | 653 | 14 | **2.1%** | [1.3, 3.6] | **0.3×** |
+| *GWAS lead variants* | 185 | 14 | 7.6% | [4.6, 12.3] | 1.0× |
+
+**On this metric PolyFun wins, clearly, and `fb_xregion` is second.** PolyFun
+recovers as many protein-altering variants as `fb_xregion` (23) from half the
+calls (69 against 136). Report it that way; it is the one headline measure here
+that does not favour our own method.
+
+**`fb_prefix` is DEPLETED relative to doing no fine-mapping at all** — 2.1%
+against the leads' 7.6%. Its 653 calls are not merely unselective, they point
+away from coding variants, which is independent confirmation that the saturated
+posterior is noise rather than a different answer.
+
+Three limits travel with these numbers:
+
+1. **Protein-altering consequence is a proxy for causality**, and a biased one:
+   it counts a genuinely regulatory causal variant as a failure. SORT1
+   `rs12740374` is the canonical lipid example, and it is non-coding. A method
+   that resolves regulatory variants well is penalised here.
+2. **It is partly circular for a functionally informed method.** PolyFun's
+   `combined` prior is built on baselineLF, which carries explicit coding and
+   conserved categories, so that column is partly *instructed* to upweight
+   coding variants. `polyfun_sniff` is not — it sees only the Borzoi PCs, the
+   same information `fb_xregion`'s head sees — and still reaches 30.1% against
+   16.9%. That pair is the comparison worth reading, and it does not go our way.
+3. **The sets overlap**, each other and the lead set: 39–43% of each method's
+   calls *are* its block's lead. The intervals are Wilson binomial intervals for
+   each set on its own; no test between sets is offered, because they are not
+   independent samples. `polyfun_combined` [23.4, 45.1] and `fb_xregion`
+   [11.5, 24.1] barely separate.
+
+### 6.13 What this does and does not establish
 
 **Does.** Both fixes to our own code are necessary and they do different jobs
-(§6.5). `fb_xregion` is the only column that is both confident and clean: the
-highest localisation rate (134/185), the smallest credible sets among the confident
-methods (median 2), and one call on a null against funmap's 52. The PolyFun priors
+(§6.5). `fb_xregion` leads on localisation (134/185), has the smallest credible
+sets among the confident methods (median 2), places one call on a null against
+funmap's 61, and is the only method of the four to recover APOE ε2 (§6.11).
+**PolyFun, not `fb_xregion`, leads on coding enrichment** (§6.12), so the two
+families win different measures and the honest summary names both. The PolyFun priors
 run on PolyFun's documented default bin selection (30 bins, chosen automatically);
 the earlier 10-bin pinning was a diagnostic that `--nnls-exact` made unnecessary.
 
