@@ -88,3 +88,6 @@ __pycache__/
 # Deposit staging directory built for archiving results
 zenodo/
 Rplots.pdf
+
+# locally generated figures
+application/figures/
