@@ -729,11 +729,286 @@ installation rpy2 should embed.
 
 ---
 
-## 6. Open items
+## 6. Results
 
-- **Pre-registered prediction.** `RNAGTEX-PC5` (0-based) separates liver at
-  3.5 SD, so a lipid trait should select it. Check
-  `results/annotation_weights.csv` against Funmap's shrunk weights.
-- **Correctness anchor.** Funmap's paper fine-maps cholesterol at
+Produced by `06_collect.py` (collection and QC), `09_ld_conditioning.py` (per-block
+LD diagnostics), `10_analyse_pips.py` (the tables below), `diag_comparator_ladder.py`
+(the ablation audit) and `11_export_results.py` (the local bundle).
+
+254 blocks, 7 columns, 15,375,983 (region, variant, method) rows, **zero missing
+outputs**. The 11 blocks excluded by the unannotated-gap rule (§1) are absent by
+construction, not missing: `ldEUR_06_0019/0020`, `ldEUR_08_0011/0012/0013/0015`,
+`ldEUR_11_0028/0029/0030/0031/0032`.
+
+### 6.1 What the seven columns are
+
+Four are methods; three are ablations of our own code and must not be read as
+methods.
+
+| column | what it is |
+|---|---|
+| `fb_xregion` | functional BEATRICE, all fixes: max memo offset, adaptive LD floor, learned per-variant prior |
+| `funmap` | upstream Funmap, unmodified |
+| `polyfun_sniff` | PolyFun + SuSiE on the Borzoi/Sniff annotation set |
+| `polyfun_combined` | PolyFun + SuSiE on Borzoi + baselineLF |
+| `fb_prefix` | *ablation*: FB at `d0fb022` — max offset, but a **uniform** prior in the credible-set sweep and the fixed `1e-3` LD clip |
+| `fb_memomean` | *ablation*: FB with only the **mean** memo offset restored (`ablation/memo-mean-offset`, `9494664`) |
+| `beatrice` | upstream `sayangsep/Beatrice-Finemapping` @ `02dd5af`, **unmodified**, on its own published defaults (`sigma_sq` 0.05, `sparse_concrete` 50, `n_caus` 20) |
+
+A `fb_xregion` vs `beatrice` contrast therefore moves annotations, the
+cross-region prior head, the memo normalisation *and* three hyperparameters at
+once. Only `fb_memomean` → `fb_prefix` is a single-variable ablation.
+
+**Row alignment is checked, not assumed.** `06_collect.py` asserts that every
+method's PIP vector matches `snps.csv` in length but never in order, and upstream
+BEATRICE is a separate program reading a text LD file we materialise for it.
+`diag_comparator_ladder.py` `[1]` verifies the order against the labels upstream
+itself writes: 0 mismatches and `variant_index == 0..p-1` in all 254 blocks. Note
+that those labels are `"<region_id>_<BP>"`, not rsIDs (`prep_block.py:172`), so
+comparing them to `snps.csv` `SNP` reports 254/254 mismatched however well aligned
+the run is.
+
+### 6.2 Headline, signal regions only
+
+185 of 254 blocks carry a genome-wide signal (lead |Z| ≥ 5.45); 69 do not. Median
+lead |Z| among the 185 is 7.22.
+
+| method | med sumPIP | med maxPIP | PIP ≥ .95 | med CS | top = lead | med lead PIP |
+|---|---|---|---|---|---|---|
+| `beatrice` | 3.34 | 0.0065 | 1 | 348 | 2 | 0.0000 |
+| `fb_memomean` | 32.41 | 0.0262 | 1 | 72 | 46 | 0.0128 |
+| `fb_prefix` | 1.94 | 0.8797 | 87 | 2 | 67 | 0.0090 |
+| `fb_xregion` | 1.01 | 0.9169 | 79 | **2** | 83 | **0.3817** |
+| `funmap` | 9.99 | 1.0000 | **145** | **1** | 56 | 0.1951 |
+| `polyfun_combined` | 9.98 | 0.4345 | 39 | 4 | **88** | 0.2507 |
+| `polyfun_sniff` | 9.95 | 0.4363 | 46 | 4 | 76 | 0.2297 |
+
+`funmap` makes by far the most confident calls and `polyfun_combined` picks the
+exact lead most often, so neither of those columns alone separates the methods.
+The next two tables do.
+
+### 6.3 Do the confident calls carry marginal evidence?
+
+All 254 blocks. A call is a variant with PIP ≥ 0.95.
+
+| method | calls | med \|Z\| | \|Z\| < 2 | \|Z\| < 5.45 |
+|---|---|---|---|---|
+| `beatrice` | 1 | 82.85 | 0 | 0 |
+| `fb_memomean` | 1 | 82.92 | 0 | 0 |
+| `fb_prefix` | 106 | 6.55 | 19 | 37 |
+| `fb_xregion` | 90 | 6.98 | **1** | 13 |
+| `funmap` | 170 | 5.36 | **52** | 88 |
+| `polyfun_combined` | 41 | 7.83 | 0 | 5 |
+| `polyfun_sniff` | 49 | 8.05 | 1 | 8 |
+
+**52 of funmap's 170 confident calls sit on variants with |Z| < 2** — no marginal
+evidence at all — and 88 are below genome-wide significance. `fb_xregion` makes
+roughly half as many calls and one of them is on |Z| < 2.
+
+### 6.4 Localisation: what |Z| does each method's own top variant carry?
+
+Signal regions. `top = lead` scores picking a perfect-LD partner of the lead as a
+miss, which understates localisation; the |Z| the top variant actually carries does
+not.
+
+| method | med top \|Z\| | top \|Z\| ≥ .99 × lead | top \|Z\| < 2 | top = lead |
+|---|---|---|---|---|
+| `beatrice` | 0.76 | 6/185 | 153 | 2 |
+| `fb_memomean` | 4.84 | 54/185 | 62 | 46 |
+| `fb_prefix` | 6.25 | 95/185 | 37 | 67 |
+| `fb_xregion` | **6.95** | **134/185** | **1** | 83 |
+| `funmap` | 6.07 | 78/185 | 44 | 56 |
+| `polyfun_combined` | 6.66 | 106/185 | 4 | 88 |
+| `polyfun_sniff` | 6.59 | 99/185 | 3 | 76 |
+
+Median lead |Z| is 7.22, so `fb_xregion`'s median top variant at 6.95 is essentially
+at the lead. It lands on a null in 1 of 185 blocks; `funmap` does so in 44.
+
+Upstream BEATRICE's top variant carries |Z| = 0.76 in the median signal region and
+|Z| < 2 in 153 of 185. It *does* localise in the handful of extreme loci — top |Z|
+82.85 against a lead of 82.92 at APOE, 35.40 against 35.40 at PCSK9 — but those are
+the strongest loci in the genome and nothing about them generalises.
+
+### 6.5 Two different fixes, two different effects
+
+The ladder separates cleanly, and the two axes are not the same axis.
+
+**Calibration is the mean → max memo offset, on its own.** `fb_memomean` →
+`fb_prefix` changes exactly one thing, and median max PIP goes 0.026 → 0.88,
+per-region Spearman against `fb_xregion` goes 0.012 → 0.898, and confident calls go
+1 → 87. With the mean offset the normaliser saturates, every proposed configuration
+lands more than 745 nats below it, is stored as exactly 0.0, and the sweep runs
+inert — the surviving PIP is a variational selection frequency, not a posterior.
+
+**Localisation is the annotations and the learned prior.** Along the four rungs,
+the count of blocks where the top variant carries ≥ 99% of the lead's |Z| runs
+6 → 54 → 95 → 134, and the count where it carries |Z| < 2 runs 153 → 62 → 37 → 1.
+
+The prior/floor rung (`fb_prefix` → `fb_xregion`) trades quantity for quality:
+confident calls 106 → 90, but calls on |Z| < 2 drop 19 → 1, calls below genome-wide
+significance 37 → 13, median credible set 7 → 2, and the median PIP on the GWAS
+lead goes 0.0082 → 0.3195.
+
+### 6.6 Saturation is gone, and it is measurable
+
+`sum(PIP)` is the posterior mean number of causal variants, so a value at the
+model's own cap means the posterior is pinned against it rather than fitted.
+
+| method | min | median | **max** |
+|---|---|---|---|
+| `beatrice` | 2.531 | 3.328 | 17.838 |
+| `fb_memomean` | 1.590 | 32.511 | 38.475 |
+| `fb_prefix` | 1.000 | 1.328 | **51.000** |
+| `fb_xregion` | 0.640 | 1.002 | 7.510 |
+| `funmap` | 1.000 | 9.989 | 10.000 |
+| `polyfun_sniff` | 1.000 | 9.950 | 10.000 |
+
+`fb_prefix` reaches **exactly 51.000**, our fork's `sparse_concrete` cap.
+`fb_xregion` tops out at 7.510, below its own `n_caus` = 10, so it never saturates
+in any of the 254 blocks. Funmap and PolyFun sit at 10.000, their configured
+`L` / `--max-num-causal`; neither adapts `sum(PIP)` to whether the block holds a
+signal.
+
+### 6.7 Upstream BEATRICE emits almost no credible sets
+
+Of 254 `credible_set.txt` files, **253 are zero-byte** and the largest is 4 bytes.
+Its `gamma_key = 0.2` gate never fires because the max PIP never reaches it. This
+statement depends on nothing of ours — it is the published program, unmodified, on
+its published defaults, at n = 373,220.
+
+### 6.8 Where the methods disagree
+
+Per-region Spearman of PIPs, median over signal regions: `fb_prefix`–`fb_xregion`
++0.898, `fb_xregion`–`funmap` +0.891, `funmap`–`polyfun_*` +0.856/+0.858,
+`fb_xregion`–`polyfun_*` +0.810/+0.825, the two PolyFuns +0.825. `beatrice` against
+everything is −0.005 to +0.004 and `fb_memomean` +0.009 to +0.013.
+
+Restricted to blocks where **both** methods are confident, funmap is the outlier:
+
+| pair | both confident | disagree on the variant |
+|---|---|---|
+| `fb_xregion` vs `polyfun_combined` | 34 | **8** |
+| `fb_xregion` vs `polyfun_sniff` | 38 | **9** |
+| `polyfun_combined` vs `polyfun_sniff` | 38 | 3 |
+| `funmap` vs `polyfun_combined` | 38 | 21 |
+| `funmap` vs `polyfun_sniff` | 45 | 24 |
+| `fb_xregion` vs `funmap` | 70 | **47** |
+
+### 6.9 LD quality
+
+`09_ld_conditioning.py` records each block's minimum eigenvalue and the floor the
+adaptive projection applied. The floor caps the attainable correlation at ≈ 1 −
+floor, so it is a distortion as well as a fix: median 0.0305, p90 0.0703, max
+0.6311; 61 of 254 blocks exceed 0.05 ("distorted") and 10 have a minimum eigenvalue
+below −0.1 ("bad_ld"). Every table above is reproduced split by that flag in
+`10_analyse_pips.py`'s output. The ranking of methods does not change across the
+split; absolute confidence does.
+
+Four candidate explanations for the poor conditioning were tested and **refuted**:
+it is not a prep bug (max |off-diagonal| = 1.00000, a single lower triangle,
+`R + R.T` correct), not sparsification (100% dense), not float16 storage
+(0.07–0.85% round-trip error, 1.95M distinct values), and not block size (Spearman
+−0.261 against p). Pairwise-complete estimation in the published UKBB panel remains
+the untested candidate. **State this as unresolved** rather than attributing it.
+
+### 6.10 Which annotations the shared head selected
+
+LassoNet selects through the skip coefficient θ (`trainer_annot.py:274`); the
+hierarchy constraint zeroes the nonlinear path for any feature with θ = 0, so
+θ = 0 means the annotation is excluded outright. **14 of 102 survive**:
+
+| rank | annotation | \|θ\| |
+|---|---|---|
+| 1 | `RNA-PC12` | 2.67e-03 |
+| 2 | `RNAGTEX-PC3` | 1.86e-03 |
+| 3 | `RNA-PC5` | 1.44e-03 |
+| 4 | `ATAC-PC14` | 4.39e-04 |
+| … | | |
+| 10 | `RNAGTEX-PC5` | 4.33e-05 |
+
+The leaders are all expression PCs, which is directionally sensible for a lipid
+trait. The **pre-registered** prediction (§7) was `RNAGTEX-PC5`, the component that
+separates liver at 3.5 SD. It survives selection but ranks 10th of 14, 62× below
+the top. With 14 of 102 surviving, membership alone is weak evidence: **record this
+as a miss, not a confirmation.**
+
+### 6.11 Positive controls, and why the set is small
+
+There is **no gold-standard causal variant set** for fine-mapping. The autoimmune
+fine-mapping catalogue states it outright, and recent genome-wide fine-mapping work
+deliberately evaluates with metrics that need no known causals (replication across
+GWAS samples). So what follows is a positive-control check, not a benchmark, and it
+cannot produce a precision or recall number.
+
+`validated_variants.csv` holds seven variants with **variant-level** functional
+evidence — not loci, and not lead SNPs. Padding the list with well-known lead
+variants would make the check circular: at most lipid loci the validated variant
+*is* the GWAS lead, so "high PIP on the validated variant" would restate `top = lead`
+from §6.4.
+
+Two fields decide how each result reads:
+
+- **`tier`** — A: a coding variant whose protein-level mechanism is established
+  (PCSK9 R46L, APOE ε2/ε4, TM6SF2 E167K, GCKR P446L). B: non-coding, with the
+  variant itself perturbed experimentally (SORT1 rs12740374, LDLR rs6511720).
+- **`identifiable`** — whether association data *can* single the variant out.
+  `rs6511720` is in complete LD with three other LDLR intron-1 SNPs and the same
+  study finds `rs57217136` equally functional, so spreading PIP across that
+  haplotype is the **correct** answer and a low PIP there is not a miss. The SORT1
+  study likewise states that `rs12740374` tags a haplotype and any SNP on it could
+  be causal.
+
+The informative cases are the ones where the validated variant is **not** the
+regional lead. APOE is the clearest: the lead in `ldEUR_19_0031` is `rs1065853`,
+for which no variant-level functional evidence was found, while the mechanism is
+carried by `rs429358`/`rs7412`. `11_export_results.py` writes `validated_pips.csv`
+with every method's PIP and exact within-block rank for each control, alongside
+r² with the lead and the number of variants at r² ≥ 0.95 and ≥ 0.99 — so a PIP can
+be read against how many variants are indistinguishable from it.
+
+### 6.12 What this does and does not establish
+
+**Does.** Both fixes to our own code are necessary and they do different jobs
+(§6.5). `fb_xregion` is the only column that is both confident and clean: the
+highest localisation rate (134/185), the smallest credible sets among the confident
+methods (median 2), and one call on a null against funmap's 52. The PolyFun priors
+run on PolyFun's documented default bin selection (30 bins, chosen automatically);
+the earlier 10-bin pinning was a diagnostic that `--nnls-exact` made unnecessary.
+
+**Does not.** There is no ground truth here, so nothing above is power, FDR or
+calibration. The `beatrice` → `fb_memomean` rung confounds four changes. Roughly
+half the stage-1 per-SNP heritabilities are negative and PolyFun's clamp truncates
+them (§1.5), so both PolyFun columns rest on heavily truncated priors. 61 blocks
+carry a non-trivial LD distortion from the adaptive floor and the cause of the poor
+conditioning is unresolved. And `fb_xregion` still makes **11 confident calls in
+the 69 blocks with no genome-wide signal** (funmap 25, `fb_prefix` 19, PolyFun 2–3):
+sub-threshold loci can be real, but PolyFun's 2 is the contrast that needs an
+answer.
+
+---
+
+## 7. Open items
+
+- **Pre-registered prediction — ANSWERED, as a miss.** `RNAGTEX-PC5` survives
+  LassoNet selection but ranks 10th of the 14 surviving annotations, 62× below
+  `RNA-PC12` (§6.10). Report it as a miss; do not restate it as a confirmation
+  on the grounds that it survived.
+- **Correctness anchor — still open.** Funmap's paper fine-maps cholesterol at
   chr8:5–8 Mb using this same LD bucket. Reproducing that locus would validate
-  the whole chain end to end.
+  the whole chain end to end. Note that `ldEUR_08_0011/0012/0013/0015` are
+  excluded by the unannotated-gap rule, and `ldEUR_08_0012` carries a |Z| =
+  18.05 lead, so say so explicitly rather than reporting a block count.
+- **Why the LD is poorly conditioned.** Four explanations tested and refuted
+  (§6.9); pairwise-complete estimation in the published UKBB panel is the
+  remaining untested candidate. Unresolved, and written up as unresolved.
+- **Capped-floor sensitivity.** The adaptive floor runs from 0.0171 to 0.6311.
+  `min(max(1e-3, |min eig|), 0.05)` would give the low end more protection and
+  stop the tail over-regularising. ~25 h for the `03` re-run; not yet done.
+- **Confident calls where there is no signal.** `fb_xregion` makes 11 in the 69
+  blocks without a genome-wide signal, against PolyFun's 2–3 (§6.12).
+- **Scope beyond this application.** `prior_location` was `''` on every code
+  path before `fix/prior-passthrough-and-ld-floor`, so every functional
+  BEATRICE number in the LSR and the Bioinformatics paper was computed under a
+  **uniform** prior. Deciding which of those to re-run is a separate call.
+- **Merge `fix/prior-passthrough-and-ld-floor`** into functional BEATRICE's
+  `main`; it is unmerged at `f3bd29a`, which is what `setup.sh` pins.
