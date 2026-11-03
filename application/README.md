@@ -789,21 +789,43 @@ The next two tables do.
 
 ### 6.3 Do the confident calls carry marginal evidence?
 
-All 254 blocks. A call is a variant with PIP ≥ 0.95.
+**Count variants, not regions.** `10_analyse_pips.py:107` counts *regions whose
+top variant* clears 0.95, one per region. That is a useful summary but it cannot
+see a method that calls six variants inside one block, and here that distinction
+is the whole story for one column. All 254 blocks, a call being any variant at
+PIP ≥ 0.95:
 
-| method | calls | med \|Z\| | \|Z\| < 2 | \|Z\| < 5.45 |
+| method | variants ≥ .95 | blocks | per block | med \|Z\| | \|Z\| < 2 | \|Z\| < 5.45 | in blocks with no signal |
+|---|---|---|---|---|---|---|---|
+| `beatrice` | 1 | 1 | 1.00 | 82.85 | 0 | 0 | 0 |
+| `fb_memomean` | 1 | 1 | 1.00 | 82.92 | 0 | 0 | 0 |
+| `fb_prefix` | **653** | 106 | **6.16** | **0.57** | **540** | 563 | 218 |
+| `fb_xregion` | 136 | 90 | 1.51 | 7.45 | **1** | 21 | 12 |
+| `funmap` | 263 | 170 | 1.55 | 5.78 | **61** | 119 | 25 |
+| `polyfun_combined` | 69 | 41 | 1.68 | 7.75 | 1 | 12 | 2 |
+| `polyfun_sniff` | 83 | 49 | 1.69 | 7.64 | 2 | 17 | 3 |
+
+`fb_prefix` declares **653 variants causal at PIP ≥ 0.95, 540 of them on |Z| < 2**
+— 6.16 per block, median |Z| of a call 0.57. That is exactly what saturation at
+`sparse_concrete` = 51 produces, and a per-region maximum is blind to it: the
+region view records only 106.
+
+`funmap` makes 263 calls and 61 of them sit on variants with no marginal evidence;
+119 are below genome-wide significance. `fb_xregion` makes roughly half as many
+calls as funmap and **one** of them is on |Z| < 2.
+
+The region-level view, for completeness — each region's top variant, where that
+variant reaches 0.95:
+
+| method | regions | med \|Z\| | \|Z\| < 2 | \|Z\| < 5.45 |
 |---|---|---|---|---|
-| `beatrice` | 1 | 82.85 | 0 | 0 |
-| `fb_memomean` | 1 | 82.92 | 0 | 0 |
 | `fb_prefix` | 106 | 6.55 | 19 | 37 |
-| `fb_xregion` | 90 | 6.98 | **1** | 13 |
-| `funmap` | 170 | 5.36 | **52** | 88 |
+| `fb_xregion` | 90 | 6.98 | 1 | 13 |
+| `funmap` | 170 | 5.36 | 52 | 88 |
 | `polyfun_combined` | 41 | 7.83 | 0 | 5 |
 | `polyfun_sniff` | 49 | 8.05 | 1 | 8 |
 
-**52 of funmap's 170 confident calls sit on variants with |Z| < 2** — no marginal
-evidence at all — and 88 are below genome-wide significance. `fb_xregion` makes
-roughly half as many calls and one of them is on |Z| < 2.
+Quote whichever you like, but say which one it is.
 
 ### 6.4 Localisation: what |Z| does each method's own top variant carry?
 
@@ -844,10 +866,12 @@ inert — the surviving PIP is a variational selection frequency, not a posterio
 the count of blocks where the top variant carries ≥ 99% of the lead's |Z| runs
 6 → 54 → 95 → 134, and the count where it carries |Z| < 2 runs 153 → 62 → 37 → 1.
 
-The prior/floor rung (`fb_prefix` → `fb_xregion`) trades quantity for quality:
-confident calls 106 → 90, but calls on |Z| < 2 drop 19 → 1, calls below genome-wide
-significance 37 → 13, median credible set 7 → 2, and the median PIP on the GWAS
-lead goes 0.0082 → 0.3195.
+The prior/floor rung (`fb_prefix` → `fb_xregion`) trades quantity for quality,
+and per variant (§6.3) the trade is far larger than the region-level view shows:
+confident calls **653 → 136**, calls on |Z| < 2 **540 → 1**, calls below genome-wide
+significance 563 → 21, calls in blocks with no signal 218 → 12, median |Z| of a
+call 0.57 → 7.45. Median credible set goes 7 → 2 and the median PIP on the GWAS
+lead 0.0082 → 0.3195.
 
 ### 6.6 Saturation is gone, and it is measurable
 
@@ -966,6 +990,55 @@ with every method's PIP and exact within-block rank for each control, alongside
 r² with the lead and the number of variants at r² ≥ 0.95 and ≥ 0.99 — so a PIP can
 be read against how many variants are indistinguishable from it.
 
+All seven controls fall inside the analysed blocks. PIP, with the within-block
+rank in brackets (`fig3_positive_controls.pdf`):
+
+| control | k at r²≥.99 | `fb_xregion` | `funmap` | `polyfun_comb` | `polyfun_sniff` | `fb_prefix` | `beatrice` |
+|---|---|---|---|---|---|---|---|
+| PCSK9 `rs11591147` | 1 | 1.000 (1) | 1.000 (1) | 1.000 (1) | 1.000 (1) | 1.000 (1) | 0.009 (1) |
+| APOE ε4 `rs429358` | 1 | 1.000 (1) | 1.000 (1) | 1.000 (1) | 1.000 (1) | 1.000 (4) | 0.012 (3) |
+| GCKR `rs1260326` | 1 | 0.999 (1) | 0.999 (1) | 0.999 (1) | 0.997 (1) | 1.000 (1) | 0.007 (2) |
+| **APOE ε2 `rs7412`** | 1 | **0.998 (5)** | 3e-4 (5147) | 0.008 (70) | 0.003 (289) | 3e-21 (7317) | 0.974 (1) |
+| **TM6SF2 `rs58542926`** | 1 | 0.900 (2) | 0.997 (2) | 0.930 (1) | 0.994 (1) | **7e-13 (6740)** | **1e-13 (1384)** |
+| SORT1 `rs12740374` | **4** | 0.666 (2) | **1.000 (1)** | 0.771 (1) | 0.934 (1) | 0.126 (3) | 0.028 (1) |
+| LDLR `rs6511720` | **8** | 0.007 (9) | 7e-5 (7936) | 0.015 (55) | 0.002 (142) | 1e-7 (395) | 0.011 (8) |
+
+Reading it, in order of how much each row actually discriminates:
+
+- **The first three are sanity checks and everything passes.** Each is a uniquely
+  identifiable variant and every method returns ≈ 1. Good — but they separate
+  nothing, which is the circularity the short list was chosen to avoid.
+- **APOE ε2 is the one genuine discrimination.** `rs7412` is not the block's lead
+  (`rs1065853` is, at r² = 0.9897) and it has no near-perfect partner of its own.
+  `fb_xregion` gives it 0.998; funmap 3e-4, both PolyFuns 0.003–0.008. Among the
+  four methods only functional BEATRICE recovers a textbook causal coding variant
+  here. **Caveat against it:** it also calls `rs1065853` at ≈ 1.0, and the two are
+  r² = 0.99 apart, so it found ε2 without *choosing* ε2 over its proxy — at least
+  one of those two calls is redundant.
+- **TM6SF2 shows the prior/floor fix is load-bearing.** All four methods find it;
+  `fb_prefix` returns 7e-13 at rank 6740 of 6742 and upstream BEATRICE 1e-13 at
+  rank 1384. The same variant, the same data, the fix alone.
+- **SORT1 is where the ceiling bites.** Four variants sit at r² ≥ 0.99, so the
+  likelihood alone cannot put more than about 0.25 on any one of them; anything
+  above that is the prior talking. funmap reports **1.000**.
+- **LDLR is a correct collective miss.** Eight variants at r² ≥ 0.99 (39 at
+  ≥ 0.95), exactly as Fairoozy et al. describe. `fb_xregion` ranks it 9th and
+  `beatrice` 8th — right at the edge of the indistinguishable set, which is the
+  right behaviour. A high PIP here would be a fault, not a success.
+
+**A funmap pathology falls out of the two non-lead rows.** `rs7412` carries
+|Z| = 82.85 and funmap ranks it **5147 of 7317**; `rs6511720` carries |Z| = 44.43
+and funmap ranks it **7936 of 10634**. Explaining-away is expected of any
+multi-SNP model, but funmap drives near-perfect partners of its chosen variant to
+the *bottom* of the block, so its PIP ordering cannot be read as an ordering of
+evidence. `fb_xregion`'s corresponding ranks are 5 and 9.
+
+**Upstream BEATRICE's single confident call in the entire genome is `rs7412`**
+(0.974, rank 1). That is a validated causal variant — and it is one call across
+254 blocks, in the strongest locus in the genome, from a column whose top variant
+carries |Z| < 2 in 153 of 185 signal regions (§6.4). Report it as a coincidence
+of the extreme locus, not as a capability.
+
 ### 6.12 What this does and does not establish
 
 **Does.** Both fixes to our own code are necessary and they do different jobs
@@ -980,10 +1053,10 @@ calibration. The `beatrice` → `fb_memomean` rung confounds four changes. Rough
 half the stage-1 per-SNP heritabilities are negative and PolyFun's clamp truncates
 them (§1.5), so both PolyFun columns rest on heavily truncated priors. 61 blocks
 carry a non-trivial LD distortion from the adaptive floor and the cause of the poor
-conditioning is unresolved. And `fb_xregion` still makes **11 confident calls in
-the 69 blocks with no genome-wide signal** (funmap 25, `fb_prefix` 19, PolyFun 2–3):
-sub-threshold loci can be real, but PolyFun's 2 is the contrast that needs an
-answer.
+conditioning is unresolved. And `fb_xregion` still places **12 confident
+calls in the 69 blocks with no genome-wide signal** (funmap 25, PolyFun 2–3;
+`fb_prefix` 218): sub-threshold loci can be real, but PolyFun's 2 is the contrast
+that needs an answer.
 
 ---
 
