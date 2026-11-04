@@ -1,0 +1,54 @@
+#!/bin/bash
+#PBS -N fb_xregion_iter004
+#PBS -l select=1:ncpus=4:mem=32gb
+#PBS -l walltime=24:00:00
+#PBS -J 1-45
+#PBS -j oe
+#PBS -o logs/
+#
+# Re-run fb_xregion over the Iteration 004 grid with Functional BEATRICE at
+# f3bd29a. One task per grid row; 45 rows.
+#
+# Budget: 3,880 CPU-hours for fb_xregion across all 45 rows, measured from
+# results/iter004/aux/*.rds (runtime_seconds, summed per method). That is
+# ~86 CPU-hours per row, so ncpus=4 x 24h gives headroom on the larger rows.
+#
+# BEFORE SUBMITTING, set these to Iteration 004's values. The driver refuses to
+# start if any is unset, which costs seconds instead of a third of the grid:
+#
+#   ITER004_SEED       the master seed the original run used
+#   ITER004_N          GWAS sample size per scenario
+#   ITER004_N_ITER     replicates per scenario
+#   ITER004_N_REGIONS  regions per scenario
+#   ITER004_VCF_DIR    the VCF bundle the original run simulated genotypes from
+#   FB_DIR             functional-beatrice checkout, main at f3bd29a or later
+#   FMB_PYTHON         python with FB's requirements.txt installed
+#
+# The first five are NOT recoverable from results/iter004 - the stored metrics
+# carry the grid factors but not the simulation parameters. Recover them from
+# the original submitter, e.g.
+#
+#   grep -rnE "seed|n_iter|n_regions|vcf_dir|  n =" <the iter004 job scripts>
+#
+# If the seed is genuinely lost, STOP: the re-run would simulate different data
+# and its fb_xregion numbers could not be placed beside the other 18 methods'
+# Iteration 004 numbers. In that case the honest options are a self-contained
+# re-run of every method (~64,000 CPU-hours, from the same aux logs) or a
+# paired slice on fresh seeds reported on its own.
+
+set -euo pipefail
+cd "${FMB_DIR:?set FMB_DIR to the fine-mapping-benchmark checkout}"
+mkdir -p logs
+
+module load "${FMB_MODULES:?set FMB_MODULES, e.g. tools/prod R/4.3.2-gfbf-2023a Python/3.11.3-GCCcore-12.3.0}"
+
+# Refuse a stale method checkout before burning the walltime. wrapper_fb_joint.R
+# checks this too, but failing here keeps the message out of 45 task logs.
+git -C "${FB_DIR}" rev-parse --short HEAD
+grep -q "'p0_t'" "${FB_DIR}/scripts/joint_trainer.py" || {
+  echo "FATAL: ${FB_DIR} does not pass the learned prior to the sweep." >&2
+  echo "       cd ${FB_DIR} && git checkout main && git pull   # expect f3bd29a" >&2
+  exit 1
+}
+
+Rscript inst/hpc/iter004_fb_rerun.R
