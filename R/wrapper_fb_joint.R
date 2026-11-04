@@ -135,6 +135,43 @@
 # Returns list(.fb_joint_cache = <fingerprint -> parsed result>,
 #              .fb_joint_annotated = TRUE/FALSE, .fb_joint_head = head).
 # Empty annotated-arm cache means the joint run failed -> per-region fallback.
+# Refuse to run against a checkout missing any of the four fixes that separate
+# fb_xregion from the states it is often confused with. Each one fails quietly
+# and looks like a modelling result, so a stale checkout would burn the whole
+# grid and produce numbers that cannot be told apart from the method's. The
+# markers mirror require_fb_fixes() in application/lib.sh; all four are present
+# from f3bd29a (FB main) onwards.
+.fb_joint_require_fixes <- function(beatrice_dir) {
+  sdir <- file.path(beatrice_dir, "scripts")
+  has <- function(pattern, file, fixed = TRUE) {
+    path <- file.path(sdir, file)
+    if (!file.exists(path)) return(FALSE)
+    any(grepl(pattern, readLines(path, warn = FALSE), fixed = fixed))
+  }
+  has_any <- function(pattern) {
+    fs <- list.files(sdir, pattern = "[.]py$", full.names = TRUE)
+    any(vapply(fs, function(f)
+      any(grepl(pattern, readLines(f, warn = FALSE), fixed = TRUE)), logical(1)))
+  }
+  missing <- c(
+    if (!has("m0 = max(", "trainer_annot.py"))
+      "the reformat_memo max-offset fix (8d59368): the memo saturates and PIPs become a configuration count",
+    if (!has_any("nearest PD correlation matrix"))
+      "the nearest-PD LD projection (74c76a1): a diagonal shift scales every correlation and favours collinear variants",
+    if (!has("eig_floor", "ld_regularisation.py"))
+      "the adaptive LD eigenvalue floor (fc82a9c): a fixed 1e-3 clip manufactures evidence in near-singular directions",
+    if (!has("'p0_t'", "joint_trainer.py"))
+      "the learned prior pass-through (fc82a9c): the sweep falls back to a uniform prior and the annotations never reach the PIPs"
+  )
+  if (length(missing)) {
+    stop("The Functional BEATRICE checkout at ", beatrice_dir,
+         " is missing:\n  - ", paste(missing, collapse = "\n  - "),
+         "\nUpdate it to main at f3bd29a or later, then reinstall.",
+         call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 .fb_joint_scenario_setup <- function(genotypes, regions, user_args, prior_head) {
   n_regions <- length(regions)
 
@@ -165,6 +202,7 @@
                 .fb_joint_cache = list()))
   }
   py <- fmb_resolve_python(python)
+  .fb_joint_require_fixes(beatrice_dir)
 
   work_dir <- tempfile(pattern = "fbjoint_")
   dir.create(work_dir, recursive = TRUE)
