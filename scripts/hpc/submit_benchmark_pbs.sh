@@ -19,7 +19,12 @@ LOG_DIR="${FMB_LOG_DIR:-${FMB_SCRATCH}/logs/benchmark}"
 export FMB_OUTPUT_ROOT="${OUTPUT_ROOT}"
 
 # Config (override with env vars: PBS_QUEUE=... bash submit_benchmark_pbs.sh)
-PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
+# Queue: EMPTY by default. v1_small72a began denying access on 2026-10-02
+# ("qsub: Access to queue is denied") and naming it kills the submission after
+# the whole grid has been regenerated and checked. Let the cx routing queue
+# place the job from its resource request, which is what it is for. Set
+# PBS_QUEUE=<name> to force one back.
+PBS_QUEUE="${PBS_QUEUE:-}"
 PBS_WALLTIME="${PBS_WALLTIME:-72:00:00}"       # queue max; BEATRICE-family
                                                 # is compute-heavy so start
                                                 # generous, cut later if fine.
@@ -206,11 +211,14 @@ mkdir -p "$LOG_DIR" "$OUTPUT_ROOT"
 echo "Output root: $OUTPUT_ROOT"
 echo "Log dir:     $LOG_DIR"
 
+QUEUE_LINE="${PBS_QUEUE:+#PBS -q ${PBS_QUEUE}}"
+QUEUE_LINE="${QUEUE_LINE:-# no queue named: the cx routing queue places this job}"
+
 JOB_SCRIPT="$(mktemp -t fmbench_pbs_XXXXXX.sh)"
 cat > "$JOB_SCRIPT" <<PBS_EOF
 #!/bin/bash
 #PBS -N fmbench
-#PBS -q ${PBS_QUEUE}
+${QUEUE_LINE}
 #PBS -l select=${PBS_SELECT}
 #PBS -l walltime=${PBS_WALLTIME}
 #PBS -J ${ARRAY_RANGE}
@@ -300,7 +308,7 @@ echo "[node:\$(hostname)] task \${PBS_ARRAY_INDEX} finished at \$(date)"
 PBS_EOF
 
 echo "Job script: $JOB_SCRIPT"
-echo "Submitting array ${ARRAY_RANGE} to queue ${PBS_QUEUE} ..."
+echo "Submitting array ${ARRAY_RANGE} to ${PBS_QUEUE:-the routing queue} ..."
 qsub "$JOB_SCRIPT"
 
 echo
