@@ -1,35 +1,38 @@
 """
-joint_trainer.py  -  CROSS-REGION JOINT prior training for (Functional) BEATRICE.
+joint_trainer.py  -  cross-region joint prior training for (Functional) BEATRICE.
 
-Motivation (Iteration 003, 2026-07-22). Functional BEATRICE fits its annotation
-prior (`LassoNetPrior`) from a SINGLE locus, an underpowered estimation problem
-that over-fits annotation noise and worsens calibration. This module trains ONE
-shared prior head jointly across ALL regions of a scenario, exactly as agreed with
-the user:
+Why. Functional BEATRICE fits its annotation prior (`LassoNetPrior`) from a
+SINGLE locus. That is an underpowered estimation problem: one region supplies
+too few causal variants to pin down what is a genome-wide quantity, so the prior
+over-fits annotation noise and calibration suffers. This module trains ONE
+shared prior head jointly across ALL regions given to it:
 
     L(phi, {psi_r}) = sum_r  ELBO_r( psi_r ; p0_r = f_phi(v_r) )
 
-  - phi  = the ONE shared prior head (annotations -> per-SNP prior). It sees every
-           region's evidence at every optimiser step.
-  - psi_r= region-specific variational finemapping posterior (its own `network`).
-           These stay SEPARATE - which SNPs are causal differs per region.
+  - phi   = the ONE shared prior head (annotations -> per-SNP prior). It sees
+            every region's evidence at every optimiser step.
+  - psi_r = the region's own variational fine-mapping posterior (its own
+            `network`). These stay SEPARATE: which SNPs are causal differs by
+            region.
   - only p0 = f_phi(v) is shared; the likelihood (Z_r, LD_r) is per-region.
 
-Each optimiser step: accumulate the (equal-weighted) mean of the per-region losses,
-ONE backward, ONE step -> phi's gradient is (1/R) sum_r d ELBO_r / d phi. This is the
-JOINT scheme, NOT the sequential `--prior_weights` warm-start chain (order-dependent,
-catastrophic forgetting). Gradient aggregation over regions is EQUAL WEIGHT PER
-REGION (user-confirmed 2026-07-22): each locus is one exchangeable draw of the shared
-enrichment, so we do NOT weight by region size.
+Each optimiser step accumulates the mean of the per-region losses, then does ONE
+backward and ONE step, so phi's gradient is (1/R) sum_r d ELBO_r / d phi. This is
+the JOINT scheme, not the sequential `--prior_weights` warm-start chain, which is
+order-dependent and forgets earlier regions.
 
-Two swappable prior heads select the two user model ideas:
-  - prior_head='lassonet' -> the existing `LassoNetPrior`      (idea #2)
-  - prior_head='linear'   -> `LinearPrior` below (logistic map) (idea #1, flagship)
+Regions are weighted EQUALLY, not by size: each locus is treated as one
+exchangeable draw of the shared enrichment, so a large region does not get a
+larger say in the annotation map.
 
-The per-region ELBO math (`_region_elbo`, `_abf`) is copied verbatim from
-`finemapper_lassonet.train`/`.abf` in trainer_annot.py (single-region, tested, in
-production) so the JOINT and single-region paths use identical likelihood/KL/reg
-terms - only the optimisation is cross-region. trainer_annot.py is left UNTOUCHED.
+Two swappable prior heads:
+  - prior_head='lassonet' -> `LassoNetPrior` from trainer_annot.py
+  - prior_head='linear'   -> `LinearPrior` below, a plain logistic map
+
+The per-region ELBO maths (`_region_elbo`, `_abf`) is copied verbatim from
+`finemapper_lassonet.train` / `.abf` in trainer_annot.py, so the joint and
+single-region paths use identical likelihood, KL and regularisation terms and
+differ only in the optimisation.
 """
 import os
 import numpy as np
@@ -51,7 +54,7 @@ import scripts.generate_credible_sets as gen_cred
 
 
 # ---------------------------------------------------------------------------
-# Prior head for idea #1: a simple SHARED logistic map on annotations.
+# A simple SHARED logistic map on annotations.
 # Same forward interface as LassoNetPrior (returns ..., imp_o = p0), so the joint
 # loop is head-agnostic. No hidden layers, no L1 / hierarchy (proximal ops are
 # no-ops), giving a funmap/PolyFun-style global-coefficient prior.
@@ -231,7 +234,7 @@ def _load_region(z_path, ld_path, annot_path):
     Z = gpu_t(pd_read(z_path)[:, 1].astype(float))
     if torch.max(Z) == torch.inf:
         Z[torch.where(Z == torch.inf)[0]] = 200
-    LD = gpu_t(pd_read(ld_path))
+    LD = gpu(torch.from_numpy(read_ld(ld_path)))
     v = gpu_t(pd_read_annot(annot_path)[:, 1:].astype(float))
     if torch.max(v) == torch.inf:
         v[torch.where(v == torch.inf)[0]] = 200
@@ -246,6 +249,26 @@ def pd_read_col0(path):
     return pd.read_table(path, sep=' ', header=None).to_numpy()[:, 0]
 def pd_read_annot(path):
     return pd.read_table(path, sep=None, engine='python', header=None).to_numpy()
+
+
+def read_ld(path):
+    """Load an LD matrix, accepting .npy as well as whitespace text.
+
+    The text path is the original format and still works. It is, however,
+    unusable at scale: a block of p = 10,000 is an ~800 MB text file, and a
+    genome-wide run over ~250 blocks would spend longer parsing ASCII than
+    fitting the model. A float32 .npy of the same matrix is ~400 MB, memory-
+    maps, and loads in milliseconds. Values are identical; only the encoding
+    differs.
+
+    Returned as float32 and C-contiguous so the caller can wrap it with
+    torch.from_numpy directly. gpu_t() would be wrong here: it does
+    `torch.tensor(x.astype(float)).float()`, round-tripping through float64,
+    which transiently costs 4x the matrix for no benefit - about 1.6 GB for a
+    single p = 10,000 block.
+    """
+    a = np.load(path) if str(path).endswith('.npy') else pd_read(path)
+    return np.ascontiguousarray(a, dtype=np.float32)
 
 
 def run_joint(options):
@@ -310,11 +333,11 @@ def run_joint(options):
     # --- ONE shared prior head phi ------------------------------------------
     if options['prior_head'] == 'linear':
         prior_head = gpu(LinearPrior(m=m_annots))
-        head_desc = "LinearPrior (idea #1: shared logistic annotation prior)"
+        head_desc = "LinearPrior (shared logistic annotation prior)"
     else:
         prior_head = gpu(LassoNetPrior(m=m_annots, hidden_dims=prior_hidden,
                                        M=hierarchy_M))
-        head_desc = (f"LassoNetPrior (idea #2: shared, hidden={prior_hidden}, "
+        head_desc = (f"LassoNetPrior (shared, hidden={prior_hidden}, "
                      f"M={hierarchy_M}, one logit per variant)")
     print(f"[joint] {R} regions, {m_annots} annotations, head={head_desc}")
     print(f"[joint] {device_report()}")
@@ -389,6 +412,10 @@ def run_joint(options):
             # LD matrix, a second eigendecomposition and a second m_r x m_r
             # solve, per region.
             'Z_t': r['Z'], 'LD_t': r['LD'], 'S_t': r['S'],
+            # The SAME p_0 the training memo was scored and normalised
+            # with. Without it generate_credible_sets falls back to a
+            # uniform prior and the annotations never reach the PIPs.
+            'p0_t': p_0,
             'n_causal': options['n_causal'], 'allow_duplicates': options['allow_duplicates'],
             'coverage_ths': options['coverage_ths'], 'selection_prob': options['selection_prob'],
             'purity': options.get('purity', 0.0),

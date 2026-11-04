@@ -1,10 +1,10 @@
 """
-beatrice_joint.py  -  CLI for CROSS-REGION JOINT prior training (Iteration 003).
+beatrice_joint.py  -  CLI for cross-region JOINT prior training.
 
 Trains ONE shared annotation prior head jointly across ALL regions listed in a
-manifest, then writes per-region pip.csv / credible_set.txt (via gen_cred) into
-each region's own target dir. See scripts/joint_trainer.py for the model / the
-joint objective and the equal-weight-per-region decision.
+manifest, then writes per-region pip.csv / credible_set.txt into each region's
+own target directory. See scripts/joint_trainer.py for the model, the joint
+objective, and why regions are weighted equally.
 
 Manifest (--manifest): a tab-separated file, one region per line, columns:
     z <tab> LD <tab> annot <tab> target <tab> N
@@ -12,8 +12,8 @@ An optional header line 'z\tLD\tannot\ttarget\tN' is tolerated. `annot` is
 REQUIRED for every region (a joint annotation prior needs annotations).
 
 Prior head (--prior_head):
-    'lassonet' (default) -> LassoNetPrior     (user idea #2)
-    'linear'             -> LinearPrior        (user idea #1, flagship)
+    'lassonet' (default) -> LassoNetPrior, the sparse non-linear prior
+    'linear'             -> LinearPrior, a plain logistic map on annotations
 
 Example:
     python beatrice_joint.py --manifest scenario.tsv --N 50000 --prior_head linear \\
@@ -25,26 +25,40 @@ import os
 
 FLAGS = flags.FLAGS
 
+# Defaults below (n_caus, sigma_sq, sparse_concrete, prior_regularisation,
+# lambda_l1, hierarchy_M) are a tuned configuration: trial 401 of an Optuna
+# study on simulated fine-mapping data, chosen from 962 trials as the
+# highest-AP configuration among those reaching a defensible posterior-mass
+# ratio, with lambda_l1 taken from a later sweep of that penalty alone. Every
+# trial ran at max_iter 2000, so the values are optimal for that budget.
+#
+# They were selected on simulated data with in-sample LD. Treat them as a
+# starting point, not as universal - on real data, and especially where the
+# locus's likely causal count differs from n_caus, they are worth revisiting.
+
 flags.DEFINE_string('manifest', None, 'TSV of per-region z,LD,annot,target,N (one row per region).')
-flags.DEFINE_string('prior_head', 'lassonet', "Shared prior head: 'lassonet' (idea #2) or 'linear' (idea #1).")
+flags.DEFINE_string('prior_head', 'lassonet', "Shared prior head: 'lassonet' or 'linear'.")
 flags.DEFINE_string('save_prior_weights', '', 'Optional path to save the trained shared prior head (.pt).')
 flags.DEFINE_integer('N', 50000, 'Default sample size when a manifest row omits N.', lower_bound=0)
 flags.DEFINE_integer('MCMC_samples', 1, 'MC integration samples', lower_bound=1)
-flags.DEFINE_integer('max_iter', 1500, 'Number of JOINT training iterations.', lower_bound=500)
+flags.DEFINE_integer('max_iter', 2000, 'Number of JOINT training iterations.', lower_bound=500)
 flags.DEFINE_float('gamma', 0.1, 'Threshold to create the reduced space of binary vectors.')
 flags.DEFINE_float('gamma_key', 0.2, 'Threshold for key variants.')
 flags.DEFINE_float('gamma_coverage', 0.95, 'Coverage threshold for credible sets.')
 flags.DEFINE_float('gamma_selection', 0.05, 'Selection-probability threshold within a credible set.')
-flags.DEFINE_float('sigma_sq', 0.05, 'Variance of causal variants.')
+flags.DEFINE_float('sigma_sq', 0.0899, 'Variance of causal variants.')
 flags.DEFINE_float('temp_lower_bound', 0.01, 'Extent of continuous relaxation.', lower_bound=0.005)
-flags.DEFINE_integer('sparse_concrete', 50, 'Non-zero locations of the concrete vector per iteration.', lower_bound=1)
-flags.DEFINE_integer('n_caus', 5, 'Prior number of causal variants.', lower_bound=1)
+flags.DEFINE_integer('sparse_concrete', 51, 'Non-zero locations of the concrete vector per iteration.', lower_bound=1)
+flags.DEFINE_integer('n_caus', 10, 'Prior number of causal variants.', lower_bound=1)
 flags.DEFINE_boolean('allow_dup', False, 'Allow duplicate variants across credible sets.')
 flags.DEFINE_list('neural_network', '10,200,10', 'Finemapping net hidden dims.')
 flags.DEFINE_list('prior_neural_network', '10,200,10', 'LassoNet prior hidden dims.')
-flags.DEFINE_float('prior_regularisation', 1.0, 'L2 regularisation on the prior (p_0).')
-flags.DEFINE_float('lambda_l1', 0.01, 'L1 penalty for LassoNet skip connections (ignored by linear head).')
-flags.DEFINE_float('hierarchy_M', 10.0, 'LassoNet hierarchy constraint multiplier.')
+flags.DEFINE_float('prior_regularisation', 0.1255, 'L2 regularisation on the prior (p_0).')
+flags.DEFINE_float('lambda_l1', 0.1223,
+                   'L1 penalty for LassoNet skip connections, ignored by the linear head. '
+                   'The default is the best value from a sweep of this penalty; below '
+                   '~0.06 annotation selection is no better than chance.')
+flags.DEFINE_float('hierarchy_M', 10.15, 'LassoNet hierarchy constraint multiplier.')
 
 
 def _parse_manifest(path, default_N):
