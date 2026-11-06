@@ -23,6 +23,11 @@
 # Usage (from the project root):
 #   Rscript scripts/hpc/qc_run.R $EPHEMERAL/fmbench_iter004/results/benchmark
 #   Rscript scripts/hpc/qc_run.R <root> --sample 300     # fast partial check
+#   Rscript scripts/hpc/qc_run.R <root> --supp           # an FMB_METHODS re-run
+#
+# --supp reads results_supp.rds / evaluation_supp.rds, which is what a
+# supplemental re-run writes. Without it this script globs results.rds only and
+# reports a supplemental run as completely empty.
 #
 # Reading every results.rds is I/O heavy, so --sample reads a random subset for
 # the per-method statistics. Completion counting always covers everything.
@@ -43,6 +48,13 @@ if ("--sample" %in% args) {
 # than merely thinning them, so the breakdown matters more than the rate.
 focus <- NA_character_
 if ("--method" %in% args) focus <- args[which(args == "--method") + 1L]
+# --supp: a supplemental re-run (FMB_METHODS=...) writes results_supp.rds and
+# evaluation_supp.rds beside the originals rather than replacing them.
+SUFFIX   <- if ("--supp" %in% args) "_supp" else ""
+EVAL_RDS <- paste0("evaluation", SUFFIX, ".rds")
+RES_RDS  <- paste0("results",    SUFFIX, ".rds")
+EVAL_PAT <- paste0("^evaluation", SUFFIX, "\\.rds$")
+RES_PAT  <- paste0("^results",    SUFFIX, "\\.rds$")
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
 # --- 1. completion ----------------------------------------------------------
@@ -50,9 +62,9 @@ job_dirs <- list.dirs(root, recursive = FALSE)
 job_dirs <- job_dirs[grepl("/job_[0-9]+", job_dirs)]
 if (!length(job_dirs)) stop("no job_* directories under ", root, call. = FALSE)
 
-eval_files <- list.files(root, pattern = "^evaluation\\.rds$",
+eval_files <- list.files(root, pattern = EVAL_PAT,
                          recursive = TRUE, full.names = TRUE)
-res_files  <- list.files(root, pattern = "^results\\.rds$",
+res_files  <- list.files(root, pattern = RES_PAT,
                          recursive = TRUE, full.names = TRUE)
 
 cat("=============================================================\n")
@@ -60,12 +72,12 @@ cat(sprintf("QC: %s\n", root))
 cat("=============================================================\n\n")
 cat(sprintf("rows (job_*) present : %d\n", length(job_dirs)))
 cat(sprintf("scenarios evaluated  : %d\n", length(eval_files)))
-cat(sprintf("scenarios with results.rds : %d\n", length(res_files)))
+cat(sprintf("scenarios with %-18s: %d\n", RES_RDS, length(res_files)))
 
 orphan <- setdiff(dirname(res_files), dirname(eval_files))
 if (length(orphan)) {
-  cat(sprintf("\n!! %d scenario(s) have results.rds but NO evaluation.rds.\n",
-              length(orphan)))
+  cat(sprintf("\n!! %d scenario(s) have %s but NO %s.\n",
+              length(orphan), RES_RDS, EVAL_RDS))
   cat("   evaluate_methods() failed after the expensive fitting succeeded.\n")
   cat("   collect_results.R can re-evaluate these; the compute is not lost.\n")
   cat(sprintf("   e.g. %s\n", orphan[1]))
@@ -73,7 +85,7 @@ if (length(orphan)) {
 
 # --- 2. progress per row ----------------------------------------------------
 per_row <- vapply(job_dirs, function(d)
-  length(list.files(d, pattern = "^evaluation\\.rds$", recursive = TRUE)),
+  length(list.files(d, pattern = EVAL_PAT, recursive = TRUE)),
   integer(1))
 names(per_row) <- basename(job_dirs)
 cat(sprintf("\nscenarios per row: min %d  median %d  max %d\n",
@@ -86,7 +98,7 @@ if (length(unique(per_row)) > 1L) {
 
 # --- 3. per-method fit success ---------------------------------------------
 if (!length(res_files)) {
-  cat("\nNo results.rds yet - nothing to check per method.\n")
+  cat(sprintf("\nNo %s yet - nothing to check per method.\n", RES_RDS))
   quit(save = "no", status = 0)
 }
 pick <- res_files
@@ -169,13 +181,13 @@ for (f in pick) {
   }
 }
 if (!is.null(acc[["__unreadable__"]])) {
-  cat(sprintf("\n!! %d results.rds file(s) could not be read (truncated write?)\n",
-              acc[["__unreadable__"]]))
+  cat(sprintf("\n!! %d %s file(s) could not be read (truncated write?)\n",
+              acc[["__unreadable__"]], RES_RDS))
 }
 
 sk <- setdiff(ls(skipped), character(0))
 if (length(sk)) {
-  cat(sprintf("\nnon-method top-level entries in results.rds (ignored): %s\n",
+  cat(sprintf("\nnon-method top-level entries in %s (ignored): %s\n", RES_RDS,
               paste(sk, collapse = ", ")))
 }
 

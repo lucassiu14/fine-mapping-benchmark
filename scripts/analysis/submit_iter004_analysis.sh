@@ -56,8 +56,12 @@ if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004" 
 fi
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
-QUEUE_A="${QUEUE_A:-v1_small24}"
-QUEUE_B="${QUEUE_B:-v1_small24}"
+# Queue: EMPTY by default, so the cx routing queue places the job from its
+# resource request. Named queues come and go - v1_small72a started denying
+# access on 2026-10-02 and broke the fitting submitter the same way. Set
+# QUEUE_A / QUEUE_B only to pin a specific queue deliberately.
+QUEUE_A="${QUEUE_A:-}"
+QUEUE_B="${QUEUE_B:-}"
 # --- resources, sized from measured volumes rather than guessed -------------
 # Stage A: 250 scenarios x 190 fits = 47,500 per-fit metric computations, each an
 # O(p log p) sort at p <= 2000, plus reading ~250 results.rds and one sim.rds.
@@ -131,12 +135,17 @@ fi
 
 mkdir -p "$L1_DIR" "$LOG_DIR" "$OUT_DIR"
 
+QLINE_A="${QUEUE_A:+#PBS -q ${QUEUE_A}}"
+QLINE_A="${QLINE_A:-# no queue named: the cx routing queue places this job}"
+QLINE_B="${QUEUE_B:+#PBS -q ${QUEUE_B}}"
+QLINE_B="${QLINE_B:-# no queue named: the cx routing queue places this job}"
+
 # --- Stage A -----------------------------------------------------------------
 A_SCRIPT="$(mktemp -t fmb4a_XXXXXX.sh)"
 cat > "$A_SCRIPT" <<EOF
 #!/bin/bash
 #PBS -N fmb4collect
-#PBS -q ${QUEUE_A}
+${QLINE_A}
 #PBS -l select=${SELECT_A}
 #PBS -l walltime=${WALL_A}
 #PBS -J 1-${N_ROWS}
@@ -159,7 +168,7 @@ B_SCRIPT="$(mktemp -t fmb4b_XXXXXX.sh)"
 cat > "$B_SCRIPT" <<EOF
 #!/bin/bash
 #PBS -N fmb4analyse
-#PBS -q ${QUEUE_B}
+${QLINE_B}
 #PBS -l select=${SELECT_B}
 #PBS -l walltime=${WALL_B}
 #PBS -o ${LOG_DIR}/
