@@ -50,7 +50,10 @@ stopifnot(!anyNA(L3$rho))
 # which moved this cell to 0.737. The L3 tables in results/iter004 now carry the
 # Iteration 008 numbers for polyfun_ldsc, polyfun_oracle and sbayesrc, so the guard
 # tracks that. susie and fb_xregion were untouched by the swap and still match.
-quoted <- c(polyfun_ldsc = 0.737, susie = 0.723, fb_xregion = 0.748)
+# fb_xregion was 0.748 from Iteration 004. That run carried the reformat_memo
+# saturation bug (mean- not max-offset, which clipped 27-53% of the memo); it was
+# fixed and re-run over this exact grid as Iteration 009, moving this cell to 0.744.
+quoted <- c(polyfun_ldsc = 0.737, susie = 0.723, fb_xregion = 0.744)
 got <- vapply(names(quoted), function(m) mean(L3$ap[L3$method == m & L3$model == "sparse" &
                                                      L3$annotation_type == "binary"]), 0)
 cat("Section 6.3 check (sparse, binary):\n")

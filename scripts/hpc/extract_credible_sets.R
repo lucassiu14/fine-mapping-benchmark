@@ -29,6 +29,15 @@ args       <- commandArgs(trailingOnly = TRUE)
 idx        <- suppressWarnings(as.integer(args[1]))
 bench_root <- args[2]
 out_dir    <- args[3]
+# Which per-scenario results file to read, same three values and same meaning as
+# extract_pip_tail.R: results | supp | overlay. This script used to hard-code
+# results.rds, so on a supplemental run (FMB_METHODS=..., which writes
+# results_supp.rds beside the originals) it silently rescued nothing - the
+# failure mode extract_pip_tail.R's header warns about. Iteration 009 is such a
+# run, which is how this was found.
+src        <- if (length(args) >= 4 && nzchar(args[4])) args[4] else "results"
+if (!src %in% c("results", "supp", "overlay"))
+  stop("source must be results, supp or overlay, not ", src, call. = FALSE)
 stopifnot(!is.na(idx), dir.exists(bench_root))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -39,7 +48,7 @@ if (idx > length(job_dirs)) {
   quit(save = "no", status = 0L)
 }
 job_dir <- job_dirs[idx]; label <- basename(job_dir)
-message("row ", idx, ": ", label)
+message("row ", idx, ": ", label, "   source = ", src)
 
 scen_dirs <- sort(list.dirs(job_dir, recursive = FALSE))
 scen_dirs <- scen_dirs[grepl("/scenario_[0-9]+", scen_dirs)]
@@ -47,9 +56,13 @@ scen_dirs <- scen_dirs[grepl("/scenario_[0-9]+", scen_dirs)]
 rows <- vector("list", length(scen_dirs) * 400L)
 k <- 0L; n_fits <- 0L; n_with_sets <- 0L
 for (sd in scen_dirs) {
-  f <- file.path(sd, "results.rds")
-  if (!file.exists(f)) next
-  r <- tryCatch(readRDS(f), error = function(e) NULL)
+  rd   <- function(f) if (file.exists(f)) tryCatch(readRDS(f), error = function(e) NULL) else NULL
+  base <- if (src != "supp")    rd(file.path(sd, "results.rds"))      else NULL
+  supp <- if (src != "results") rd(file.path(sd, "results_supp.rds")) else NULL
+  r <- if (src == "results") base else if (src == "supp") supp else
+       if (is.null(base)) supp else {
+         if (!is.null(supp)) for (m in names(supp)) base[[m]] <- supp[[m]]
+         base }
   if (is.null(r)) next
   sc_idx <- suppressWarnings(as.integer(sub("^scenario_", "", basename(sd))))
 
@@ -80,6 +93,6 @@ for (sd in scen_dirs) {
 }
 rows <- rows[seq_len(k)]
 out <- file.path(out_dir, sprintf("cs_%s.rds", label))
-saveRDS(list(job_dir = label, fits = k, rows = rows), out)
+saveRDS(list(job_dir = label, source = src, fits = k, rows = rows), out)
 message(sprintf("  wrote %s  (%d fits, %d with at least one set, %.1f MB)",
                 basename(out), n_fits, n_with_sets, file.size(out) / 1024^2))

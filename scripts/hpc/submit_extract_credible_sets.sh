@@ -24,6 +24,16 @@ PROJECT_ROOT="$(pwd)"
 BENCH_ROOT="${BENCH_ROOT:-${EPHEMERAL}/fmbench_iter004/results/benchmark}"
 OUT_DIR="${OUT_DIR:-${PROJECT_ROOT}/results/iter004/credsets}"
 LOG_DIR="${LOG_DIR:-${OUT_DIR}/logs}"
+# results | supp | overlay - see extract_credible_sets.R. Expanded at submit time
+# into the job script, so no #PBS -V is needed for it to reach the node. The
+# guard mirrors submit_extract_pip_tail.sh: a non-default source must not write
+# into Iteration 004's credsets, which the LSR was submitted with.
+SOURCE="${SOURCE:-results}"
+if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004/credsets" ]]; then
+  echo "ERROR: SOURCE=$SOURCE would write into $OUT_DIR, Iteration 004's credible sets." >&2
+  echo "       Set a separate OUT_DIR, e.g. OUT_DIR=\$PWD/results/iter009_fb_xregion/credsets" >&2
+  exit 1
+fi
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 QUEUE="${QUEUE:-v1_small72a}"
 SELECT="${SELECT:-1:ncpus=1:mem=32gb}"
@@ -39,6 +49,7 @@ mkdir -p "$OUT_DIR" "$LOG_DIR"
 echo "Benchmark root : $BENCH_ROOT"
 echo "Rows           : $N_ROWS"
 echo "Output         : $OUT_DIR"
+echo "Source         : $SOURCE"
 
 JOB="$(mktemp -t fmbcs_XXXXXX.sh)"
 cat > "$JOB" <<EOF
@@ -54,7 +65,7 @@ set -euo pipefail
 cd "${PROJECT_ROOT}"
 module load ${R_MODULE}
 echo "[tail \${PBS_ARRAY_INDEX} on \$(hostname)] start \$(date)"
-Rscript scripts/hpc/extract_credible_sets.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${OUT_DIR}"
+Rscript scripts/hpc/extract_credible_sets.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${OUT_DIR}" "${SOURCE}"
 echo "[tail \${PBS_ARRAY_INDEX}] done \$(date)"
 EOF
 echo
