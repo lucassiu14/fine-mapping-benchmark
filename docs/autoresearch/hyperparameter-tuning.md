@@ -386,6 +386,47 @@ CANARY=1 bash scripts/tuning/submit_fb_retune.sh
 ```
 
 One trial with every parameter pinned, to time a trial before committing
-budget. Read it with `grep -h 'scenario' <LOG_DIR>/fbretcan.o* | tail -30`.
-Then drop `CANARY` to submit the worker array. Re-running the same command
-continues the study; nothing is recomputed.
+budget. The submitter prints the exact log file; this cluster writes
+`<jobid>.OU` / `.ER` into the log dir, not `<jobname>.o<id>`.
+
+### What the canary measured (job 4596630, 2026-11-10)
+
+**One trial = 175.8 min** for all 27 scenarios: ~390s per scenario, ~39s per
+region fit. Two things follow.
+
+`--timeout` goes to `study.optimize()`, which stops *launching* trials once it
+elapses and does not interrupt one already running, so `TRIAL_MARGIN` has to
+exceed a whole trial. At the old 3600s default every worker would have launched
+a last trial near its deadline, had it killed mid-flight by PBS, and left it
+`RUNNING` in the journal forever. It now defaults to 12600s and the submitter
+refuses to submit below the measured trial time.
+
+NSGA-II's population is 50 and the driver does not override it, so trials map
+onto generations of selection:
+
+| budget | trials | generations | CPU-hours |
+|---|---|---|---|
+| 24h x 10 | 60 | ~1 | 240 |
+| 72h x 10 | 230 | ~4 | 720 |
+| **72h x 20** | **460** | **~9** | **1,440** |
+| 72h x 30 | 690 | ~13 | 2,160 |
+
+At 60 trials the search is barely one population - random sampling with no
+selection pressure. **72h x 20 is the chosen budget** (user, 2026-11-10), over
+the full 27-scenario grid rather than a cheaper trial on a thinner one: the set
+of scenarios the objective averages over is part of what is being selected for,
+so cutting an S level would select against a different grid than the paper
+reports on. Nothing is one-shot - re-running the same command resumes the
+study, so the front can be read and the budget extended.
+
+The canary also gives the baseline to beat. The **shipped** config scores
+AP 0.523, worst-stratum FDR 0.811, `ece_hi` 0.437 on this grid. The FDR is
+higher than the 0.626 the `draw` estimator gives on the Iteration 004 grid,
+which is the grid design working as intended: phi = 0.6 is included here and
+diluted there.
+
+```bash
+WORKERS=20 PBS_WALLTIME=72:00:00 bash scripts/tuning/submit_fb_retune.sh
+```
+
+Re-running the same command continues the study; nothing is recomputed.
