@@ -35,7 +35,11 @@ if [[ "$SOURCE" != "results" && "$OUT_DIR" == "${PROJECT_ROOT}/results/iter004/p
   exit 1
 fi
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
-QUEUE="${QUEUE:-v1_small72a}"
+# Queue: EMPTY by default. v1_small72a began denying access on 2026-10-02
+# ("qsub: Access to queue is denied") and naming it kills the submission. Let
+# the cx routing queue place the job from its resource request, as
+# submit_benchmark_pbs.sh does. Set QUEUE=<name> to force one back.
+QUEUE="${QUEUE:-}"
 SELECT="${SELECT:-1:ncpus=1:mem=32gb}"
 WALLTIME="${WALLTIME:-06:00:00}"
 
@@ -60,11 +64,13 @@ if (( N_SIM < N_ROWS )); then
   echo "         Recover truth for those rows first if it still exists."
 fi
 
+QLINE="${QUEUE:+#PBS -q ${QUEUE}}"
+QLINE="${QLINE:-# no queue named: the cx routing queue places this job}"
 JOB="$(mktemp -t fmbtail_XXXXXX.sh)"
 cat > "$JOB" <<EOF
 #!/bin/bash
 #PBS -N fmbtail
-#PBS -q ${QUEUE}
+${QLINE}
 #PBS -l select=${SELECT}
 #PBS -l walltime=${WALLTIME}
 #PBS -J 1-${N_ROWS}
@@ -78,7 +84,7 @@ Rscript scripts/hpc/extract_pip_tail.R "\${PBS_ARRAY_INDEX}" "${BENCH_ROOT}" "${
 echo "[tail \${PBS_ARRAY_INDEX}] done \$(date)"
 EOF
 echo
-echo "Submitting array 1-${N_ROWS} to ${QUEUE} ..."
+echo "Submitting array 1-${N_ROWS} to ${QUEUE:-the routing queue} ..."
 qsub "$JOB"
 cat <<EOF
 
