@@ -98,6 +98,22 @@ MAX_ITER="${MAX_ITER:-2000}"
 WORKERS="${WORKERS:-10}"
 mkdir -p "$TUNE_DIR" "$LOG_DIR"
 
+# The venv python is dynamically linked against the module's libpython, so the
+# module has to be loaded before it will even start (submit_optuna_pbs.sh:72).
+# Checked here because a missing optuna is only discovered inside the job, which
+# on 2026-11-10 cost a 90-minute sim build and a queue round trip to learn.
+if ! ( module load "${PY_MODULE}" 2>/dev/null; "$PY" -c 'import optuna' ) 2>/dev/null; then
+  cat >&2 <<MSG
+ERROR: $PY cannot import optuna, so no trial can run. Install it:
+
+  module load ${PY_MODULE} && ${PY%/python}/pip install optuna scikit-learn
+
+scikit-learn is optional - without it --report just omits the fANOVA parameter
+importance table (optuna_fb.py guards that call).
+MSG
+  exit 1
+fi
+
 # --- the three sims, one per (model, rho) -----------------------------------
 SIM_SPARSE="${TUNE_DIR}/sim_sparse_binary_e${ENRICHMENT}_n${SIM_N}.rds"
 SIM_ARGS=( "sparse=${SIM_SPARSE}" )
@@ -186,13 +202,16 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
           gamma=0.1 gamma_key=0.2
 echo "[canary] done \$(date)"
 PBS_EOF
-  echo "Canary job: $J"
+  echo "Canary job script: $J"
   # shellcheck disable=SC2086
-  qsub ${DEPEND} "$J"
+  JID="$(qsub ${DEPEND} "$J")"
+  echo "Canary job: $JID"
   echo
   echo "The canary pins every parameter at the SHIPPED values, so its per-scenario"
-  echo "seconds= lines are the cost of one trial, not of the search. Read them with:"
-  echo "  grep -h 'scenario' ${LOG_DIR}/fbretcan.o* | tail -30"
+  echo "seconds= lines are the cost of one trial, not of the search. This cluster"
+  echo "writes <jobid>.OU / .ER into the log dir, so read them with:"
+  echo "  grep 'scenario' ${LOG_DIR}/${JID}.OU | tail -30"
+  echo "  tail -20 ${LOG_DIR}/${JID}.ER      # on failure"
   exit 0
 fi
 
@@ -221,7 +240,9 @@ echo "[worker \${PBS_ARRAY_INDEX}] done \$(date)"
 PBS_EOF
 echo "Job script: $J"
 # shellcheck disable=SC2086
-qsub ${DEPEND} "$J"
+JID="$(qsub ${DEPEND} "$J")"
+echo "Array:    $JID"
+echo "Logs:     ${LOG_DIR}/<jobid>.OU and .ER  (this cluster's naming)"
 echo
 echo "Track:    qstat -tan -u \$USER | grep -E 'fbretune|fbretsim'"
 echo "Report:   ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} --study ${STUDY} \\"
