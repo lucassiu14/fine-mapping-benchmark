@@ -96,6 +96,17 @@ PY="${PY:-$HOME/tools/fmpy-venv/bin/python}"
 FB_PY="${FB_PY:-$HOME/tools/py-venv-runner.sh}"
 MAX_ITER="${MAX_ITER:-2000}"
 WORKERS="${WORKERS:-10}"
+
+# One trial is 27 scenarios; the 2026-11-10 canary (job 4596630) measured 175.8
+# minutes for all 27, i.e. ~390s per scenario, ~39s per region fit.
+MEASURED_TRIAL_SEC="${MEASURED_TRIAL_SEC:-10548}"
+# --timeout goes to study.optimize(), which stops LAUNCHING trials once it
+# elapses - a trial already running is not interrupted. So the margin has to
+# exceed one whole trial, or every worker's last trial is launched near the
+# deadline, killed mid-flight by PBS, and left RUNNING in the journal forever.
+# The old default of 3600 was a third of a trial and would have done exactly
+# that on all WORKERS at once.
+TRIAL_MARGIN="${TRIAL_MARGIN:-12600}"
 mkdir -p "$TUNE_DIR" "$LOG_DIR"
 
 # The venv python is dynamically linked against the module's libpython, so the
@@ -132,6 +143,18 @@ echo "Strata     : ${N_SIMS} sims -> $(( PER_SIM * N_SIMS )) scenarios x ${REGIO
 echo "             = $(( PER_SIM * N_SIMS * REGIONS )) region-fits per trial"
 for s in "${SIM_ARGS[@]}"; do echo "             $s"; done
 echo "Storage    : $STORAGE"
+WALL_S=$(awk -F: '{print $1*3600+$2*60+$3}' <<< "$PBS_WALLTIME")
+if (( TRIAL_MARGIN < MEASURED_TRIAL_SEC )); then
+  echo "ERROR: TRIAL_MARGIN=${TRIAL_MARGIN}s is less than one trial" >&2
+  echo "       (${MEASURED_TRIAL_SEC}s measured). Every worker would lose its" >&2
+  echo "       last trial to the walltime kill. Raise it." >&2
+  exit 1
+fi
+PER_WORKER=$(( (WALL_S - TRIAL_MARGIN) / MEASURED_TRIAL_SEC ))
+echo "Budget     : trial ~$(( MEASURED_TRIAL_SEC / 60 )) min measured; walltime ${PBS_WALLTIME}"
+echo "             ${PER_WORKER} trials/worker x ${WORKERS} workers = $(( PER_WORKER * WORKERS )) trials"
+echo "             NSGA-II population is 50, so that is about \
+$(( PER_WORKER * WORKERS / 50 )) generations of selection"
 
 DEPEND=""
 if (( ${#BUILD[@]} > 0 )); then
