@@ -294,3 +294,98 @@ The Pareto front (or best scalar trial) gives a configuration, not a conclusion.
 Validate the chosen config on the **full** Iteration 002 grid as a normal
 supplemental method run, so it is judged on held-out scenarios rather than the
 small tuning set it was selected on.
+
+## Re-tune v3 — study `fb_retune_insample_v3` (2026-11-10)
+
+### Two independent reasons the shipped config is wrong for `fb_xregion`
+
+1. **It predates the fix it is meant to compensate for.** The config in
+   `run_benchmark_job.R` was selected on 2026-08-06. The `reformat_memo`
+   saturation bug (a mean offset where the max belongs, which clipped 27-53% of
+   the memo) was fixed and reached the benchmark on 2026-11-04 as Iteration 009.
+   Every trial in v1/v2 was scored on the saturated model.
+2. **It tuned a different method.** `fb_objective.R` ran `functional_beatrice`,
+   the per-region method, because `--rotate_regions` keeps one region per
+   scenario and a cross-region method has nothing to pool over with one region.
+   `run_benchmark_job.R` then assigns that config to `fb_xregion`. The
+   cross-region method has never been tuned at all.
+
+What the fix cost, measured on the Iteration 009 re-run of the Iteration 004
+grid: AP under `sparse_inf` fell 0.048 (every annotation arm), and the `draw`
+estimator's FDR at t = 0.95 went from 0.018 to 0.626 under `sparse_inf`/binary.
+The saturation had been flattening the memo, which acted as accidental
+regularisation and helped under misspecification. That is what has to be
+recovered by tuning rather than by a bug.
+
+### Grid (proposed, then amended by the user)
+
+Sparse-only was v2's error and is not repeated: the whole FDR problem lives in
+`sparse_inf`, which carries 95.6% of the false calls.
+
+| axis | levels | why |
+|---|---|---|
+| stratum | `sparse`/binary, `sparse_inf`/binary at rho 0.2 and 0.6 | user: "the model is supposed to be used with annotations, im not fussed about how it performs without them"; `continuous` dropped on the same instruction |
+| S | 1, 3, 10 | FDR is worst at S = 1 (0.866) and falls to 0.572 at S = 10 |
+| phi | 0.05, 0.2, 0.6 | FDR runs 0.318 at 0.05 to 0.816 at 0.6, and 0.6 holds 43% of all selections. v2 capped phi at 0.4 and so excluded the worst cell |
+| regions | **10**, as 2 each of 500/750/1000/1500/2000 | `generate_params_grid.R:93`. One shared head trains over all of a scenario's regions, so regions-per-scenario *is* the amount of cross-region pooling. Not an axis to economise on |
+| enrichment | 5.4 (single level) | the only axis that is flat: FDR 0.319-0.354 under sparse and 0.767-0.781 under sparse_inf |
+| n, LD | 5,000, in-sample | isolates the prior from LD misspecification, which Iteration 007 measures separately |
+
+3 sims x 9 scenarios = 27 scenarios x 10 regions = **270 region-fits per trial.**
+Run the canary first; this cost is untested.
+
+### Search space (8), and what is held fixed
+
+Chosen by reading the model code, then amended by the user.
+
+| tuned | where it acts |
+|---|---|
+| `lambda_l1` | proximal L1 on the LassoNet head; sets how many annotations survive |
+| `prior_regularisation` | how hard the learned prior is pulled toward the uniform |
+| `hierarchy_M` | LassoNet hierarchy budget; added at the user's request |
+| `sigma_sq`, `n_caus` | the ABF prior's effect-size scale and expected causal count |
+| `sparse_concrete` | concrete/Gumbel relaxation temperature schedule |
+| `gamma`, `gamma_key` | ELBO weights on the sparsity and key-variant terms |
+
+Held fixed: `max_iter`, `MCMC_samples` (user: "keep fixed"), `temp_lower_bound`
+and `purity` (user: not of interest). The user's own argument against `purity`
+("if we focus on auprc/fdr this doesnt actually come into effect right?") is
+correct and rules out `gamma_coverage` and `gamma_selection` for the same
+reason: all three enter only `generate_credible_sets.py`'s set construction,
+after `pip.csv` is written, so no AP or FDR number can move with them.
+
+### Objective: `triple`
+
+AP alone is what produced a config with FDR at 0.63. Three objectives, Pareto:
+
+1. mean AP across strata (maximise),
+2. **worst-stratum** FDR excess over 0.05 at t = 0.95 (minimise),
+3. mean `ece_hi` (minimise).
+
+Two rules in the aggregation, both unit-tested:
+
+- A stratum's FDR is **pooled from its counts** (`sum fp / sum (tp+fp)`), never
+  averaged from per-scenario rates. Several `--sim` flags may share one stratum
+  label, and they pool.
+- It is the **worst** stratum, not the mean. A config that is clean under
+  `sparse` and broken under `sparse_inf` must not average into looking fine.
+
+**No admissibility constraint in the search**, because 0.05 is not reachable
+under `sparse_inf` by anything: Oracle SuSiE itself sits at 0.350 there and
+plain SuSiE at 0.362. The 0.05 in the objective is a direction, not a target.
+Judge the front at selection time against per-stratum reference levels taken
+from the benchmark's own methods — about 0.02 under `sparse` (Oracle SuSiE) and
+about 0.14 under `sparse_inf` (FINEMAP-inf, the best any method achieves there).
+BEATRICE's 0.001 under `sparse_inf` is the saturation artifact and is not a
+target.
+
+### Running it
+
+```bash
+CANARY=1 bash scripts/tuning/submit_fb_retune.sh
+```
+
+One trial with every parameter pinned, to time a trial before committing
+budget. Read it with `grep -h 'scenario' <LOG_DIR>/fbretcan.o* | tail -30`.
+Then drop `CANARY` to submit the worker array. Re-running the same command
+continues the study; nothing is recomputed.

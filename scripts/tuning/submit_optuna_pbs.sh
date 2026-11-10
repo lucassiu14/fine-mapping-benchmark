@@ -59,11 +59,13 @@ SIM_N="${SIM_N:-1000}"                       # GWAS sample size
 SIM_REGION_SIZES="${SIM_REGION_SIZES:-100,200,400,500,1000}"   # variants/region
 SIM_WALLTIME="${SIM_WALLTIME:-04:00:00}"
 SIM_SELECT="${SIM_SELECT:-1:ncpus=1:mem=32gb}"
-SIM_QUEUE="${SIM_QUEUE:-v1_small24}"
+# v1_small24/v1_small72a deny access (2026-10-02); naming one kills the
+# submission. Empty by default so the cx routing queue places the job.
+SIM_QUEUE="${SIM_QUEUE:-}"
 
 # --- cluster resources -------------------------------------------------------
 WORKERS="${WORKERS:-10}"               # parallel array elements sharing the study
-PBS_QUEUE="${PBS_QUEUE:-v1_small72a}"
+PBS_QUEUE="${PBS_QUEUE:-}"
 PBS_WALLTIME="${PBS_WALLTIME:-24:00:00}"
 PBS_SELECT="${PBS_SELECT:-1:ncpus=1:mem=16gb}"
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
@@ -97,6 +99,11 @@ fi
 # build-if-needed, then tune. If the sim already exists the build is skipped and
 # the array starts immediately - which is also what happens on every resume.
 DEPEND=""
+QLINE_SIM="${SIM_QUEUE:+#PBS -q ${SIM_QUEUE}}"
+QLINE_SIM="${QLINE_SIM:-# no queue named: the cx routing queue places this job}"
+QLINE_RUN="${PBS_QUEUE:+#PBS -q ${PBS_QUEUE}}"
+QLINE_RUN="${QLINE_RUN:-# no queue named: the cx routing queue places this job}"
+
 if [[ -f "$SIM" ]]; then
   echo "Tuning sim: $SIM (exists - reusing)"
 else
@@ -107,7 +114,7 @@ else
   cat > "$SIM_SCRIPT" <<SIM_EOF
 #!/bin/bash
 #PBS -N fbtunesim
-#PBS -q ${SIM_QUEUE}
+${QLINE_SIM}
 #PBS -l select=${SIM_SELECT}
 #PBS -l walltime=${SIM_WALLTIME}
 #PBS -o ${LOG_DIR}/
@@ -163,7 +170,7 @@ JOB_SCRIPT="$(mktemp -t fmbtune_XXXXXX.sh)"
 cat > "$JOB_SCRIPT" <<PBS_EOF
 #!/bin/bash
 #PBS -N fbtune
-#PBS -q ${PBS_QUEUE}
+${QLINE_RUN}
 #PBS -l select=${PBS_SELECT}
 #PBS -l walltime=${PBS_WALLTIME}
 #PBS -J 1-${WORKERS}

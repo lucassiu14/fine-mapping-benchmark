@@ -188,6 +188,13 @@
     "--n_caus",               as.character(as.integer(gv("n_caus", 5))),
     "--sigma_sq",             as.character(gv("sigma_sq", 0.05)),
     "--gamma_coverage",       as.character(gv("gamma_coverage", 0.95)),
+    # gamma builds the reduced space of binary vectors during training, and
+    # gamma_key seeds the stepwise search in generate_credible_sets.py. Both
+    # act BEFORE pip.csv is written, so both move the PIPs - unlike
+    # gamma_coverage/gamma_selection/purity, which are read only afterwards.
+    # They were never exposed, so every run so far used the Python defaults.
+    "--gamma",                as.character(gv("gamma", 0.1)),
+    "--gamma_key",            as.character(gv("gamma_key", 0.2)),
     "--sparse_concrete",      as.character(as.integer(gv("sparse_concrete", 50))),
     "--prior_regularisation", as.character(gv("prior_regularisation", 1.0)),
     "--lambda_l1",            as.character(gv("lambda_l1", 0.01)),

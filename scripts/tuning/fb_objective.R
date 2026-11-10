@@ -64,6 +64,17 @@ gets <- function(k, d) if (!is.null(opt[[k]])) opt[[k]] else d
 SIM_PATH  <- gets("sim", "")
 SCENARIO  <- geti("scenario", 1L)
 N_REGIONS <- geti("regions", 0L)          # 0 = use all regions in the sim
+# Which FB to tune. This script scored "functional_beatrice" - the PER-REGION
+# method, one prior head per locus. The production method is fb_xregion: ONE
+# LassoNet head trained jointly over all of a scenario's regions
+# (wrapper_fb_joint.R). lambda_l1, prior_regularisation and hierarchy_M are that
+# SHARED head's knobs, so tuning them on the per-region method and assigning the
+# result to fb_xregion - which is what run_benchmark_job.R does - tunes one
+# method and deploys another. Default is now the method actually shipped.
+METHOD    <- gets("method", "fb_xregion")
+# The stratum this sim belongs to, echoed in the output so the caller can
+# aggregate PER STRATUM and never pool across generative models.
+STRATUM   <- gets("stratum", "")
 if (!nzchar(SIM_PATH) || !file.exists(SIM_PATH)) {
   stop("--sim must point at an existing tuning sim .rds (see make_tuning_sim.R)")
 }
@@ -91,6 +102,10 @@ if (ROTATE) {
   # so S cycles fastest with period length(S) = 5, while the rotation has period
   # length(genotypes) = 3. gcd(5, 3) = 1, so region size spreads evenly over both
   # the S and the phi axis rather than pairing with either.
+  if (METHOD != "functional_beatrice")
+    stop("--rotate_regions keeps ONE region per scenario, which leaves a ",
+         "cross-region method (", METHOD, ") with nothing to pool over. ",
+         "Use all regions instead.")
   n_reg <- length(mini$genotypes)
   keep  <- ((SCENARIO - 1L) %% n_reg) + 1L
   mini$genotypes <- mini$genotypes[keep]
@@ -112,13 +127,17 @@ fb_args <- list(
   sparse_concrete      = geti("sparse_concrete", 50L),
   prior_regularisation = getn("prior_regularisation", 1.0),
   lambda_l1            = getn("lambda_l1", 0.01),
-  hierarchy_M          = getn("hierarchy_M", 10.0)
+  hierarchy_M          = getn("hierarchy_M", 10.0),
+  # Both act before pip.csv is written, so both move the PIPs; defaults are the
+  # Python defaults, which is what every run before this used.
+  gamma                = getn("gamma", 0.1),
+  gamma_key            = getn("gamma_key", 0.2)
 )
 
 t0 <- Sys.time()
 res <- tryCatch(
-  run_methods(mini, methods = "functional_beatrice",
-              method_args = list(functional_beatrice = fb_args),
+  run_methods(mini, methods = METHOD,
+              method_args = setNames(list(fb_args), METHOD),
               save = FALSE, verbose = FALSE),
   error = function(e) structure(conditionMessage(e), class = "fb_fail")
 )
@@ -131,7 +150,7 @@ ev <- tryCatch(
   evaluate_methods(mini, res, save = FALSE, verbose = FALSE),
   error = function(e) NULL
 )
-g <- if (!is.null(ev)) ev[["functional_beatrice"]]$global else NULL
+g <- if (!is.null(ev)) ev[[METHOD]]$global else NULL
 if (is.null(g)) {
   cat("status=error\nmessage=evaluate_methods returned no global metrics\n")
   quit(status = 0)
@@ -143,6 +162,8 @@ ap <- g$ap %||% NA_real_
 max_fdr_violation_n20 <- NA_real_
 fdr_at_90 <- NA_real_
 fdr_at_95 <- NA_real_
+tp_at_95  <- NA_real_
+fp_at_95  <- NA_real_
 fpc <- g$fdr_power_curve
 if (!is.null(fpc) && nrow(fpc) > 0) {
   viol <- pmax(0, fpc$fdr - (1 - fpc$threshold))
@@ -164,6 +185,12 @@ if (!is.null(fpc) && nrow(fpc) > 0) {
     if (!length(i) || (fpc$tp[i] + fpc$fp[i]) == 0) return(NA_real_)
     fpc$fp[i] / (fpc$tp[i] + fpc$fp[i])
   }
+  # The COUNTS behind fdr_at_95, so a caller spanning several scenarios can
+  # pool them and form the rate once. A stratum's FDR is pooled from counts and
+  # never the mean of per-scenario rates: mean(fp/n) != sum(fp)/sum(n), and the
+  # scenarios differ in n.
+  i95 <- which.min(abs(fpc$threshold - 0.95))
+  if (length(i95)) { tp_at_95 <- fpc$tp[i95]; fp_at_95 <- fpc$fp[i95] }
   fdr_at_90 <- fdr_at(0.90)
   fdr_at_95 <- fdr_at(0.95)
 }
@@ -197,15 +224,18 @@ if (!is.null(pc) && nrow(pc) > 0) {
   }
 }
 
-n_failed <- res[["functional_beatrice"]]$n_failed %||% NA_integer_
+n_failed <- res[[METHOD]]$n_failed %||% NA_integer_
 elapsed  <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
 cat(sprintf(
-  "status=ok\nap=%.6f\nmax_fdr_violation_n20=%s\nfdr_at_90=%s\nfdr_at_95=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
+  "status=ok\nmethod=%s\nstratum=%s\nap=%.6f\nmax_fdr_violation_n20=%s\nfdr_at_90=%s\nfdr_at_95=%s\ntp_at_95=%s\nfp_at_95=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
+  METHOD, STRATUM,
   ap,
   ifelse(is.na(max_fdr_violation_n20), "NA", sprintf("%.6f", max_fdr_violation_n20)),
   ifelse(is.na(fdr_at_90), "NA", sprintf("%.6f", fdr_at_90)),
   ifelse(is.na(fdr_at_95), "NA", sprintf("%.6f", fdr_at_95)),
+  ifelse(is.na(tp_at_95),  "NA", sprintf("%.0f", tp_at_95)),
+  ifelse(is.na(fp_at_95),  "NA", sprintf("%.0f", fp_at_95)),
   ifelse(is.na(total_mass_ratio),      "NA", sprintf("%.6f", total_mass_ratio)),
   ifelse(is.na(hi_pip_reliab),         "NA", sprintf("%.6f", hi_pip_reliab)),
   ifelse(is.na(ece_hi),                "NA", sprintf("%.6f", ece_hi)),

@@ -206,7 +206,9 @@ run_beatrice <- function(z,
                          n_caus         = 5,
                          sigma_sq       = 0.05,
                          gamma_coverage = 0.95,
-                         sparse_concrete = 50) {
+                         sparse_concrete = 50,
+                         gamma          = 0.1,
+                         gamma_key      = 0.2) {
 
   # --- Validate inputs --------------------------------------------------------
 
@@ -250,7 +252,8 @@ run_beatrice <- function(z,
   if (is.null(script_path)) {
     return(.beatrice_error_result(
       p, .beatrice_params(n, max_iter, n_caus, sigma_sq, gamma_coverage,
-                          sparse_concrete, beatrice_dir, python),
+                          sparse_concrete, beatrice_dir, python,
+                          gamma, gamma_key),
       0,
       paste("No BEATRICE script (beatrice_annot.py or beatrice.py) found in:",
             beatrice_dir)
@@ -258,7 +261,8 @@ run_beatrice <- function(z,
   }
 
   params <- .beatrice_params(n, max_iter, n_caus, sigma_sq, gamma_coverage,
-                             sparse_concrete, beatrice_dir, python)
+                             sparse_concrete, beatrice_dir, python,
+                             gamma, gamma_key)
 
   # --- Set up temp working directory ------------------------------------------
 
@@ -295,6 +299,12 @@ run_beatrice <- function(z,
     "--n_caus",          as.character(as.integer(n_caus)),
     "--sigma_sq",        as.character(sigma_sq),
     "--gamma_coverage",  as.character(gamma_coverage),
+    # See wrapper_fb_joint.R: these two move the PIPs. Exposed here too so the
+    # FB-vs-BEATRICE ablation can keep "everything else equal" once FB is
+    # retuned on them; both default to the Python defaults, so behaviour is
+    # unchanged for any caller that does not set them.
+    "--gamma",           as.character(gamma),
+    "--gamma_key",       as.character(gamma_key),
     "--sparse_concrete", as.character(as.integer(sparse_concrete)),
     "--plot_loss",       "False",   # suppress PDF plots in batch mode
     "--get_cred",        "True"
@@ -438,7 +448,8 @@ run_beatrice_region <- function(region_geno, region_pheno, ...) {
 # =============================================================================
 
 .beatrice_params <- function(n, max_iter, n_caus, sigma_sq, gamma_coverage,
-                             sparse_concrete, beatrice_dir, python) {
+                             sparse_concrete, beatrice_dir, python,
+                             gamma = 0.1, gamma_key = 0.2) {
   list(
     n               = n,
     max_iter        = max_iter,
@@ -447,7 +458,11 @@ run_beatrice_region <- function(region_geno, region_pheno, ...) {
     gamma_coverage  = gamma_coverage,
     sparse_concrete = sparse_concrete,
     beatrice_dir    = beatrice_dir,
-    python          = python
+    python          = python,
+    # Recorded so a result says which thresholds produced it. Trailing with
+    # defaults, so the two existing positional call sites stay valid.
+    gamma           = gamma,
+    gamma_key       = gamma_key
   )
 }
 

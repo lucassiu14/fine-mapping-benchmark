@@ -82,10 +82,50 @@ def parse_kv(text):
     return out
 
 
-def run_one_scenario(args, params, scenario):
+def parse_scenarios(args, n_sims):
+    """--scenarios: one integer for every sim, or one per sim in order."""
+    parts = [q.strip() for q in str(args.scenarios).split(",") if q.strip()]
+    vals = [int(q) for q in parts]
+    if len(vals) == 1:
+        vals = vals * n_sims
+    if len(vals) != n_sims:
+        raise SystemExit(f"--scenarios gave {len(vals)} value(s) for {n_sims} --sim")
+    if any(v < 1 for v in vals):
+        raise SystemExit("--scenarios must be >= 1")
+    return vals
+
+
+def parse_sims(args):
+    """--sim is repeatable, as LABEL=PATH, one per STRATUM.
+
+    A stratum is a generative model x annotation type. They are never pooled:
+    each contributes its own AP and its own FDR, and the objective aggregates
+    those per-stratum numbers. One --sim without a label keeps the old
+    single-stratum behaviour.
+    """
+    out = []
+    for i, spec in enumerate(args.sim):
+        if "=" in spec:
+            label, _, path = spec.partition("=")
+        else:
+            label, path = (f"stratum{i+1}" if len(args.sim) > 1 else "default"), spec
+        out.append((label, path))
+    if any(not l for l, _ in out):
+        raise SystemExit("--sim labels must be non-empty")
+    # Labels MAY repeat: several sims can belong to one stratum, and then their
+    # counts pool into it. That is how the rho sweep enters - sparse_inf is one
+    # stratum whose rho levels the benchmark pools over, so rho=0.2 and rho=0.6
+    # are two sims both labelled sparse_inf. Give them distinct labels instead
+    # if you want the objective to target the worst rho rather than their pool.
+    return out
+
+
+def run_one_scenario(args, params, sim_path, stratum, scenario):
     """Invoke the R objective for a single scenario; return a dict of metrics."""
     cmd = [args.rscript, args.objective_script,
-           "--sim", args.sim,
+           "--sim", sim_path,
+           "--stratum", stratum,
+           "--method", args.method,
            "--scenario", str(scenario),
            "--regions", str(args.regions),
            "--beatrice_dir", args.beatrice_dir,
@@ -112,6 +152,7 @@ def run_one_scenario(args, params, scenario):
 
     return {k: num(k) for k in
             ("ap", "max_fdr_violation_n20", "fdr_at_90", "fdr_at_95",
+             "tp_at_95", "fp_at_95",
              "total_mass_ratio", "hi_pip_reliab", "ece_hi", "seconds")}
 
 
@@ -149,6 +190,19 @@ def suggest_params(trial, args):
         "hierarchy_M":          sfloat("hierarchy_M", 1.0, 100.0),
         "n_caus":               sint("n_caus", 1, 10),
         "sparse_concrete":      sint("sparse_concrete", 1, 300, log=True),
+        # ADDED 2026-11-10. Both act BEFORE pip.csv is written, so both move the
+        # PIPs and therefore AP and FDR; neither had ever been exposed by the R
+        # wrappers, so every run so far used the Python defaults (0.1, 0.2).
+        # gamma builds the reduced space of binary vectors during training.
+        # gamma_key seeds the stepwise search whose abf() calls enlarge the memo
+        # before the PIPs are recomputed - and reformat_memo's own docstring ties
+        # it to the saturation bug ("no PIP ever reached gamma_key"), so its
+        # default was implicitly calibrated against flattened PIPs.
+        # gamma_coverage, gamma_selection and purity are deliberately NOT here:
+        # generate_credible_sets.py reads them only after pip.csv is written, so
+        # they cannot change AP or FDR at all.
+        "gamma":                sfloat("gamma", 0.01, 0.5, log=True),
+        "gamma_key":            sfloat("gamma_key", 0.02, 0.8, log=True),
     }
     if args.tune_gamma_coverage:
         p["gamma_coverage"] = sfloat("gamma_coverage", 0.8, 0.99, log=False)
@@ -187,36 +241,41 @@ def _abort_thresholds(study, n_scen, args):
 
 
 def build_objective(args):
-    n_scen = args.scenarios
+    sims   = parse_sims(args)
+    counts = parse_scenarios(args, len(sims))
+    # The flat list of work units a trial does: (stratum, sim path, scenario).
+    units  = [(lab, path, sc)
+              for (lab, path), n in zip(sims, counts)
+              for sc in range(1, n + 1)]
+    n_scen = len(units)
 
     def objective(trial):
         params = suggest_params(trial, args)
         cuts = _abort_thresholds(trial.study, n_scen, args)
         t_trial = time.time()
-        aps, viols, masses, reliabs, eces, fdr95s = [], [], [], [], [], []
+        aps = []
+        # Per-stratum accumulators. Nothing is ever pooled ACROSS strata: AP and
+        # ece are averaged within a stratum and then over strata (equal weight
+        # per stratum), and a stratum's FDR is pooled from its own COUNTS.
+        per = {lab: {"ap": [], "ece": [], "relb": [], "mass": [],
+                     "viol": [], "tp": 0.0, "fp": 0.0} for lab, _ in sims}
 
-        for s in range(1, n_scen + 1):
-            m = run_one_scenario(args, params, s)
+        for s, (lab, sim_path, sc) in enumerate(units, start=1):
+            m = run_one_scenario(args, params, sim_path, lab, sc)
+            d = per[lab]
             aps.append(m["ap"])
-            if m["max_fdr_violation_n20"] == m["max_fdr_violation_n20"]:   # not NaN
-                viols.append(m["max_fdr_violation_n20"])
-            if m["total_mass_ratio"] == m["total_mass_ratio"]:
-                masses.append(m["total_mass_ratio"])
-            if m["hi_pip_reliab"] == m["hi_pip_reliab"]:
-                reliabs.append(m["hi_pip_reliab"])
-            if m["ece_hi"] == m["ece_hi"]:
-                eces.append(m["ece_hi"])
-            if m["fdr_at_95"] == m["fdr_at_95"]:
-                fdr95s.append(m["fdr_at_95"])
+            d["ap"].append(m["ap"])
+            for key, dst in (("ece_hi", "ece"), ("hi_pip_reliab", "relb"),
+                             ("total_mass_ratio", "mass"),
+                             ("max_fdr_violation_n20", "viol")):
+                if m[key] == m[key]:                      # not NaN
+                    d[dst].append(m[key])
+            # Counts, not the rate: mean(fp/n) != sum(fp)/sum(n).
+            if m["tp_at_95"] == m["tp_at_95"] and m["fp_at_95"] == m["fp_at_95"]:
+                d["tp"] += m["tp_at_95"]; d["fp"] += m["fp_at_95"]
 
-            # Record the running AP so later trials can be compared against this
-            # one at the same stage, then abort if we are already clearly behind.
-            # Emit timing to OUR stdout (the PBS log). fb_objective.R's own
-            # `seconds=` goes to a captured pipe, so without this line a trial
-            # killed at walltime leaves no timing evidence whatsoever - which is
-            # exactly the case a short canary run is trying to measure.
-            print(f"[trial {trial.number}] scenario {s}/{n_scen} "
-                  f"seconds={m['seconds']:.1f} ap={m['ap']:.4f} "
+            print(f"[trial {trial.number}] {lab} scenario {sc} "
+                  f"({s}/{n_scen}) seconds={m['seconds']:.1f} ap={m['ap']:.4f} "
                   f"cum_min={(time.time() - t_trial) / 60:.1f}", flush=True)
 
             running_ap = sum(aps) / len(aps)
@@ -224,73 +283,81 @@ def build_objective(args):
             if s in cuts and running_ap < cuts[s]:
                 raise optuna.TrialPruned()
 
-            # Pruning only applies to single-objective studies; Optuna does not
-            # support pruners for multi-objective optimisation.
             if args.objective == "scalar":
-                # Must use the SAME formula as the final score below, or the
-                # pruner ranks trials on a different quantity than the one the
-                # study is optimising.
-                running = sum(aps) / len(aps)
-                if viols:
-                    running -= args.penalty * (sum(viols) / len(viols))
-                if args.mass_penalty and masses:
-                    running -= args.mass_penalty * abs(sum(masses) / len(masses) - 1.0)
+                running = running_ap
+                vs = [v for dd in per.values() for v in dd["viol"]]
+                ms = [v for dd in per.values() for v in dd["mass"]]
+                if vs:
+                    running -= args.penalty * (sum(vs) / len(vs))
+                if args.mass_penalty and ms:
+                    running -= args.mass_penalty * abs(sum(ms) / len(ms) - 1.0)
                 trial.report(running, s)
                 if trial.should_prune():
                     raise optuna.TrialPruned()
 
-        mean_ap    = sum(aps) / len(aps) if aps else float("nan")
-        mean_viol  = sum(viols) / len(viols) if viols else 1.0
-        mean_mass  = sum(masses) / len(masses) if masses else float("nan")
-        mean_relb  = sum(reliabs) / len(reliabs) if reliabs else float("nan")
-        mean_ece   = sum(eces) / len(eces) if eces else float("nan")
-        mean_fdr95 = sum(fdr95s) / len(fdr95s) if fdr95s else float("nan")
+        def mean(xs, default=float("nan")):
+            return sum(xs) / len(xs) if xs else default
 
-        # Record everything, so any objective can be re-derived from the study
-        # later without re-running trials.
+        # --- per-stratum, then across strata --------------------------------
+        strat_ap, strat_ece, strat_fdr = {}, {}, {}
+        for lab, _ in sims:
+            d = per[lab]
+            strat_ap[lab]  = mean(d["ap"])
+            strat_ece[lab] = mean(d["ece"])
+            n = d["tp"] + d["fp"]
+            strat_fdr[lab] = (d["fp"] / n) if n > 0 else float("nan")
+            trial.set_user_attr(f"ap_{lab}", strat_ap[lab])
+            trial.set_user_attr(f"fdr_at_95_{lab}", strat_fdr[lab])
+            trial.set_user_attr(f"ece_hi_{lab}", strat_ece[lab])
+            trial.set_user_attr(f"nsel_at_95_{lab}", n)
+
+        mean_ap    = mean([v for v in strat_ap.values() if v == v])
+        mean_ece   = mean([v for v in strat_ece.values() if v == v])
+        mean_relb  = mean([v for dd in per.values() for v in dd["relb"]])
+        mean_mass  = mean([v for dd in per.values() for v in dd["mass"]])
+        mean_viol  = mean([v for dd in per.values() for v in dd["viol"]], 1.0)
+        # The reported FDR is the WORST stratum, not the average. Averaged, a
+        # configuration that is honest under `sparse` and badly overconfident
+        # under `sparse_inf` looks mid-range, and the search can buy objective
+        # value by fixing only the easy stratum. The max cannot be satisfied
+        # that way. A stratum that selected nothing at 0.95 contributes no rate.
+        fdrs = [v for v in strat_fdr.values() if v == v]
+        worst_fdr = max(fdrs) if fdrs else float("nan")
+
         trial.set_user_attr("mean_ap", mean_ap)
         trial.set_user_attr("mean_fdr_violation_n20", mean_viol)
         trial.set_user_attr("mean_total_mass_ratio", mean_mass)
         trial.set_user_attr("mean_hi_pip_reliab", mean_relb)
         trial.set_user_attr("mean_ece_hi", mean_ece)
-        trial.set_user_attr("mean_fdr_at_95", mean_fdr95)
+        trial.set_user_attr("worst_fdr_at_95", worst_fdr)
+        trial.set_user_attr("worst_stratum",
+                            max(strat_fdr, key=lambda k: (strat_fdr[k] == strat_fdr[k],
+                                                          strat_fdr[k]))
+                            if fdrs else "")
 
         if args.objective == "triple":
-            # The three quantities that jointly define a usable fine-mapper:
-            # ranking (AP, up), selection safety (FDR violation, down) and
-            # honesty of the reported probabilities (ece_hi, down). NaN scores
-            # as clearly bad so a broken trial is dominated, not unsortable.
-            # Excess FDR over the 0.05 budget promised at PIP >= 0.95. This
-            # replaces max_fdr_violation_n20 as the safety objective: the
-            # guarded max is a mid-range statistic (see fb_objective.R).
-            fdr_excess = (max(0.0, mean_fdr95 - 0.05)
-                          if mean_fdr95 == mean_fdr95 else 1.0)
+            # Ranking (AP, up), selection safety (worst-stratum FDR excess over
+            # the 0.05 budget promised at PIP >= 0.95, down) and honesty of the
+            # reported probabilities (ece_hi, down). NaN scores as clearly bad so
+            # a broken trial is dominated rather than unsortable.
+            fdr_excess = (max(0.0, worst_fdr - 0.05)
+                          if worst_fdr == worst_fdr else 1.0)
             return (mean_ap,
                     fdr_excess,
                     mean_ece if mean_ece == mean_ece else 1.0)
 
         if args.objective == "multi":
-            # Second objective, always minimised. 'violation' produced a
-            # single-point front on fb_binary_ref500 because it never conflicts
-            # with AP. 'mass' targets the trade-off that IS real once AP
-            # saturates, and needs no weight chosen up front.
-            # NaN would make the trial unsortable against the front, so a
-            # mass ratio that could not be computed scores as clearly bad
-            # rather than poisoning the study.
             if args.multi_second == "mass":
                 second = abs(mean_mass - 1.0) if mean_mass == mean_mass else 10.0
             elif args.multi_second == "reliab":
                 second = (1.0 - mean_relb) if mean_relb == mean_relb else 1.0
+            elif args.multi_second == "fdr":
+                second = (max(0.0, worst_fdr - 0.05)
+                          if worst_fdr == worst_fdr else 1.0)
             else:
                 second = mean_viol
             return mean_ap, second
 
-        # Optional calibration term. Study fb_binary_ref500 (3102 trials) found
-        # AP saturated at 0.809 while the mass ratio sat at ~2.0 in EVERY top
-        # trial - i.e. the only metric with room left to improve is the one no
-        # objective could see. |mass - 1| is symmetric because both directions
-        # are miscalibration: >1 is over-confident (Iteration 002's 9-11x
-        # failure mode), <1 leaves detectable mass on the table.
         score = mean_ap - args.penalty * mean_viol
         if args.mass_penalty and mean_mass == mean_mass:
             score -= args.mass_penalty * abs(mean_mass - 1.0)
@@ -301,7 +368,14 @@ def build_objective(args):
 
 def main():
     ap = argparse.ArgumentParser(description="Optuna tuning for Functional BEATRICE")
-    ap.add_argument("--sim", required=True, help="fixed tuning sim .rds (make_tuning_sim.R)")
+    ap.add_argument("--sim", required=True, action="append", metavar="LABEL=PATH",
+                    help="fixed tuning sim .rds (make_tuning_sim.R). Repeatable, "
+                         "once per STRATUM, as LABEL=PATH. Strata are never "
+                         "pooled: each yields its own AP and its own FDR.")
+    ap.add_argument("--method", default="fb_xregion",
+                    help="which FB to tune. Default fb_xregion, the cross-region "
+                         "method the benchmark ships. 'functional_beatrice' is the "
+                         "per-region method and tunes a DIFFERENT model.")
     ap.add_argument("--study", required=True, help="study name (one per stratum)")
     ap.add_argument("--storage", required=True, help="journal file path (persists the study)")
     ap.add_argument("--objective", choices=["multi", "scalar", "triple"], default="multi",
@@ -323,7 +397,7 @@ def main():
                     help="never abort before this many scenarios have been scored.")
     ap.add_argument("--abort-min-trials", type=int, default=30,
                     help="never abort until this many trials have completed.")
-    ap.add_argument("--multi-second", choices=["violation", "mass", "reliab"],
+    ap.add_argument("--multi-second", choices=["violation", "mass", "reliab", "fdr"],
                     default="violation",
                     help="multi mode only: the second (minimised) objective. "
                          "'violation' = max_fdr_violation_n20 (the original); "
@@ -344,7 +418,9 @@ def main():
                          "them spends budget without moving the objective.")
     ap.add_argument("--penalty", type=float, default=0.5,
                     help="scalar mode only: weight on the FDR violation")
-    ap.add_argument("--scenarios", type=int, default=4, help="scenarios per trial")
+    ap.add_argument("--scenarios", default="4",
+                    help="scenarios per trial: one integer for every sim, or a "
+                         "comma-separated list, one per --sim, in order.")
     ap.add_argument("--regions", type=int, default=4, help="regions per scenario (0 = all)")
     ap.add_argument("--max_iter", type=int, default=2000, help="FB max_iter (fixed, not tuned)")
     ap.add_argument("--tune-gamma-coverage", action="store_true",
@@ -408,6 +484,8 @@ def main():
                 if t.state == optuna.trial.TrialState.COMPLETE])
     print(f"[optuna] study '{args.study}' opened: {done} completed trial(s) so far",
           flush=True)
+    print("[optuna] strata: " + ", ".join(f"{l}={pth}" for l, pth in parse_sims(args))
+          + f"   method={args.method}")
     print(f"[optuna] objective={args.objective}  scenarios/trial={args.scenarios}  "
           f"regions/scenario={args.regions}  timeout={args.timeout}s", flush=True)
 
