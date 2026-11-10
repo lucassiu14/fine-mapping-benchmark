@@ -7,7 +7,12 @@
 # the ranked PIP vector at 0.95 cumulative mass and yields exactly one set per
 # fit; this scores what each method actually reported instead.
 #
-#   Rscript scripts/analysis/iter004_native_credible_sets.R
+#   Rscript scripts/analysis/iter004_native_credible_sets.R \
+#       [l3_rds] [credsets_dir] [piptail_dir] [out_rds]
+#
+# The four paths were hard-coded to results/iter004, which made the script
+# unrunnable on any other iteration. They are arguments now, defaulting to
+# Iteration 004 so existing invocations are unchanged.
 #
 # Truth comes from the PIP tails rather than sim.rds: extract_pip_tail.R retains
 # every causal variant whatever its PIP, so the causal index set is complete
@@ -22,16 +27,23 @@
 # Coverage and power under each method's OWN credible sets, using causal indices
 # recovered from the PIP tails (which retain every causal variant whatever its
 # PIP, so the truth is complete there).
-design <- unique(readRDS("results/iter004/combined_scenario_metrics.rds")[,
-                  c("job_dir","model","annotation_type")])
+.a   <- commandArgs(TRUE)
+L3F  <- if (length(.a) >= 1 && nzchar(.a[1])) .a[1] else "results/iter004/combined_scenario_metrics.rds"
+CSD  <- if (length(.a) >= 2 && nzchar(.a[2])) .a[2] else "results/iter004/credsets"
+PTD  <- if (length(.a) >= 3 && nzchar(.a[3])) .a[3] else "results/iter004/piptail"
+OUT  <- if (length(.a) >= 4 && nzchar(.a[4])) .a[4] else "results/iter004/native_credible_sets.rds"
+stopifnot(file.exists(L3F), dir.exists(CSD), dir.exists(PTD))
+
+design <- unique(readRDS(L3F)[, c("job_dir","model","annotation_type")])
 labs <- sub("^cs_", "", sub("\\.rds$", "", basename(
-  list.files("results/iter004/credsets", pattern="^cs_.*\\.rds$"))))
+  list.files(CSD, pattern="^cs_.*\\.rds$"))))
+stopifnot(length(labs) > 0L)
 acc <- new.env(parent = emptyenv())
 bump <- function(k, v) { o <- acc[[k]]; acc[[k]] <- if (is.null(o)) v else o + v }
 
 for (lab in labs) {
-  cs <- readRDS(file.path("results/iter004/credsets", paste0("cs_", lab, ".rds")))
-  pt <- tryCatch(readRDS(file.path("results/iter004/piptail",
+  cs <- readRDS(file.path(CSD, paste0("cs_", lab, ".rds")))
+  pt <- tryCatch(readRDS(file.path(PTD,
                                    paste0("piptail_", lab, ".rds"))), error=function(e) NULL)
   if (is.null(pt)) { message("no piptail for ", lab); next }
   truth <- new.env(parent = emptyenv())
@@ -64,5 +76,6 @@ out$power            <- out$cap  / out$S              # causal captured / causal
 out$mean_size        <- out$size / out$sets
 out$sets_per_fit     <- out$sets / out$fits
 out$pct_no_set       <- 100 * out$nosets / out$fits
-saveRDS(out, "results/iter004/native_credible_sets.rds")
-cat("wrote results/iter004/native_credible_sets.rds  (", nrow(out), " rows )\n", sep="")
+dir.create(dirname(OUT), recursive = TRUE, showWarnings = FALSE)
+saveRDS(out, OUT)
+cat("wrote ", OUT, "  (", nrow(out), " rows )\n", sep="")
