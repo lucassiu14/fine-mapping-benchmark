@@ -58,8 +58,10 @@ th <- theme_bw(base_size = 8) +
 present <- sort(unique(R$ap$method))
 HL  <- intersect(M7, present)
 OTH <- sprintf("other methods (%d)", length(setdiff(present, HL)))
-hl_scales <- function() list(scale_colour_manual(values = PAL7[HL], limits = HL, name = NULL),
-                             scale_shape_manual(values = SHP7[HL], limits = HL, name = NULL))
+hl_scales <- function() list(scale_colour_manual(values = PAL7[HL], limits = HL,
+                                                 labels = unname(LAB_ALL[HL]), name = NULL),
+                             scale_shape_manual(values = SHP7[HL], limits = HL,
+                                                labels = unname(LAB_ALL[HL]), name = NULL))
 
 # ---- figure 1: average precision ----------------------------------------------
 ap <- strata(R$ap)
@@ -73,8 +75,12 @@ p1 <- ggplot(ap, aes(m, method, colour = grp, shape = grp)) +
   geom_errorbarh(aes(xmin = m - 1.96 * se, xmax = m + 1.96 * se), height = .42, linewidth = .45) +
   geom_point(size = 1.9, stroke = .6) +
   facet_grid(ldf ~ annf) +
-  scale_colour_manual(values = c(PAL7[HL], setNames(GREY, OTH)), limits = c(HL, OTH), name = NULL) +
-  scale_shape_manual(values = c(SHP7[HL], setNames(16, OTH)), limits = c(HL, OTH), name = NULL) +
+  scale_colour_manual(values = c(PAL7[HL], setNames(GREY, OTH)), limits = c(HL, OTH),
+                      labels = c(unname(LAB_ALL[HL]), OTH), name = NULL) +
+  scale_shape_manual(values = c(SHP7[HL], setNames(16, OTH)), limits = c(HL, OTH),
+                     labels = c(unname(LAB_ALL[HL]), OTH), name = NULL) +
+  # every method is named on this axis, not just the highlighted seven
+  scale_y_discrete(labels = function(v) unname(LAB_ALL[v])) +
   labs(x = "Mean average precision over iterations (95% CI)", y = NULL) +
   th + theme(panel.grid.major.y = element_line(linewidth = .2, colour = "grey93"))
 suppressWarnings(ggsave(file.path(FIG, "fig_ld_auprc.pdf"), p1, width = W, height = H, device = cairo_pdf))

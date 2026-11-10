@@ -24,7 +24,33 @@ PAL7 <- c(susie          = "#0072B2",
           fb_xregion     = "#D55E00")
 SHP7 <- c(susie = 15, polyfun_ldsc = 17, finemap_inf = 18, polyfun_oracle = 3,
           sbayesrc = 4, beatrice = 1, fb_xregion = 16)
+# Published names, for every figure's legend and for method axes. Kept here with
+# the colours for the same reason they are: a method that is "Oracle SuSiE" in one
+# figure and "polyfun_oracle" in the next reads as two methods. LAB_ALL covers
+# every method the benchmark can display - the LD supplement puts all twelve on
+# its y axis, not just the seven - and LAB7 is its restriction to the seven, in
+# M7 order, so the two can never drift apart.
+LAB_ALL <- c(susie               = "SuSiE",
+             susie_inf           = "SuSiE-inf",
+             finemap             = "FINEMAP",
+             finemap_inf         = "FINEMAP-inf",
+             polyfun_ldsc        = "PolyFun + SuSiE",
+             polyfun_oracle      = "Oracle SuSiE",
+             polyfun_est         = "PolyFun (estimated)",
+             sbayesrc            = "SBayesRC",
+             beatrice            = "BEATRICE",
+             functional_beatrice = "Functional BEATRICE (per region)",
+             fb_pooled           = "Functional BEATRICE (shared logistic)",
+             fb_xregion          = "Functional BEATRICE",
+             funmap              = "Funmap",
+             paintor             = "PAINTOR",
+             finimom             = "FiniMOM",
+             sparsepro           = "SparsePro",
+             carma               = "CARMA")
+LAB7 <- LAB_ALL[M7]
 GREY <- "#9AA0A6"            # every method outside the seven
 REF  <- "#C1272D"            # reference and bound lines (y = x, y = 1 - t)
 stopifnot(identical(names(PAL7), M7), identical(names(SHP7), M7),
-          !anyDuplicated(PAL7), !anyDuplicated(SHP7))
+          identical(names(LAB7), M7),
+          !anyDuplicated(PAL7), !anyDuplicated(SHP7), !anyDuplicated(LAB7),
+          all(M7 %in% names(LAB_ALL)), !anyNA(LAB7))

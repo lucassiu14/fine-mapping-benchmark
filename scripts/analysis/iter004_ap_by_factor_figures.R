@@ -44,7 +44,13 @@ stopifnot(!anyNA(L3$rho))
 
 # --- the same table as section 6.3, before anything is pooled ---------------
 # Results quote these per-stratum means (sparse model, binary annotations).
-quoted <- c(polyfun_ldsc = 0.773, susie = 0.723, fb_xregion = 0.748)
+# polyfun_ldsc was 0.773 when this guard was written, from Iteration 004's own
+# implementation. That implementation did not follow the published method and was
+# rewritten and re-run as Iteration 008 (results/iter004/SUPERSEDED_COMPARATORS.md),
+# which moved this cell to 0.737. The L3 tables in results/iter004 now carry the
+# Iteration 008 numbers for polyfun_ldsc, polyfun_oracle and sbayesrc, so the guard
+# tracks that. susie and fb_xregion were untouched by the swap and still match.
+quoted <- c(polyfun_ldsc = 0.737, susie = 0.723, fb_xregion = 0.748)
 got <- vapply(names(quoted), function(m) mean(L3$ap[L3$method == m & L3$model == "sparse" &
                                                      L3$annotation_type == "binary"]), 0)
 cat("Section 6.3 check (sparse, binary):\n")
@@ -54,7 +60,7 @@ stopifnot(all(round(got, 3) == quoted))
 FACTORS <- list(
   S      = list(col = "S",           lab = "Causal variants per region, S",
                 lev = c(1, 2, 3, 5, 10)),
-  phi    = list(col = "phi",         lab = "Variance explained, φ",
+  phi    = list(col = "phi",         lab = "Variance explained, h²",
                 lev = c(0.05, 0.1, 0.2, 0.4, 0.6)),
   rho    = list(col = "rho",         lab = "Sparse variance share, ρ (1 = sparse model)",
                 lev = c(0.2, 0.4, 0.6, 0.8, 1)),
@@ -100,8 +106,10 @@ for (fk in names(FACTORS)) {
     geom_point(data = hi, size = 1.7, stroke = .6) +
     scale_x_continuous(breaks = seq_along(f$lev), labels = as.character(f$lev),
                        expand = expansion(add = .25)) +
-    scale_colour_manual(values = c(PAL7, setNames(GREY, OTH)), limits = c(M7, OTH), name = NULL) +
-    scale_shape_manual(values = c(SHP7, setNames(16, OTH)), limits = c(M7, OTH), name = NULL) +
+    scale_colour_manual(values = c(PAL7, setNames(GREY, OTH)), limits = c(M7, OTH),
+                        labels = c(LAB7, setNames(OTH, OTH)), name = NULL) +
+    scale_shape_manual(values = c(SHP7, setNames(16, OTH)), limits = c(M7, OTH),
+                       labels = c(LAB7, setNames(OTH, OTH)), name = NULL) +
     labs(x = f$lab, y = "Mean average precision over cells (95% CI)") + th
   ggsave(file.path(FIG, sprintf("fig_ap_by_%s.pdf", fk)), p, width = 6.3, height = 3.4, device = cairo_pdf)
 
