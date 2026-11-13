@@ -430,3 +430,96 @@ WORKERS=20 PBS_WALLTIME=72:00:00 bash scripts/tuning/submit_fb_retune.sh
 ```
 
 Re-running the same command continues the study; nothing is recomputed.
+
+## Re-tune v4 — study `fb_retune_cells_v4` (2026-11-13)
+
+### Why v3's answer had to be thrown out
+
+v3's front ran from AP 0.549 / FDR 0.762 down to AP 0.244 / FDR 0.150, and every
+point at FDR below 0.48 had `sparse_concrete` ∈ {1, 2, 4, 7}. The apparent
+winner, trial #227, scored AP 0.462 / FDR 0.152 / mass 0.94 — a five-fold FDR
+improvement on the shipped config.
+
+It is not a valid configuration, for two independent reasons.
+
+**It is outside the published method.** The original BEATRICE
+(github.com/sayangsep/Beatrice-Finemapping, `beatrice.py`) declares
+
+```python
+flags.DEFINE_integer('sparse_concrete', 50, 'Number of non zero locatons of the
+    concrete random vector at every iteration.', lower_bound=10)
+```
+
+abseil refuses to start below 10. Our fork declares `lower_bound=1`, and
+`optuna_fb.py`'s 2026-07-30 bounds revision opened the floor to 1 citing "the
+package's own declared lower_bound=1" — our fork's bound, not the published one.
+That is the error this iteration corrects. The same revision noted that v1 had
+landed on `sparse_concrete` = 10 and dismissed it as "standing on a floor";
+it was standing on the published minimum.
+
+**It is a two-variant detector.** `sparse_concrete` is `K_C`, the top-K cap on
+how many variants may be simultaneously causal in one configuration
+(`joint_trainer.py:190`, `topk(c[i], K_C)`; original `trainer.py:211`), and
+`_abf` keys the memo on `tuple(ind)`, so no configuration ever has more than
+`K_C` members. At `K_C` = 2 the model cannot represent the truth in any
+scenario with S = 3 or S = 10. Measured against the shipped config on the 12
+units where both logs overlap:
+
+| true causals | shipped (sc=51) | #227 (sc=2) | change |
+|---|---|---|---|
+| S = 1 | 0.700 | 0.884 | +26% |
+| S = 3 | 0.457 | 0.436 | −5% |
+| S = 10 | 0.299 | 0.157 | **−48%** |
+
+Its low FDR is the same artifact: a model that cannot emit multi-variant calls
+cannot make multi-variant false ones. Its mass ratio of 0.94 is the cap
+binding, not agreement with the data — mass tracks `sparse_concrete` almost
+proportionally while the cap binds (1→0.47, 2→0.94, 4→1.6, 7→2.3, 10→2.7-3.3,
+22→4.7) and then stops (244→3.70, *below* 22's).
+
+**The aggregate hid all of it.** v3's AP objective averaged over S ∈ {1, 3, 10}
+with equal weight, so the S = 1 gain offset the S = 10 collapse and #227's mean
+AP looked like a mild 0.06 cost. This is the pooling failure the project's own
+rule guards against, on an axis that had not been treated as a stratum.
+
+### What changed
+
+- **`--sc-min` defaults to 10**, the published floor. Do not lower it.
+- **New objective `cells`**: AP and FDR are both worst-cased over
+  (stratum × S) cells rather than over strata alone, so no configuration can
+  pay for one causal count with another. Objective 1 is the *minimum* cell AP;
+  objective 2 the *maximum* cell FDR excess over 0.05; objective 3 mean
+  `ece_hi`. Mean AP and every cell's AP/FDR are stored in `user_attrs` so
+  selection can still see the whole picture.
+- **Posterior mass is a hard constraint**, `sum(PIP)/#causal` within
+  [`--mass-lo`, `--mass-hi`] = [0.5, 2.0], enforced through
+  NSGA-II's `constraints_func`. v3 printed it as a warning and the search
+  walked straight past it. A constraint rather than a pruned trial, so
+  infeasible trials still inform the search.
+- **`fb_objective.R` reports `scen_S` and `scen_phi`** from
+  `simulation$scenarios[[k]]$S`, so cells are keyed off the simulation rather
+  than re-derived from `run_simulation`'s `expand.grid(S, phi, iter)` ordering.
+  It refuses to run if S is missing, since that would collapse every cell into
+  one.
+
+`gamma` is the lever this leaves open. In `_abf` it *is* the threshold —
+`ind = id_sort[where(cc_t > gamma)]` — so raising it shrinks configurations
+from inside the top-K instead of truncating it, and the original declares
+`gamma` with no bounds at all. v3's search spanned 0.01-0.5 but never needed
+it, because lowering `K_C` was the cheaper route to the same score.
+
+The aggregation is unit-tested with a faked scenario runner (16 checks),
+including the decisive one: a two-variant detector ranks *above* a balanced
+configuration under `triple` and *below* it under `cells`.
+
+### Best admissible point from v3, for reference
+
+Restricted to `sparse_concrete` ≥ 10, v3's front gives trial #206 — `sc` = 12,
+AP 0.532, FDR 0.663, mass 3.09. Better than the shipped config on every axis,
+and still far from the ~0.14 reference. **If v4 finds no feasible trial, that
+is the finding**: the post-fix overconfidence is structural rather than a
+hyperparameter, and the memo normalisation itself needs re-examining.
+
+```bash
+WORKERS=20 PBS_WALLTIME=72:00:00 bash scripts/tuning/submit_fb_retune.sh
+```

@@ -55,12 +55,23 @@ set -euo pipefail
 PROJECT_ROOT="$(pwd)"
 [[ -f scripts/tuning/optuna_fb.py ]] || { echo "ERROR: run from the project root" >&2; exit 1; }
 
-STUDY="${STUDY:-fb_retune_insample_v3}"
+STUDY="${STUDY:-fb_retune_cells_v4}"
 TUNE_DIR="${TUNE_DIR:-${PROJECT_ROOT}/tuning}"
 STORAGE="${STORAGE:-${TUNE_DIR}/${STUDY}.journal}"
 LOG_DIR="${FMB_LOG_DIR:-${TUNE_DIR}/logs}"
 METHOD="${METHOD:-fb_xregion}"
-OBJECTIVE="${OBJECTIVE:-triple}"
+# v3 used OBJECTIVE=triple, which worst-cased FDR over strata but pooled over
+# the true causal count S. Its winning point was a two-variant detector:
+# sparse_concrete=2, five times below the published floor of 10, +26% AP at
+# S=1 and -48% at S=10. v4 worst-cases over (stratum x S) cells and makes
+# posterior mass a hard constraint instead of a printed warning.
+OBJECTIVE="${OBJECTIVE:-cells}"
+# The published BEATRICE declares sparse_concrete with lower_bound=10 and
+# refuses to start below it. Do not lower SC_MIN.
+SC_MIN="${SC_MIN:-10}"
+SC_MAX="${SC_MAX:-300}"
+MASS_LO="${MASS_LO:-0.5}"
+MASS_HI="${MASS_HI:-2.0}"
 CANARY="${CANARY:-0}"
 
 # --- grid -------------------------------------------------------------------
@@ -143,6 +154,8 @@ echo "Strata     : ${N_SIMS} sims -> $(( PER_SIM * N_SIMS )) scenarios x ${REGIO
 echo "             = $(( PER_SIM * N_SIMS * REGIONS )) region-fits per trial"
 for s in "${SIM_ARGS[@]}"; do echo "             $s"; done
 echo "Storage    : $STORAGE"
+echo "Objective  : ${OBJECTIVE}  sparse_concrete in [${SC_MIN}, ${SC_MAX}]"
+echo "             mass constraint: sum(PIP)/#causal in [${MASS_LO}, ${MASS_HI}]"
 WALL_S=$(awk -F: '{print $1*3600+$2*60+$3}' <<< "$PBS_WALLTIME")
 if (( TRIAL_MARGIN < MEASURED_TRIAL_SEC )); then
   echo "ERROR: TRIAL_MARGIN=${TRIAL_MARGIN}s is less than one trial" >&2
@@ -219,6 +232,8 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --study "${STUDY}_canary" --storage "${TUNE_DIR}/${STUDY}_canary.journal" \\
     --method "${METHOD}" --objective "${OBJECTIVE}" \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
+    --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
+    --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
     --n-trials 1 --python "${FB_PY}" \\
     --fix sigma_sq=0.0899 n_caus=10 sparse_concrete=51 \\
           prior_regularisation=0.1255 lambda_l1=0.1223 hierarchy_M=10.15 \\
@@ -258,7 +273,9 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --study "${STUDY}" --storage "${STORAGE}" \\
     --method "${METHOD}" --objective "${OBJECTIVE}" \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
-    --timeout \$(( WALL_SEC - ${TRIAL_MARGIN:-3600} )) --python "${FB_PY}"
+    --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
+    --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
+    --timeout \$(( WALL_SEC - ${TRIAL_MARGIN} )) --python "${FB_PY}"
 echo "[worker \${PBS_ARRAY_INDEX}] done \$(date)"
 PBS_EOF
 echo "Job script: $J"

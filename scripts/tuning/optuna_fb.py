@@ -153,7 +153,12 @@ def run_one_scenario(args, params, sim_path, stratum, scenario):
     return {k: num(k) for k in
             ("ap", "max_fdr_violation_n20", "fdr_at_90", "fdr_at_95",
              "tp_at_95", "fp_at_95",
-             "total_mass_ratio", "hi_pip_reliab", "ece_hi", "seconds")}
+             "total_mass_ratio", "hi_pip_reliab", "ece_hi", "seconds",
+             # scen_S is the scenario's TRUE causal count, reported by
+             # fb_objective.R from simulation$scenarios[[k]]$S rather than
+             # re-derived here from the expand.grid(S, phi) ordering. It keys
+             # the per-S cells the `cells` objective worst-cases over.
+             "scen_S", "scen_phi")}
 
 
 def suggest_params(trial, args):
@@ -168,11 +173,22 @@ def suggest_params(trial, args):
     # objective - was choosing the value:
     #   sigma_sq        0.005323 against a 5e-3 floor  (1.4% into a 2-decade range)
     #   sparse_concrete 10       against a 10 floor    (exactly on it)
-    # Both floors are now opened up. sparse_concrete goes to the package's own
-    # declared lower_bound=1 and switches to a log-uniform integer, which puts the
-    # sampling density where the optimum actually lives instead of spreading it
-    # evenly over 10..300. (BEATRICE's README examples all use 10, so v1 landed on
-    # the authors' value - but standing on a floor is not evidence it is optimal.)
+    # Both floors were opened up. sparse_concrete went to lower_bound=1 and a
+    # log-uniform integer, on the stated grounds of "the package's own declared
+    # lower_bound=1".
+    #
+    # CORRECTED 2026-11-13. That bound is OUR FORK's. The published BEATRICE
+    # (github.com/sayangsep/Beatrice-Finemapping, beatrice.py) declares
+    #   DEFINE_integer('sparse_concrete', 50, ..., lower_bound=10)
+    # and abseil refuses to start below 10, so v1 landing on 10 was landing on
+    # the published MINIMUM, not on an arbitrary floor. sparse_concrete is the
+    # top-K cap on how many variants may be simultaneously causal in one
+    # configuration (joint_trainer.py:190 topk, original trainer.py:211), so a
+    # value below the true causal count makes the model structurally unable to
+    # represent the truth. Study v3 duly walked to sparse_concrete=2, which
+    # scored a 5x better FDR by becoming a two-variant detector: measured
+    # against the shipped config it gained 26% AP at S=1 and lost 48% at S=10.
+    # The floor is now an argument, defaulting to the published 10.
     # Kept as-is: lambda_l1, prior_regularisation and n_caus all found interior
     # optima in v1, so their ranges are doing their job.
     fixed = args.fix or {}
@@ -189,7 +205,8 @@ def suggest_params(trial, args):
         "sigma_sq":             sfloat("sigma_sq", 1e-4, 0.5),
         "hierarchy_M":          sfloat("hierarchy_M", 1.0, 100.0),
         "n_caus":               sint("n_caus", 1, 10),
-        "sparse_concrete":      sint("sparse_concrete", 1, 300, log=True),
+        "sparse_concrete":      sint("sparse_concrete", args.sc_min, args.sc_max,
+                                     log=True),
         # ADDED 2026-11-10. Both act BEFORE pip.csv is written, so both move the
         # PIPs and therefore AP and FDR; neither had ever been exposed by the R
         # wrappers, so every run so far used the Python defaults (0.1, 0.2).
@@ -259,6 +276,11 @@ def build_objective(args):
         # per stratum), and a stratum's FDR is pooled from its own COUNTS.
         per = {lab: {"ap": [], "ece": [], "relb": [], "mass": [],
                      "viol": [], "tp": 0.0, "fp": 0.0} for lab, _ in sims}
+        # Cells are (stratum, true causal count). Study v3 worst-cased FDR over
+        # strata only, which left the S axis poolable - and a config that buys
+        # S=1 with S=10 then averages into looking fine. Keyed lazily because S
+        # arrives with the scenario, not with the --sim flag.
+        cells = {}
 
         for s, (lab, sim_path, sc) in enumerate(units, start=1):
             m = run_one_scenario(args, params, sim_path, lab, sc)
@@ -273,6 +295,15 @@ def build_objective(args):
             # Counts, not the rate: mean(fp/n) != sum(fp)/sum(n).
             if m["tp_at_95"] == m["tp_at_95"] and m["fp_at_95"] == m["fp_at_95"]:
                 d["tp"] += m["tp_at_95"]; d["fp"] += m["fp_at_95"]
+
+            sS = m["scen_S"]
+            key = f"{lab}|S={int(sS)}" if sS == sS else f"{lab}|S=?"
+            cd = cells.setdefault(key, {"ap": [], "ece": [], "tp": 0.0, "fp": 0.0})
+            cd["ap"].append(m["ap"])
+            if m["ece_hi"] == m["ece_hi"]:
+                cd["ece"].append(m["ece_hi"])
+            if m["tp_at_95"] == m["tp_at_95"] and m["fp_at_95"] == m["fp_at_95"]:
+                cd["tp"] += m["tp_at_95"]; cd["fp"] += m["fp_at_95"]
 
             print(f"[trial {trial.number}] {lab} scenario {sc} "
                   f"({s}/{n_scen}) seconds={m['seconds']:.1f} ap={m['ap']:.4f} "
@@ -335,6 +366,46 @@ def build_objective(args):
                                                           strat_fdr[k]))
                             if fdrs else "")
 
+        # --- per-cell summaries, for the `cells` objective ------------------
+        cell_ap, cell_fdr = {}, {}
+        for key, cd in cells.items():
+            cell_ap[key] = mean(cd["ap"])
+            n = cd["tp"] + cd["fp"]
+            cell_fdr[key] = (cd["fp"] / n) if n > 0 else float("nan")
+            trial.set_user_attr(f"ap_{key}", cell_ap[key])
+            trial.set_user_attr(f"fdr_at_95_{key}", cell_fdr[key])
+            trial.set_user_attr(f"nsel_at_95_{key}", n)
+        aps_c = [v for v in cell_ap.values() if v == v]
+        fdr_c = [v for v in cell_fdr.values() if v == v]
+        min_cell_ap   = min(aps_c) if aps_c else float("nan")
+        worst_cell_fdr = max(fdr_c) if fdr_c else float("nan")
+        trial.set_user_attr("min_cell_ap", min_cell_ap)
+        trial.set_user_attr("worst_cell_fdr_at_95", worst_cell_fdr)
+        trial.set_user_attr("worst_cell",
+                            max(cell_fdr, key=lambda k: (cell_fdr[k] == cell_fdr[k],
+                                                         cell_fdr[k]))
+                            if fdr_c else "")
+
+        # Posterior mass as a HARD constraint, not a watched number. v3 printed
+        # it as a warning and the search walked straight past it: every point at
+        # the low-FDR end reached mass ~1 by capping sparse_concrete below the
+        # true causal count. NSGA-II reads this through constraints_func;
+        # <= 0 is feasible.
+        mass_c = (max(args.mass_lo - mean_mass, mean_mass - args.mass_hi)
+                  if mean_mass == mean_mass else 1e3)
+        trial.set_user_attr("constraint", (float(mass_c),))
+        trial.set_user_attr("mass_feasible", bool(mass_c <= 0))
+
+        if args.objective == "cells":
+            # As `triple`, but both AP and FDR are worst-cased over
+            # (stratum x S) cells rather than over strata alone, so no
+            # configuration can pay for one causal count with another.
+            fdr_excess = (max(0.0, worst_cell_fdr - 0.05)
+                          if worst_cell_fdr == worst_cell_fdr else 1.0)
+            return (min_cell_ap if min_cell_ap == min_cell_ap else 0.0,
+                    fdr_excess,
+                    mean_ece if mean_ece == mean_ece else 1.0)
+
         if args.objective == "triple":
             # Ranking (AP, up), selection safety (worst-stratum FDR excess over
             # the 0.05 budget promised at PIP >= 0.95, down) and honesty of the
@@ -378,7 +449,8 @@ def main():
                          "per-region method and tunes a DIFFERENT model.")
     ap.add_argument("--study", required=True, help="study name (one per stratum)")
     ap.add_argument("--storage", required=True, help="journal file path (persists the study)")
-    ap.add_argument("--objective", choices=["multi", "scalar", "triple"], default="multi",
+    ap.add_argument("--objective",
+                    choices=["multi", "scalar", "triple", "cells"], default="multi",
                     help="multi: Pareto front of (AP, FDR violation), no arbitrary "
                          "weighting but no pruning. scalar: AP - penalty*violation, "
                          "enables pruning. Default: multi.")
@@ -406,6 +478,18 @@ def main():
                          "PIP>=0.9 calls. 'reliab' is the one that matches the "
                          "measured Iteration 003 failure - but only if the tuning "
                          "sim spans phi=0.4, where that failure lives.")
+    # The published BEATRICE declares sparse_concrete with lower_bound=10 and
+    # refuses to start below it. Defaulting the floor there keeps the search
+    # inside the method as published; raise sc_max, never lower sc_min, unless
+    # you mean to leave the published parameter space.
+    ap.add_argument("--sc-min", type=int, default=10,
+                    help="sparse_concrete floor (published lower_bound is 10)")
+    ap.add_argument("--sc-max", type=int, default=300,
+                    help="sparse_concrete ceiling (the original declares none)")
+    ap.add_argument("--mass-lo", type=float, default=0.5,
+                    help="feasible sum(PIP)/#causal floor (objective 'cells')")
+    ap.add_argument("--mass-hi", type=float, default=2.0,
+                    help="feasible sum(PIP)/#causal ceiling (objective 'cells')")
     ap.add_argument("--mass-penalty", type=float, default=0.0,
                     help="scalar mode only: subtract this x |total_mass_ratio - 1| "
                          "from the score. 0 (default) reproduces the old objective. "
@@ -458,16 +542,32 @@ def main():
         print(f"[fix] held out of the search: {fixed}")
 
     storage = make_storage(args.storage)
-    multi_obj = args.objective in ("multi", "triple")
-    sampler = (optuna.samplers.NSGAIISampler(seed=None) if multi_obj
-               else optuna.samplers.TPESampler(n_startup_trials=args.startup_trials))
+    multi_obj = args.objective in ("multi", "triple", "cells")
+    # `cells` carries a hard feasibility constraint (posterior mass), which
+    # NSGA-II honours through constrained domination: an infeasible trial loses
+    # to every feasible one but still informs the search, which is why this is
+    # a constraint rather than a pruned trial. A trial that died before setting
+    # the attr counts as infeasible.
+    def _constraints(frozen):
+        c = frozen.user_attrs.get("constraint")
+        try:
+            return tuple(float(v) for v in c)
+        except (TypeError, ValueError):
+            return (1e3,)
+    if args.objective == "cells":
+        sampler = optuna.samplers.NSGAIISampler(seed=None,
+                                                constraints_func=_constraints)
+    elif multi_obj:
+        sampler = optuna.samplers.NSGAIISampler(seed=None)
+    else:
+        sampler = optuna.samplers.TPESampler(n_startup_trials=args.startup_trials)
     pruner = (optuna.pruners.MedianPruner(n_startup_trials=args.startup_trials,
                                           n_warmup_steps=1)
               if args.objective == "scalar" else optuna.pruners.NopPruner())
 
     kwargs = dict(study_name=args.study, storage=storage,
                   load_if_exists=True, sampler=sampler)
-    if args.objective == "triple":
+    if args.objective in ("triple", "cells"):
         kwargs["directions"] = ["maximize", "minimize", "minimize"]
     elif args.objective == "multi":
         kwargs["directions"] = ["maximize", "minimize"]
@@ -633,6 +733,34 @@ def report(study, args):
             print(f"    {v:6.3f}  {k}")
     except Exception as e:                       # too few trials, missing sklearn, ...
         print(f"  (param importance unavailable: {e})")
+
+    if args.objective == "cells":
+        feas = [t for t in complete if t.user_attrs.get("mass_feasible")]
+        print(f"  mass-feasible trials: {len(feas)}/{len(complete)} "
+              f"(sum(PIP)/#causal within [{args.mass_lo}, {args.mass_hi}])")
+        if not feas:
+            print("  NO feasible trial. Either the window is too tight or the")
+            print("  post-fix model cannot reach calibrated mass inside the")
+            print("  published sparse_concrete range - which is a finding, not")
+            print("  a config. Check the sparse_concrete spread above.")
+        front = sorted(study.best_trials, key=lambda x: -x.values[0])
+        print(f"Pareto front (WORST-CELL AP up, WORST-CELL FDR-excess@0.95 down, "
+              f"ece_hi down)  [{len(front)} points]:")
+        for t in front:
+            ua = t.user_attrs
+            flag = "" if ua.get("mass_feasible") else "  [INFEASIBLE mass]"
+            print(f"  minAP={t.values[0]:.4f}  worst_fdr_xs={t.values[1]:.4f}  "
+                  f"ece_hi={t.values[2]:.4f}  meanAP={ua.get('mean_ap', float('nan')):.4f}  "
+                  f"mass={ua.get('mean_total_mass_ratio', float('nan')):.2f}  "
+                  f"worst={ua.get('worst_cell', '')}  #{t.number}{flag}")
+            cells = sorted(k[3:] for k in ua if k.startswith("ap_") and "|S=" in k)
+            if cells:
+                print("      " + "  ".join(
+                    f"{c}:AP={ua.get('ap_' + c, float('nan')):.3f}/"
+                    f"FDR={ua.get('fdr_at_95_' + c, float('nan')):.3f}"
+                    for c in cells))
+            print(f"      {t.params}")
+        return
 
     if args.objective == "triple":
         front = sorted(study.best_trials, key=lambda x: -x.values[0])

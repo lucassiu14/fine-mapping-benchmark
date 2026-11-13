@@ -91,6 +91,18 @@ if (SCENARIO < 1L || SCENARIO > n_sc) {
 mini <- sim
 mini$scenarios <- sim$scenarios[SCENARIO]
 mini$scenarios[[1]]$scenario_id <- 1L
+
+# The scenario's TRUE causal count and heritability, reported so the caller can
+# key per-S cells off the simulation itself rather than re-deriving them from
+# run_simulation's expand.grid(S, phi, iter) ordering, which varies S fastest
+# and would silently mis-key if that ever changed.
+.sc      <- sim$scenarios[[SCENARIO]]
+SCEN_S   <- if (!is.null(.sc$S))   as.numeric(.sc$S)[1]   else NA_real_
+SCEN_PHI <- if (!is.null(.sc$phi)) as.numeric(.sc$phi)[1] else NA_real_
+if (is.na(SCEN_S))
+  stop("scenario ", SCENARIO, " has no S: the per-S cells would all collapse ",
+       "into one, which is the pooling this objective exists to prevent.",
+       call. = FALSE)
 ROTATE <- identical(toupper(gets("rotate_regions", "FALSE")), "TRUE")
 if (ROTATE) {
   # One region per scenario, with the region (and hence the region SIZE) rotating
@@ -228,8 +240,10 @@ n_failed <- res[[METHOD]]$n_failed %||% NA_integer_
 elapsed  <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
 
 cat(sprintf(
-  "status=ok\nmethod=%s\nstratum=%s\nap=%.6f\nmax_fdr_violation_n20=%s\nfdr_at_90=%s\nfdr_at_95=%s\ntp_at_95=%s\nfp_at_95=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
+  "status=ok\nmethod=%s\nstratum=%s\nscen_S=%s\nscen_phi=%s\nap=%.6f\nmax_fdr_violation_n20=%s\nfdr_at_90=%s\nfdr_at_95=%s\ntp_at_95=%s\nfp_at_95=%s\ntotal_mass_ratio=%s\nhi_pip_reliab=%s\nece_hi=%s\nn_failed=%s\nseconds=%.1f\n",
   METHOD, STRATUM,
+  sprintf("%.0f", SCEN_S),
+  ifelse(is.na(SCEN_PHI), "NA", sprintf("%.6f", SCEN_PHI)),
   ap,
   ifelse(is.na(max_fdr_violation_n20), "NA", sprintf("%.6f", max_fdr_violation_n20)),
   ifelse(is.na(fdr_at_90), "NA", sprintf("%.6f", fdr_at_90)),
