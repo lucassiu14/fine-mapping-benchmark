@@ -218,7 +218,17 @@ def suggest_params(trial, args):
         # gamma_coverage, gamma_selection and purity are deliberately NOT here:
         # generate_credible_sets.py reads them only after pip.csv is written, so
         # they cannot change AP or FDR at all.
-        "gamma":                sfloat("gamma", 0.01, 0.5, log=True),
+        # CEILING RAISED 0.5 -> 0.8 (2026-11-13, user). With sparse_concrete
+        # floored at its published 10, gamma is the only remaining lever on
+        # configuration size: _abf keeps the top-K entries with cc > gamma, so
+        # raising it shrinks configurations from INSIDE the top-K instead of
+        # truncating it. The original declares gamma with no bounds at all, and
+        # v3's lowest-mass sparse_concrete=7 configuration sat at gamma 0.478,
+        # 4% under the old ceiling - the direction v4 needs. 0.8 matches
+        # gamma_key's existing ceiling. Above ~0.8 few concrete values clear the
+        # threshold, the training memo can come back near-empty and the PIPs
+        # fall out of the stepwise search rather than the variational fit.
+        "gamma":                sfloat("gamma", 0.01, 0.8, log=True),
         "gamma_key":            sfloat("gamma_key", 0.02, 0.8, log=True),
     }
     if args.tune_gamma_coverage:
