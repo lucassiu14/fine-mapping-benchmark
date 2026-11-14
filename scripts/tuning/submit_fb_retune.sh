@@ -114,16 +114,17 @@ FB_PY="${FB_PY:-$HOME/tools/py-venv-runner.sh}"
 MAX_ITER="${MAX_ITER:-2000}"
 WORKERS="${WORKERS:-10}"
 
-# One trial is 27 scenarios; the 2026-11-10 canary (job 4596630) measured 175.8
-# minutes for all 27, i.e. ~390s per scenario, ~39s per region fit.
-MEASURED_TRIAL_SEC="${MEASURED_TRIAL_SEC:-10548}"
-# --timeout goes to study.optimize(), which stops LAUNCHING trials once it
-# elapses - a trial already running is not interrupted. So the margin has to
-# exceed one whole trial, or every worker's last trial is launched near the
-# deadline, killed mid-flight by PBS, and left RUNNING in the journal forever.
-# The old default of 3600 was a third of a trial and would have done exactly
-# that on all WORKERS at once.
-TRIAL_MARGIN="${TRIAL_MARGIN:-12600}"
+# Trial cost scales with the number of REGION FITS, which is
+# scenarios-per-sim x sims x regions, so the measurement is kept per fit and
+# multiplied up below once the strata are known. The 2026-11-10 canary (job
+# 4596630) ran 27 scenarios x 10 regions = 270 fits in 175.8 minutes: 10548s a
+# trial, ~390s a scenario, ~39s a region fit.
+#
+# Keeping it per fit matters now that STRATA can select one stratum: a
+# sparse-only study is 9 scenarios x 10 regions = 90 fits, a third of the work,
+# and a hardcoded 10548 would reserve three and a half hours of margin for a
+# one-hour trial and launch a third as many trials as the walltime allows.
+MEASURED_FIT_SEC="${MEASURED_FIT_SEC:-39}"
 mkdir -p "$TUNE_DIR" "$LOG_DIR"
 
 # The venv python is dynamically linked against the module's libpython, so the
@@ -195,6 +196,14 @@ if [[ "${PM_MAX}" != "0" ]]; then
 else
   echo "             prior_mass: OFF (learned prior scale left unanchored)"
 fi
+FITS_PER_TRIAL=$(( PER_SIM * N_SIMS * REGIONS ))
+MEASURED_TRIAL_SEC="${MEASURED_TRIAL_SEC:-$(( MEASURED_FIT_SEC * FITS_PER_TRIAL ))}"
+# --timeout goes to study.optimize(), which stops LAUNCHING trials once it
+# elapses - a trial already running is not interrupted. So the margin has to
+# exceed one whole trial, or every worker's last trial is launched near the
+# deadline, killed mid-flight by PBS, and left RUNNING in the journal forever.
+# 1.2x gives a trial that runs slower than measured somewhere to land.
+TRIAL_MARGIN="${TRIAL_MARGIN:-$(( MEASURED_TRIAL_SEC * 12 / 10 ))}"
 WALL_S=$(awk -F: '{print $1*3600+$2*60+$3}' <<< "$PBS_WALLTIME")
 if (( TRIAL_MARGIN < MEASURED_TRIAL_SEC )); then
   echo "ERROR: TRIAL_MARGIN=${TRIAL_MARGIN}s is less than one trial" >&2
