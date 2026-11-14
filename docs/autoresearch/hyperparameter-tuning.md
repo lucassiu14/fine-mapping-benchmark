@@ -734,3 +734,62 @@ CAVEAT on the sparse table: one scenario, one seed, two regions, and at
 phi = 0.2 with n = 5000 the per-causal signal is strong (z ~ 18), so AP = 1.000
 at prior_mass = 10 is plausible but is not evidence of a trend. The 9-scenario
 S x phi grid is the check.
+
+### The mass constraint also has the wrong TARGET under sparse_inf
+
+Run on the same real-LD `sparse_inf` bed (rho=0.2, S=3, phi=0.2) with
+`scripts/tuning/compare_methods_local.R`:
+
+| method | AP | mass | FDR@.95 | reliability |
+|---|---|---|---|---|
+| susie | 0.418 | 3.333 | 0.500 | 0.429 |
+| susie_inf | 0.595 | 3.289 | 0.000 | 1.000 |
+| fb_xregion (prior_mass 3) | 0.368 | 2.836 | 0.636 | 0.333 |
+
+`susie_inf` is the correctly specified method here and it is PERFECTLY reliable -
+every PIP >= 0.9 call is truly causal, zero FDR at 0.95 - with a posterior mass
+of 3.289. So mass ~ 3 under `sparse_inf` is not miscalibration.
+
+The reason is in the definition. `total_mass_ratio = sum(PIP) / #causal` counts
+only the SPARSE causals in its denominator, while under `sparse_inf` there is
+real diffuse signal on top of them. A method that correctly recognises that
+signal must have mass > 1. Driving mass toward 1 in that stratum therefore
+pushes toward WORSE calibration, which is consistent with what v4's lowest-mass
+trials looked like: gamma pinned at its ceiling and min-cell AP 0.154 against a
+0.225 baseline.
+
+So the v4 constraint had two defects, not one: it pooled strata, AND its target
+value is wrong for one of them regardless of method. Constrain mass on `sparse`,
+where 1.0 is the right target and the shipped configuration already sits at
+1.04. For `sparse_inf`, hi_pip_reliab and FDR are the calibration objectives
+that mean what they say; `susie_inf`'s 3.289 is the reference mass, not 1.0.
+
+### What FB is actually missing under sparse_inf
+
+fb_xregion (0.368) came in below PLAIN susie (0.418), which is also a sparse
+model - so the deficit is not just the generic penalty a sparse method pays
+under polygenicity. SuSiE runs with `estimate_residual_variance = TRUE` and can
+absorb the background into its residual variance. FB takes sigma_sq and n as
+given and has no residual-variance adaptation at all, so sigma_sq is the only
+knob that can stand in for one. Sweeping it on the same bed at prior_mass = 3:
+
+| sigma_sq | AP | FDR@.95 | mass | reliability |
+|---|---|---|---|---|
+| 0.005 | 0.260 | 0.727 | 2.165 | 0.273 |
+| 0.02 | 0.322 | 0.765 | 3.333 | 0.211 |
+| 0.0899 (shipped) | 0.368 | 0.636 | 2.836 | 0.333 |
+| 0.2 | 0.442 | 0.667 | 3.331 | 0.235 |
+| 0.5 | 0.401 | 0.714 | 2.834 | 0.267 |
+
+prior_mass = 3 with sigma_sq = 0.2 lifts AP from 0.248 (shipped, unanchored) to
+0.442, which puts FB above plain susie and still below susie_inf. That ordering
+is the honest one: susie_inf models the infinitesimal component and FB does not.
+This also explains v4's fANOVA, where sigma_sq dominated AP importance at 0.734 -
+under `sparse_inf` it is doing duty as a residual-variance parameter.
+
+Closing that remaining gap properly is a METHODS change, not a tuning run. The
+marginal model under an infinitesimal component is
+z ~ N(sqrt(n) R b, R + n tau^2 R^2) rather than z ~ N(sqrt(n) R b, R), so `abf`
+would need tau^2 estimated per region and carried through its quadratic form and
+log-determinant. That is the FB analogue of SuSiE-inf / FINEMAP-inf and should
+be scoped as its own piece of work, not folded into a hyperparameter search.
