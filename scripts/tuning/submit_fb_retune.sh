@@ -72,6 +72,12 @@ SC_MIN="${SC_MIN:-10}"
 SC_MAX="${SC_MAX:-300}"
 MASS_LO="${MASS_LO:-0.5}"
 MASS_HI="${MASS_HI:-2.0}"
+# prior_mass: the per-region anchor on sum(p_0), added 2026-11-14. Until it
+# existed, mass was the one constrained quantity that no search parameter
+# controlled directly, which is why v4 found 0/76 feasible trials. PM_MAX=0
+# keeps the anchor off and out of the search space (the v1-v4 behaviour).
+PM_MIN="${PM_MIN:-0.5}"
+PM_MAX="${PM_MAX:-0}"
 CANARY="${CANARY:-0}"
 
 # --- grid -------------------------------------------------------------------
@@ -156,6 +162,11 @@ for s in "${SIM_ARGS[@]}"; do echo "             $s"; done
 echo "Storage    : $STORAGE"
 echo "Objective  : ${OBJECTIVE}  sparse_concrete in [${SC_MIN}, ${SC_MAX}]"
 echo "             mass constraint: sum(PIP)/#causal in [${MASS_LO}, ${MASS_HI}]"
+if [[ "${PM_MAX}" != "0" ]]; then
+  echo "             prior_mass in [${PM_MIN}, ${PM_MAX}] - anchors sum(p_0) per region"
+else
+  echo "             prior_mass: OFF (learned prior scale left unanchored)"
+fi
 WALL_S=$(awk -F: '{print $1*3600+$2*60+$3}' <<< "$PBS_WALLTIME")
 if (( TRIAL_MARGIN < MEASURED_TRIAL_SEC )); then
   echo "ERROR: TRIAL_MARGIN=${TRIAL_MARGIN}s is less than one trial" >&2
@@ -234,6 +245,7 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
     --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
     --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
+    --pm-min ${PM_MIN} --pm-max ${PM_MAX} \\
     --n-trials 1 --python "${FB_PY}" \\
     --fix sigma_sq=0.0899 n_caus=10 sparse_concrete=51 \\
           prior_regularisation=0.1255 lambda_l1=0.1223 hierarchy_M=10.15 \\
@@ -275,6 +287,7 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
     --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
     --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
+    --pm-min ${PM_MIN} --pm-max ${PM_MAX} \\
     --timeout \$(( WALL_SEC - ${TRIAL_MARGIN} )) --python "${FB_PY}"
 echo "[worker \${PBS_ARRAY_INDEX}] done \$(date)"
 PBS_EOF

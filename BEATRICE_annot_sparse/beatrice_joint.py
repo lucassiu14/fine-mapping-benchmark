@@ -54,6 +54,12 @@ flags.DEFINE_boolean('allow_dup', False, 'Allow duplicate variants across credib
 flags.DEFINE_list('neural_network', '10,200,10', 'Finemapping net hidden dims.')
 flags.DEFINE_list('prior_neural_network', '10,200,10', 'LassoNet prior hidden dims.')
 flags.DEFINE_float('prior_regularisation', 0.1255, 'L2 regularisation on the prior (p_0).')
+flags.DEFINE_float('prior_mass', 0.0,
+                   'Anchor each region\'s prior so sum(p_0) equals this. '
+                   '1.0 reproduces published BEATRICE, whose prior is the '
+                   'constant 1/m (trainer.py:386), so sum(p_0) = 1. '
+                   '0 (default) leaves the learned scale unanchored, which '
+                   'is the behaviour before this flag existed.')
 flags.DEFINE_float('lambda_l1', 0.1223,
                    'L1 penalty for LassoNet skip connections, ignored by the linear head. '
                    'The default is the best value from a sweep of this penalty; below '
@@ -106,6 +112,7 @@ def main(argv):
         'lambda_l1': FLAGS.lambda_l1,
         'hierarchy_M': FLAGS.hierarchy_M,
         'n_causal': FLAGS.n_caus,
+        'prior_mass': FLAGS.prior_mass,
         'coverage_ths': FLAGS.gamma_coverage,
         'selection_prob': FLAGS.gamma_selection,
         'key_thres': FLAGS.gamma_key,

@@ -207,6 +207,22 @@ def suggest_params(trial, args):
         "n_caus":               sint("n_caus", 1, 10),
         "sparse_concrete":      sint("sparse_concrete", args.sc_min, args.sc_max,
                                      log=True),
+        # The prior's SCALE, unidentified until anchor_prior_mass existed.
+        # Published BEATRICE does not learn the prior at all (upstream
+        # scripts/trainer.py:386 sets p_0 = 1/m, so sum(p_0) = 1 exactly);
+        # LassoNetPrior fixes the prior's SHAPE from annotations and left its
+        # total free, and because `abf` uses a Bernoulli configuration prior,
+        # sum_j PIP_j is governed by sum_j p0_j. Mass was therefore the one
+        # constrained quantity that NO search parameter controlled directly -
+        # gamma and sigma_sq could only push it sideways, at a cost in AP, which
+        # is exactly what v4's lowest-mass trials did (gamma pinned at its 0.8
+        # ceiling, min-cell AP 0.154 against a 0.225 baseline). Measured
+        # locally, prior_mass=1.0 took sparse_inf S=10 mass from 2.00 to 1.00.
+        # --pm-max <= 0 keeps the anchor out of the space entirely, which is
+        # every run before this.
+        "prior_mass":           (0.0 if args.pm_max <= 0 else
+                                 sfloat("prior_mass", max(args.pm_min, 1e-3),
+                                        args.pm_max, log=True)),
         # ADDED 2026-11-10. Both act BEFORE pip.csv is written, so both move the
         # PIPs and therefore AP and FDR; neither had ever been exposed by the R
         # wrappers, so every run so far used the Python defaults (0.1, 0.2).
@@ -355,7 +371,22 @@ def build_objective(args):
         mean_ap    = mean([v for v in strat_ap.values() if v == v])
         mean_ece   = mean([v for v in strat_ece.values() if v == v])
         mean_relb  = mean([v for dd in per.values() for v in dd["relb"]])
-        mean_mass  = mean([v for dd in per.values() for v in dd["mass"]])
+        # Mass is reported PER STRATUM and constrained on the WORST one.
+        # v4 pooled it - the mean over every scenario of every stratum - which
+        # is the one metric here that broke the never-pool rule, and since it
+        # was the binding constraint it decided the whole search. Attainable
+        # mass differs by generative model (measured locally at the shipped
+        # config: 1.04 under sparse on real LD, 1.8-6.4 under sparse_inf), so a
+        # window on their average can only be met by trading one stratum off
+        # against the other - and with [0.5, 2.0] it was met by neither:
+        # 0/76 trials feasible, Pareto front empty. Worst-stratum is the same
+        # choice already made for FDR below, for the same reason.
+        strat_mass = {}
+        for lab, _ in sims:
+            mm = [v for v in per[lab]["mass"] if v == v]
+            strat_mass[lab] = mean(mm) if mm else float("nan")
+            trial.set_user_attr(f"total_mass_ratio_{lab}", strat_mass[lab])
+        mean_mass  = mean([v for v in strat_mass.values() if v == v])
         mean_viol  = mean([v for dd in per.values() for v in dd["viol"]], 1.0)
         # The reported FDR is the WORST stratum, not the average. Averaged, a
         # configuration that is honest under `sparse` and badly overconfident
@@ -401,8 +432,9 @@ def build_objective(args):
         # the low-FDR end reached mass ~1 by capping sparse_concrete below the
         # true causal count. NSGA-II reads this through constraints_func;
         # <= 0 is feasible.
-        mass_c = (max(args.mass_lo - mean_mass, mean_mass - args.mass_hi)
-                  if mean_mass == mean_mass else 1e3)
+        _mv = [max(args.mass_lo - v, v - args.mass_hi)
+               for v in strat_mass.values() if v == v]
+        mass_c = (max(_mv) if _mv and len(_mv) == len(strat_mass) else 1e3)
         trial.set_user_attr("constraint", (float(mass_c),))
         trial.set_user_attr("mass_feasible", bool(mass_c <= 0))
 
@@ -496,6 +528,16 @@ def main():
                     help="sparse_concrete floor (published lower_bound is 10)")
     ap.add_argument("--sc-max", type=int, default=300,
                     help="sparse_concrete ceiling (the original declares none)")
+    ap.add_argument("--pm-min", type=float, default=0.5,
+                    help="Lower bound for prior_mass, the per-region anchor on "
+                         "sum(p_0). Only used when --pm-max > 0.")
+    ap.add_argument("--pm-max", type=float, default=0.0,
+                    help="Upper bound for prior_mass. <= 0 (the default) keeps "
+                         "the anchor off and out of the search space, i.e. the "
+                         "unanchored learned scale every run so far used. A "
+                         "sensible range is 0.5-20: 1.0 is published BEATRICE's "
+                         "scale, and the prior expected causal count should be "
+                         "able to reach S.")
     ap.add_argument("--mass-lo", type=float, default=0.5,
                     help="feasible sum(PIP)/#causal floor (objective 'cells')")
     ap.add_argument("--mass-hi", type=float, default=2.0,

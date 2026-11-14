@@ -198,7 +198,13 @@
     "--sparse_concrete",      as.character(as.integer(gv("sparse_concrete", 50))),
     "--prior_regularisation", as.character(gv("prior_regularisation", 1.0)),
     "--lambda_l1",            as.character(gv("lambda_l1", 0.01)),
-    "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0))
+    "--hierarchy_M",          as.character(gv("hierarchy_M", 10.0)),
+    # Anchors sum(p_0) per region. Published BEATRICE never learns the
+    # prior at all - trainer.py:386 sets p_0 = 1/m, so sum(p_0) = 1 - while
+    # the LassoNet head fixes only the prior's SHAPE and leaves its SCALE
+    # unidentified. 0 keeps that unanchored behaviour (what every run
+    # before this flag used); 1.0 is the published scale.
+    "--prior_mass",           as.character(gv("prior_mass", 0))
   )
 
   run_output <- tryCatch(

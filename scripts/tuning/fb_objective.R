@@ -143,7 +143,10 @@ fb_args <- list(
   # Both act before pip.csv is written, so both move the PIPs; defaults are the
   # Python defaults, which is what every run before this used.
   gamma                = getn("gamma", 0.1),
-  gamma_key            = getn("gamma_key", 0.2)
+  gamma_key            = getn("gamma_key", 0.2),
+  # 0 = unanchored learned prior scale (pre-existing behaviour);
+  # 1.0 = published BEATRICE's sum(p_0) = 1.
+  prior_mass           = getn("prior_mass", 0)
 )
 
 t0 <- Sys.time()

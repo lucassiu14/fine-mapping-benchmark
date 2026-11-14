@@ -158,6 +158,56 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
     return None
 
 
+def anchor_prior_mass(p0, mass, eps=1e-7):
+    """Rescale a region's prior so that sum(p0) == `mass`, differentiably.
+
+    Why this exists. Published BEATRICE (sayangsep/Beatrice-Finemapping,
+    scripts/trainer.py:386) does not learn the prior at all:
+
+        p_0 = gpu_t(np.array([1/len(Z)]*len(Z)))
+
+    i.e. p0_j = 1/m for every variant, so sum(p0) = 1 EXACTLY - a prior
+    expectation of one causal variant per locus. `n_caus` does not change this;
+    it only caps credible-set size in generate_credible_sets.py.
+
+    Our LassoNetPrior instead emits p0_j = sigmoid(theta'x_j + f(x_j)) per
+    variant, which fixes the SHAPE of the prior from annotations but leaves its
+    SCALE unidentified: nothing in the ELBO ties sum(p0) to anything. The only
+    term that touches the scale is lambda_reg * sum(p0**2), which pulls it
+    toward 0 rather than toward a calibrated value. Measured on the v4 tuning
+    grid, sum(PIP)/#causal ran 2.06 - 35.26 with a median of 5.73, and because
+    `abf` uses a Bernoulli configuration prior,
+
+        log p(config) = sum_{j in ind} log p0_j + sum_{j not in ind} log(1-p0_j)
+
+    the posterior expected configuration size - hence sum_j PIP_j - is governed
+    directly by sum_j p0_j. An unanchored scale therefore inflates every PIP,
+    which is what drove worst-stratum FDR to 0.81.
+
+    Renormalising restores the published scale while KEEPING the annotation
+    head's contribution: the head now redistributes a fixed budget of prior
+    mass across the locus instead of setting its total. With a flat logit this
+    returns p0_j = mass/bp, which is published BEATRICE's 1/m when mass = 1, so
+    mass = 1.0 is the faithful setting and larger values are a deliberate,
+    documented relaxation for high-S strata.
+
+    `mass <= 0` disables the anchor and returns p0 unchanged, which is the
+    pre-existing (unanchored) behaviour.
+    """
+    if mass is None or mass <= 0:
+        return p0
+    tot = torch.sum(p0)
+    # Guard on a DETACHED copy: `tot` carries requires_grad during training, and
+    # float() on such a tensor warns and would silently drop the graph.
+    tot_v = float(tot.detach())
+    if not (tot_v > 0.0) or tot_v != tot_v or tot_v == float("inf"):
+        return p0
+    scaled = p0 * (mass / tot)
+    # log(1-p0) must stay finite, so cap just below 1. The cap only binds when a
+    # single variant would take essentially the whole budget.
+    return torch.clamp(scaled, eps, 1.0 - 1e-6)
+
+
 def _region_elbo(model, p_0, S, Z, LD, temp, n_samples, sigma_sq,
                  n_sub, K_C, gamma, lambda_reg, memo):
     """One region's differentiable loss (lik + kl + reg), populating `memo`.
@@ -365,7 +415,9 @@ def run_joint(options):
             K_C = min(r['bp'], options['sparse_concrete'])
             lo, hi = offs[i]
             region_loss, _ = _region_elbo(
-                r['model'], p0_all[lo:hi], r['S'], r['Z'], r['LD'],
+                r['model'],
+                anchor_prior_mass(p0_all[lo:hi], options.get('prior_mass', 0.0)),
+                r['S'], r['Z'], r['LD'],
                 temp, n_samples, gpu_ts(sigma_sq), r['N'], K_C, gamma,
                 lambda_reg, r['memo'])
             total = total + region_loss / R          # EQUAL weight per region
@@ -381,6 +433,7 @@ def run_joint(options):
     for r in reg:
         with torch.no_grad():
             _, _, _, p_0 = prior_head(r['v'], temp, 1)
+            p_0 = anchor_prior_mass(p_0, options.get('prior_mass', 0.0))
         mean_memo = reformat_memo(r['memo'], p_0)
         res = {'memo': r['memo'], 'mean_memo': mean_memo,
                'names': r['names'], 'pip': calculate_pip(r['memo'], r['bp']),

@@ -523,3 +523,124 @@ hyperparameter, and the memo normalisation itself needs re-examining.
 ```bash
 WORKERS=20 PBS_WALLTIME=72:00:00 bash scripts/tuning/submit_fb_retune.sh
 ```
+
+## v4 post-mortem: the search was infeasible by construction (2026-11-14)
+
+### What v4 reported
+
+Study `fb_retune_cells_v4` (array 4642289) reached 76 completed trials with
+**0/76 inside the posterior-mass window** and an empty Pareto front. The mass
+distribution was min 2.06 / median 5.73 / max 35.26 against a window of
+[0.5, 2.0]; the closest trial missed by 0.06. `inspect_mass.py` put the rank
+correlation of mass with `sparse_concrete` at +0.60, `sigma_sq` -0.43,
+`gamma` -0.34.
+
+### Why: the constraint pools strata
+
+`scripts/tuning/optuna_fb.py:358`
+
+```python
+mean_mass = mean([v for dd in per.values() for v in dd["mass"]])
+```
+
+`per` is keyed by stratum label, and this flattens across **all** of them. The
+v4 submitter builds three sims - `sparse`, `sparse_inf` rho=0.2, `sparse_inf`
+rho=0.6 - into ONE study, so the constraint asks a single hyperparameter vector
+to put the *pooled* mean mass inside one window.
+
+That is the pooling the project forbids, and `make_tuning_sim.R`'s own header
+had already said so:
+
+> drawn from the same generative model as the Iteration 002 benchmark grid,
+> restricted to ONE stratum, because the never-pool rule applies here too [...]
+> Run one study per stratum.
+
+The combined three-sim study was a later deviation from that instruction. It is
+the direct cause of the empty front: the two generative models have different
+attainable mass, so no single point satisfies a window on their average.
+
+The first objective has the same defect in a milder form - `min_cell_ap` takes
+the minimum over cells spanning both generative models, so the whole budget is
+spent on the worst cell (sparse_inf S=10 rho=0.2, baseline AP 0.104), and a
+configuration optimal there is by the never-pool rule not the one to deploy on
+sparse.
+
+### Where the performance actually went
+
+Measured locally, one factor at a time, with the real trainer
+(`beatrice_joint.py`, shipped defaults, AR(1) LD, phi=0.2, N=5000). Region
+construction follows `R/simulate_phenotypes.R:911`
+(`generate_phenotype_sparse_inf`): infinitesimal component over NONCAUSAL
+variants only, each component rescaled by its realised variance b'Rb.
+
+| cell | regions | mass | AP | FDR@.95 |
+|---|---|---|---|---|
+| sparse S=1 | 1 | 1.06 | 1.000 | 0.000 |
+| sparse S=3 | 1 | 1.02 | 1.000 | 0.000 |
+| sparse S=10 | 1 | 0.89 | 1.000 | 0.000 |
+| sparse S=3, bp=1000 | 1 | 1.14 | 1.000 | 0.000 |
+| sparse S=3, shared head over 10 regions | 10 | 1.09 | 1.000 | 0.000 |
+| sparse_inf S=3 rho=0.2 | 1 | 6.40 | 0.317 | 0.895 |
+| sparse_inf S=10 rho=0.2 | 1 | 2.00 | 0.035 | 0.950 |
+| sparse_inf S=10 rho=0.2 | 10 | 1.78 | 0.252 | 0.775 |
+
+Neither region size, nor S, nor the number of regions sharing the prior head
+degrades the model. The entire loss sits in `sparse_inf`, and the 10-region
+sparse_inf cell reproduces the cluster baseline (AP 0.225, worst-stratum FDR
+0.811) closely enough to serve as a local proxy - 85 seconds instead of hours.
+
+On REAL 1000G LD, through the exact tuning path
+(`fb_objective.R -> wrapper_fb_joint.R -> beatrice_joint.py`), 2 regions of
+500/1000, n=5000, binary annotations, enrichment 10.8, S=3, phi=0.2, sparse,
+shipped defaults:
+
+```
+ap = 0.834   fdr_at_90 = 0.000   fdr_at_95 = 0.000 (tp 5, fp 0)
+max_fdr_violation_n20 = 0.000
+total_mass_ratio = 1.043          hi_pip_reliab = 1.000
+```
+
+The post-fix model is accurate AND calibrated on the sparse stratum. The mass
+inflation that v4's constraint was built around does not exist there. (This is
+2 regions of 500/1000 against the cluster baseline's 10 regions of 500-2000, so
+0.834 is not directly comparable to the baseline's 0.604 - the load-bearing
+result is the calibration, mass 1.043 and FDR 0.)
+
+### Why the pre-fix numbers looked better
+
+The pre-fix `reformat_memo` offset was the MEAN log-BF (which is what published
+BEATRICE does, `scripts/trainer.py:321-326`), so every configuration above
+mean + log(1e15) saturated the clamp to the same value. `calculate_pip` then
+normalised a set of equal weights, making the PIP a marginal inclusion
+*frequency* over the visited top half rather than a posterior. That ranks
+reasonably - hence the respectable AP - while pinning every PIP near
+1/n_configs, so no threshold ever fired and FDR was trivially near zero. The
+max-offset fix did not break the model; it removed a bug that had been masking
+how the model behaves under `sparse_inf`, where it is genuinely misspecified.
+
+### `prior_mass`: the unidentified prior scale, now a parameter
+
+Published BEATRICE never learns the prior (`scripts/trainer.py:386`):
+
+```python
+p_0 = gpu_t(np.array([1/len(Z)]*len(Z)))
+```
+
+so sum(p_0) = 1 exactly - a prior expectation of one causal variant per locus.
+`n_caus` does not change this; it only caps credible-set size
+(`generate_credible_sets.py:395`).
+
+`LassoNetPrior` instead emits p0_j = sigmoid(theta'x_j + f(x_j)), which fixes
+the prior's SHAPE from annotations but leaves its SCALE unidentified: no ELBO
+term ties sum(p0) to anything, and the only term touching it,
+`lambda_reg * sum(p_0**2)` (`joint_trainer.py:223`), pulls toward 0 rather than
+toward a calibrated value. Measured locally, sum(p0) starts at 498.5 for a
+300-variant region and the L2 term alone drives it to 0.07 for every
+lambda in {0.1 ... 50}.
+
+Because `abf` uses a Bernoulli configuration prior, sum_j PIP_j is governed
+directly by sum_j p0_j, so an unanchored scale inflates every PIP.
+`anchor_prior_mass` (`joint_trainer.py:161`) rescales each region's prior to a
+target total, differentiably, keeping the annotation head's shape. A flat logit
+returns p0_j = mass/bp, i.e. published BEATRICE's 1/m at mass = 1. The flag
+defaults to 0 = unanchored, so nothing changes until it is set.
