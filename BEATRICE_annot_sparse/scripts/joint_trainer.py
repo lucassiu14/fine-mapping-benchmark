@@ -89,6 +89,9 @@ class LinearPrior(nn.Module):
     def forward(self, X, T, samples, p0_only=False):
         eps = 1e-7
         out = self.skip(X)                       # (bp, 2)
+        # Same identified logit LassoNetPrior stashes, so anchor_prior_mass can
+        # renormalise in log space for either head.
+        self.last_logit = out[:, 1] - out[:, 0]
         imp = torch.exp(out)
         imp_o = imp[:, 1] / (torch.sum(imp, dim=1) + eps)
         if not p0_only:                          # both lines are device syncs
@@ -158,7 +161,7 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
     return None
 
 
-def anchor_prior_mass(p0, mass, eps=1e-7):
+def anchor_prior_mass(p0, mass, logit=None, eps=1e-7):
     """Rescale a region's prior so that sum(p0) == `mass`, differentiably.
 
     Why this exists. Published BEATRICE (sayangsep/Beatrice-Finemapping,
@@ -196,13 +199,21 @@ def anchor_prior_mass(p0, mass, eps=1e-7):
     """
     if mass is None or mass <= 0:
         return p0
-    tot = torch.sum(p0)
-    # Guard on a DETACHED copy: `tot` carries requires_grad during training, and
-    # float() on such a tensor warns and would silently drop the graph.
-    tot_v = float(tot.detach())
-    if not (tot_v > 0.0) or tot_v != tot_v or tot_v == float("inf"):
-        return p0
-    scaled = p0 * (mass / tot)
+    if logit is not None:
+        # The numerically sound form. softmax is invariant to a constant shift of
+        # the logit - which is exactly the direction normalisation leaves
+        # unidentified and therefore free to drift - and it subtracts the max
+        # internally, so neither tail underflows.
+        scaled = mass * torch.softmax(logit, dim=0)
+    else:
+        # Fallback for callers with no logit to hand. Renormalising the
+        # probabilities is algebraically identical but NOT stable: see the note
+        # above, and LassoNetPrior.forward's. Kept only so the function is total.
+        tot = torch.sum(p0)
+        tot_v = float(tot.detach())   # detach: `tot` carries requires_grad here
+        if not (tot_v > 0.0) or tot_v != tot_v or tot_v == float("inf"):
+            return p0
+        scaled = p0 * (mass / tot)
     # log(1-p0) must stay finite, so cap just below 1. The cap only binds when a
     # single variant would take essentially the whole budget.
     return torch.clamp(scaled, eps, 1.0 - 1e-6)
@@ -411,12 +422,19 @@ def run_joint(options):
         total = gpu_ts(0.0)
         # ONE evaluation of the shared head for the whole scenario, then slice.
         _, _, _, p0_all = prior_head(v_all, temp, 1, p0_only=True)
+        # The head sees every region's annotations concatenated, so the
+        # logit must be sliced per region exactly as p0_all is: the
+        # anchor is a PER-REGION budget, and a softmax over the whole
+        # concatenation would instead split one budget across regions.
+        logit_all = getattr(prior_head, 'last_logit', None)
         for i, r in enumerate(reg):
             K_C = min(r['bp'], options['sparse_concrete'])
             lo, hi = offs[i]
             region_loss, _ = _region_elbo(
                 r['model'],
-                anchor_prior_mass(p0_all[lo:hi], options.get('prior_mass', 0.0)),
+                anchor_prior_mass(p0_all[lo:hi], options.get('prior_mass', 0.0),
+                                  logit=(logit_all[lo:hi]
+                                         if logit_all is not None else None)),
                 r['S'], r['Z'], r['LD'],
                 temp, n_samples, gpu_ts(sigma_sq), r['N'], K_C, gamma,
                 lambda_reg, r['memo'])
@@ -433,7 +451,9 @@ def run_joint(options):
     for r in reg:
         with torch.no_grad():
             _, _, _, p_0 = prior_head(r['v'], temp, 1)
-            p_0 = anchor_prior_mass(p_0, options.get('prior_mass', 0.0))
+            # This call is already per region, so last_logit needs no slicing.
+            p_0 = anchor_prior_mass(p_0, options.get('prior_mass', 0.0),
+                                    logit=getattr(prior_head, 'last_logit', None))
         mean_memo = reformat_memo(r['memo'], p_0)
         res = {'memo': r['memo'], 'mean_memo': mean_memo,
                'names': r['names'], 'pip': calculate_pip(r['memo'], r['bp']),

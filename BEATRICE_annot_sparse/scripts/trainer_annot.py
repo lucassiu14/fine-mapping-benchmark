@@ -369,6 +369,17 @@ class LassoNetPrior(nn.Module):
         # consumer - imp_o, the Gumbel draws - unchanged, and the softmax below
         # is sigmoid(logit) up to its 1e-7 stabiliser.
         out = skip_out + hidden_out  # (bp, 1)
+        # Stash the identified logit for anchor_prior_mass. p_0 = sigmoid(logit)
+        # pins only the prior's SHAPE; its total is unidentified, and when the
+        # joint trainer anchors sum(p_0) it must renormalise in LOG space.
+        # Renormalising the sigmoids themselves (p_0 * mass / sum(p_0)) is
+        # algebraically the same but numerically fatal: normalising makes the
+        # overall logit scale a FLAT direction in the loss, so it drifts freely,
+        # and once it drifts negative sum(p_0) underflows, mass/sum overflows and
+        # 0 * inf = nan. Measured on real 1000G LD, that killed training at
+        # iteration ~1110 of 2000. A softmax over this logit is invariant to the
+        # same shift but subtracts the max internally, so the drift is harmless.
+        self.last_logit = out[:, 0]
         out = torch.cat([torch.zeros_like(out), out], dim=1)  # (bp, 2)
 
         # Convert to probabilities
