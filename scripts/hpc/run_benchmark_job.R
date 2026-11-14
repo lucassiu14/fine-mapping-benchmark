@@ -103,8 +103,29 @@ METHODS <- c(
   # annotation-informed
   "funmap", "paintor", "polyfun_oracle", "polyfun_est", "polyfun_ldsc",
   "sbayesrc",
-  # BEATRICE family: locus-only, then the two cross-region joint-prior models
-  "beatrice", "functional_beatrice", "fb_pooled", "fb_xregion"
+  # BEATRICE family: the annotation-blind control, then the two cross-region
+  # joint-prior models.
+  #
+  # `functional_beatrice` - FB fit to one locus at a time - is RETIRED as an arm
+  # (2026-11-14, user's decision). Functional BEATRICE IS a cross-region model:
+  # the prior head is shared across the loci of a scenario, and that sharing is
+  # the method, not an option on top of it. Running the head on a single locus
+  # is a degenerate case of the model, not a second method, so reporting it
+  # beside fb_xregion presented one model as two.
+  #
+  # The wrapper and the .FM_REGISTRY entry are KEPT, for three reasons:
+  #   1. `run_functional_beatrice_region` is the internal fallback of every
+  #      joint arm (R/wrapper_fb_joint.R:304) - on the `none` arm by design,
+  #      where it is plain BEATRICE, and on an annotated arm only if the joint
+  #      fit errors. Those records are tagged additional$joint_fallback = TRUE
+  #      and carried through by scripts/hpc/extract_aux.R:114.
+  #   2. METHOD_ARGS$functional_beatrice below still holds the FB base
+  #      configuration that every joint arm inherits.
+  #   3. The Iteration 002-005 analysis scripts reference the method by name and
+  #      must stay runnable against already-collected results.
+  # The ITER005/ITER006 sets above are frozen records of what those iterations
+  # ran and are deliberately NOT edited.
+  "beatrice", "fb_pooled", "fb_xregion"
 )
 
 # Supplemental mode: FMB_METHODS="beatrice,sparsepro" re-runs ONLY those
@@ -231,6 +252,10 @@ METHOD_ARGS <- list(
 # (The manual FB/BEATRICE hyperparameter-variant methods were removed - a
 # hand-picked knob grid is the wrong tool for tuning; use a principled search
 # such as Optuna in a dedicated study instead. Only the joint-prior models remain.)
+# The FB base configuration. It is keyed `functional_beatrice` because that is
+# the wrapper the fallback path calls, but it is no longer a deployed arm (see
+# the METHODS note above): read it as "the FB hyperparameters", which the joint
+# arms inherit below.
 .FBv <- METHOD_ARGS$functional_beatrice
 # Same FB base args (beatrice_dir, python, max_iter, n_caus, ...). The joint
 # training is driven by each method's scenario_setup hook (run_fb_*_scenario_setup
@@ -280,11 +305,15 @@ METHOD_ARGS$fb_xregion_id_l25 <- modifyList(.FBj, list(lambda_l1 = 0.25))
 METHOD_ARGS$fb_xregion_id_l50  <- modifyList(.FBj, list(lambda_l1 = 0.5))
 METHOD_ARGS$fb_xregion_id_l100 <- modifyList(.FBj, list(lambda_l1 = 1.0))
 METHOD_ARGS$fb_xregion_id_l200 <- modifyList(.FBj, list(lambda_l1 = 2.0))
-# NOTE: `functional_beatrice` (the PER-REGION method) is deliberately NOT
-# anchored. The anchor lives in joint_trainer.py, which only the joint methods
-# use; the single-region path in trainer_annot.py has the identical defect but
-# would need its own patch. Until that is done, functional_beatrice vs
-# fb_xregion is confounded by the anchor as well as by the shared head.
+# The anchor lives in joint_trainer.py, so it covers every path that is now
+# deployed. The single-region trainer_annot.py has the identical defect and is
+# still unanchored, but with functional_beatrice retired as an arm the only way
+# to reach it is the joint arms' fallback: harmless on the `none` arm, where
+# there are no annotations and the prior is BEATRICE's uniform p0 = 1/m, and
+# otherwise only on a joint-fit error. Such records are tagged
+# joint_fallback = TRUE, so check that tag is absent before quoting an FB
+# number; if the error path ever fires at a non-trivial rate, anchor
+# trainer_annot.py rather than treating the fallback as comparable.
 
 # --- Iteration 004: additional summary-statistic methods ---------------------
 # CARMA is registered in .FM_REGISTRY already but has never been installed, so
