@@ -237,19 +237,54 @@ METHOD_ARGS <- list(
 # in R/wrapper_fb_joint.R), which invokes BEATRICE_annot_sparse/beatrice_joint.py
 # once per scenario. fb_pooled = shared logistic head (idea #1); fb_xregion =
 # shared LassoNet head (idea #2). On the `none` arm they fall back to plain FB.
-METHOD_ARGS$fb_pooled         <- .FBv
-METHOD_ARGS$fb_xregion        <- .FBv
+# prior_mass anchors sum(p_0) per region, i.e. the prior EXPECTED NUMBER OF
+# CAUSAL VARIANTS in a locus. It exists because that number was unidentified.
+# Under the independent-Bernoulli configuration prior that `abf` implements,
+# sum_j PIP_j = E[|gamma| | z], so sum_j p0_j sets the scale of every PIP.
+# Published BEATRICE fixes p0_j = 1/m (Beatrice-Finemapping trainer.py:386), so
+# its sum is exactly 1. LassoNetPrior instead emits p0_j = sigmoid(theta'a_j +
+# h(a_j)), which takes the prior's SHAPE from annotations - the point of the
+# method - but leaves its total to whatever training drifts to: measured 498.5
+# at initialisation, and the only loss term touching it,
+# lambda_reg * sum(p_0**2), pulls toward 0 rather than toward anything
+# calibrated. Posterior mass on the v4 tuning grid ran 2.06-35.26.
+#
+# With the anchor, p0_j = M * softmax(logit)_j, so the head redistributes a
+# fixed budget M instead of choosing it - annotations say WHERE, not HOW MANY -
+# and a flat logit gives p0_j = M/m, which at M = 1 is published BEATRICE
+# exactly. See docs/autoresearch/hyperparameter-tuning.md.
+#
+# PROVISIONAL VALUE. 3 is the best single setting measured locally on real
+# 1000G LD over the 9-scenario sparse grid (2 regions of 500/1000, n = 5000,
+# one seed): mean AP 0.773 -> 0.817, min-cell AP 0.699 -> 0.736, ece_hi at
+# S=3/phi=0.2 0.140 -> 0.029, and stratum mean mass 2.245 -> 1.953. It is not
+# uniformly better - it loses at S=10/phi=0.2 by 0.059 - and 10 was no better
+# than 3 anywhere. Studies fb_retune_sparse_v5 and fb_retune_sinf_v5 are
+# searching prior_mass in [1, 10] on the full grid; replace this with their
+# answer when they land.
+.FBj <- modifyList(.FBv, list(prior_mass = 3))
+# Applied to EVERY joint arm, not just fb_xregion. fb_pooled's LinearPrior has
+# the same unanchored sigmoid scale, and the lambda_l1 sweep arms are
+# fb_xregion variants - anchoring only some of them would confound the
+# head comparison and the sweep with the anchor.
+METHOD_ARGS$fb_pooled         <- .FBj
+METHOD_ARGS$fb_xregion        <- .FBj
 # The lambda_l1 sweep's arms. Every LassoNet head is single-logit now (the
 # two-logit head was removed), so these differ from fb_xregion only in
 # lambda_l1: fb_xregion_id carries the production value 0.1223 from .FBv and is
 # identical to fb_xregion; the others bracket it.
-METHOD_ARGS$fb_xregion_id     <- .FBv                                   # 0.1223
-METHOD_ARGS$fb_xregion_id_l03 <- modifyList(.FBv, list(lambda_l1 = 0.03))
-METHOD_ARGS$fb_xregion_id_l06 <- modifyList(.FBv, list(lambda_l1 = 0.06))
-METHOD_ARGS$fb_xregion_id_l25 <- modifyList(.FBv, list(lambda_l1 = 0.25))
-METHOD_ARGS$fb_xregion_id_l50  <- modifyList(.FBv, list(lambda_l1 = 0.5))
-METHOD_ARGS$fb_xregion_id_l100 <- modifyList(.FBv, list(lambda_l1 = 1.0))
-METHOD_ARGS$fb_xregion_id_l200 <- modifyList(.FBv, list(lambda_l1 = 2.0))
+METHOD_ARGS$fb_xregion_id     <- .FBj                                   # 0.1223
+METHOD_ARGS$fb_xregion_id_l03 <- modifyList(.FBj, list(lambda_l1 = 0.03))
+METHOD_ARGS$fb_xregion_id_l06 <- modifyList(.FBj, list(lambda_l1 = 0.06))
+METHOD_ARGS$fb_xregion_id_l25 <- modifyList(.FBj, list(lambda_l1 = 0.25))
+METHOD_ARGS$fb_xregion_id_l50  <- modifyList(.FBj, list(lambda_l1 = 0.5))
+METHOD_ARGS$fb_xregion_id_l100 <- modifyList(.FBj, list(lambda_l1 = 1.0))
+METHOD_ARGS$fb_xregion_id_l200 <- modifyList(.FBj, list(lambda_l1 = 2.0))
+# NOTE: `functional_beatrice` (the PER-REGION method) is deliberately NOT
+# anchored. The anchor lives in joint_trainer.py, which only the joint methods
+# use; the single-region path in trainer_annot.py has the identical defect but
+# would need its own patch. Until that is done, functional_beatrice vs
+# fb_xregion is confounded by the anchor as well as by the shared head.
 
 # --- Iteration 004: additional summary-statistic methods ---------------------
 # CARMA is registered in .FM_REGISTRY already but has never been installed, so
