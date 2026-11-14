@@ -79,6 +79,23 @@ MASS_HI="${MASS_HI:-2.0}"
 PM_MIN="${PM_MIN:-0.5}"
 PM_MAX="${PM_MAX:-0}"
 CANARY="${CANARY:-0}"
+# FIX pins the configuration a CANARY evaluates. The default is the shipped
+# configuration, which is what a timing canary wants - do not change it, or the
+# recorded baseline (AP 0.523 / worst-stratum FDR@0.95 0.811, job 4596630) stops
+# being comparable.
+#
+# Override it to SCORE A CANDIDATE on a chosen grid. That is how a single
+# deployable configuration gets selected out of the per-stratum studies: one
+# config has to serve every setup, so each candidate from a stratum's Pareto
+# front is re-scored on ALL 27 cells and judged on its worst stratum.
+#   CANARY=1 STRATA="sparse sparse_inf" STUDY=fb_cand01 PM_MAX=10 \
+#     FIX="sigma_sq=0.14 n_caus=10 sparse_concrete=120 \
+#          prior_regularisation=0.2 lambda_l1=0.1223 hierarchy_M=10.15 \
+#          gamma=0.1 gamma_key=0.2 prior_mass=3" \
+#     bash scripts/tuning/submit_fb_retune.sh
+# prior_mass must be listed explicitly AND PM_MAX kept above 0: the search space
+# forces prior_mass to 0.0 when PM_MAX <= 0, before --fix is consulted.
+FIX="${FIX:-sigma_sq=0.0899 n_caus=10 sparse_concrete=51 prior_regularisation=0.1255 lambda_l1=0.1223 hierarchy_M=10.15 gamma=0.1 gamma_key=0.2}"
 
 # --- grid -------------------------------------------------------------------
 SIM_S="${SIM_S:-1,3,10}"
@@ -284,9 +301,7 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
     --pm-min ${PM_MIN} --pm-max ${PM_MAX} \\
     --n-trials 1 --python "${FB_PY}" \\
-    --fix sigma_sq=0.0899 n_caus=10 sparse_concrete=51 \\
-          prior_regularisation=0.1255 lambda_l1=0.1223 hierarchy_M=10.15 \\
-          gamma=0.1 gamma_key=0.2
+    --fix ${FIX}
 echo "[canary] done \$(date)"
 PBS_EOF
   echo "Canary job script: $J"
@@ -294,7 +309,8 @@ PBS_EOF
   JID="$(qsub ${DEPEND} "$J")"
   echo "Canary job: $JID"
   echo
-  echo "The canary pins every parameter at the SHIPPED values, so its per-scenario"
+  echo "Pinned configuration: ${FIX}"
+  echo "The canary pins every parameter, so its per-scenario"
   echo "seconds= lines are the cost of one trial, not of the search. This cluster"
   echo "writes <jobid>.OU / .ER into the log dir, so read them with:"
   echo "  grep 'scenario' ${LOG_DIR}/${JID}.OU | tail -30"
