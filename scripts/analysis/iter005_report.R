@@ -292,15 +292,11 @@ cat(sprintf("\nOVERALL: %s\n", if (ok_all) "all checks passed" else "FAILURES PR
 sink()
 message("validity: ", if (ok_all) "passed" else "FAILURES - see validity_checks.txt")
 
-# ---------------------------------------------------------------------------
-# Drive the three senses
-# ---------------------------------------------------------------------------
-for (script in c("iter005_sense_v.R", "iter005_sense_d.R", "iter005_sense_g.R")) {
-  message("\n>>> ", script)
-  Sys.setenv(FMB_EXPECT_JOBS = EXPECT_JOBS)
-  st <- system2("Rscript", c(file.path("scripts", "analysis", script), out_dir,
-                             file.path(out_dir, sub("\\.R$", "", script))))
-  if (st != 0L) message("    (exit ", st, " - see its own output)")
-}
+# The three "senses" (V = what moves the metric, D = what changes the winner,
+# G = what hurts one method) were DROPPED on 2026-11-14. Sense G's estimand was
+# the per-region/cross-region contrast, which disappeared when the per-region FB
+# arm was retired, and V and D went with it. Their already-computed outputs stay
+# under results/iter004/ and the write-ups stay in docs/reports/ as a record;
+# only the machinery is gone.
 
 message("\nDone. Artefacts in ", out_dir)

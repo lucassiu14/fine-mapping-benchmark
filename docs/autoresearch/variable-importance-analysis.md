@@ -1,6 +1,25 @@
 # Variable-importance analysis: which simulation variables matter, for which methods
 
-**Status:** specification, not yet implemented.
+> ## ⛔ RETIRED 2026-11-14 — do not implement from this document
+>
+> All three senses were dropped. `scripts/analysis/iter00{4,5}_sense_{v,d,g}.R`
+> are deleted and the report drivers no longer call them.
+>
+> Sense G's estimand was the per-region vs cross-region contrast
+> (`annot = functional_beatrice - beatrice`,
+> `joint = fb_xregion - functional_beatrice`). That midpoint ceased to exist
+> when the per-region FB arm was retired: Functional BEATRICE is a cross-region
+> model, so fitting it one locus at a time is a degenerate case of the model and
+> not a second method to difference against. Senses V and D went with it.
+>
+> What survives, as a record and nothing more: the computed outputs under
+> `results/iter004/iter004_sense_{v,d,g}/`, the rendered figures in
+> `docs/reports/figs*/`, and the write-ups (§Sense V/D/G of
+> `docs/reports/report.tex` and `docs/reports/iter004_full_analysis.tex`, with
+> their methodology sections `sec_{v,d,g}how.tex`). Nothing below should be
+> built on.
+
+**Status:** retired specification; was implemented for Iterations 004-005, then dropped.
 
 > ### ⚠ STALE FACTOR LEVELS — read before using §2
 > Written against the Iteration 003 grid. Iteration 004 (2026-08-06) changed four of the

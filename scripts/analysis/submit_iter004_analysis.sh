@@ -187,12 +187,9 @@ cat <<EOF
 
 Output    : ${OUT_DIR}
   combined_fit_metrics.rds        L1 - the pivot; every statistic re-derivable from it
-  combined_replicate_metrics.rds  L2 - paired differences for the Sense D gate
+  combined_replicate_metrics.rds  L2 - paired differences, per replicate          
   combined_scenario_metrics.rds   L3 - cell means, the ANOVA input
   validity_checks.txt             §11 - read this FIRST
-  iter004_sense_v/sense_v.txt     which variables move the metric
-  iter004_sense_d/sense_d_ap.txt  which variables change the winner
-  iter004_sense_g/sense_g_ap.txt  which variables hurt THIS method specifically
 
 Track     : qstat -tan -u \$USER | grep -E 'fmb4collect|fmb4analyse'
 
