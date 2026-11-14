@@ -568,26 +568,42 @@ sparse.
 ### Where the performance actually went
 
 Measured locally, one factor at a time, with the real trainer
-(`beatrice_joint.py`, shipped defaults, AR(1) LD, phi=0.2, N=5000). Region
-construction follows `R/simulate_phenotypes.R:911`
-(`generate_phenotype_sparse_inf`): infinitesimal component over NONCAUSAL
-variants only, each component rescaled by its realised variance b'Rb.
+(`beatrice_joint.py`, shipped defaults, synthetic AR(1) LD rho=0.97, phi=0.2,
+N=5000, prior_mass off). Region construction follows
+`R/simulate_phenotypes.R:911` (`generate_phenotype_sparse_inf`): infinitesimal
+component over NONCAUSAL variants only, each component rescaled by its realised
+variance b'Rb.
 
 | cell | regions | mass | AP | FDR@.95 |
 |---|---|---|---|---|
-| sparse S=1 | 1 | 1.06 | 1.000 | 0.000 |
-| sparse S=3 | 1 | 1.02 | 1.000 | 0.000 |
-| sparse S=10 | 1 | 0.89 | 1.000 | 0.000 |
-| sparse S=3, bp=1000 | 1 | 1.14 | 1.000 | 0.000 |
-| sparse S=3, shared head over 10 regions | 10 | 1.09 | 1.000 | 0.000 |
+| sparse S=3 | 1 | 0.86 | 1.000 | 0.000 |
+| sparse S=10 | 1 | 0.71 | 0.805 | 0.200 |
+| sparse S=10 | 10 | 0.92 | 0.790 | 0.138 |
 | sparse_inf S=3 rho=0.2 | 1 | 6.40 | 0.317 | 0.895 |
+| sparse_inf S=3 rho=0.6 | 1 | 5.71 | 0.200 | 0.882 |
 | sparse_inf S=10 rho=0.2 | 1 | 2.00 | 0.035 | 0.950 |
-| sparse_inf S=10 rho=0.2 | 10 | 1.78 | 0.252 | 0.775 |
+| sparse_inf S=10 rho=0.6 | 1 | 1.72 | 0.111 | 0.667 |
+| sparse_inf S=10 rho=0.2 | 10 | 1.66 | 0.080 | 0.916 |
 
-Neither region size, nor S, nor the number of regions sharing the prior head
-degrades the model. The entire loss sits in `sparse_inf`, and the 10-region
-sparse_inf cell reproduces the cluster baseline (AP 0.225, worst-stratum FDR
-0.811) closely enough to serve as a local proxy - 85 seconds instead of hours.
+A first pass used a cruder generator (infinitesimal effects on ALL variants,
+scaled by a nominal variance sum rather than b'Rb, which under rho=0.97 LD makes
+the background far stronger than intended). It gave the same structural answer
+and also showed region size and the shared head to be harmless: sparse AP 1.000
+at S=1, 3 and 10, at bp=300 and bp=1000, and 1.000 with ONE head shared over 10
+regions. Its sparse_inf S=10 10-region cell happened to land at AP 0.252 against
+the cluster's 0.225; that agreement was a coincidence of the wrong generator and
+is NOT evidence that the synthetic bed reproduces the benchmark. With the
+faithful generator the same cell gives AP 0.080, i.e. the synthetic AR(1) bed is
+HARSHER than the benchmark grid and is useful only for ranking factors, never for
+quoting a number. Numbers to be compared with the cluster come from the real-LD
+beds below.
+
+What the sweep establishes: neither region size (bp 300 vs 1000), nor S (1, 3,
+10), nor the number of regions sharing the prior head (1 vs 10) is what degrades
+the model. Under `sparse` the model stays calibrated (mass 0.71-0.92) with low
+FDR in every cell tested. The entire loss sits in `sparse_inf`, where the model
+is genuinely misspecified: it assumes a sparse effect vector, and a polygenic
+background violates that assumption rather than any hyperparameter.
 
 On REAL 1000G LD, through the exact tuning path
 (`fb_objective.R -> wrapper_fb_joint.R -> beatrice_joint.py`), 2 regions of

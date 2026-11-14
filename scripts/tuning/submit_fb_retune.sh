@@ -142,16 +142,44 @@ MSG
   exit 1
 fi
 
-# --- the three sims, one per (model, rho) -----------------------------------
+# --- which strata go into THIS study ----------------------------------------
+# STRATA selects them. make_tuning_sim.R's own header says to run ONE study per
+# stratum, because a configuration optimal under `sparse` has no reason to be
+# optimal under `sparse_inf` and the two are never pooled. v4 put all three sims
+# in one study; its binding constraint (posterior mass) then pooled them, and no
+# single point could satisfy a window on the average - 0/76 feasible trials.
+#   STRATA="sparse"              one study on the sparse stratum
+#   STRATA="sparse_inf"          one study on sparse_inf (all RHOS)
+#   STRATA="sparse sparse_inf"   both in one study (the v4 layout); metrics stay
+#                                per stratum and mass is now constrained on the
+#                                WORST stratum, but the search must then serve
+#                                two generative models with one configuration.
+STRATA="${STRATA:-sparse}"
 SIM_SPARSE="${TUNE_DIR}/sim_sparse_binary_e${ENRICHMENT}_n${SIM_N}.rds"
-SIM_ARGS=( "sparse=${SIM_SPARSE}" )
+SIM_ARGS=()
 BUILD=()
-[[ -f "$SIM_SPARSE" ]] || BUILD+=( "sparse::${SIM_SPARSE}" )
-for rho in $RHOS; do
-  f="${TUNE_DIR}/sim_sparseinf_rho${rho}_binary_e${ENRICHMENT}_n${SIM_N}.rds"
-  SIM_ARGS+=( "sparse_inf=${f}" )
-  [[ -f "$f" ]] || BUILD+=( "sparse_inf:${rho}:${f}" )
+for st in $STRATA; do
+  case "$st" in
+    sparse)
+      SIM_ARGS+=( "sparse=${SIM_SPARSE}" )
+      [[ -f "$SIM_SPARSE" ]] || BUILD+=( "sparse::${SIM_SPARSE}" )
+      ;;
+    sparse_inf)
+      for rho in $RHOS; do
+        f="${TUNE_DIR}/sim_sparseinf_rho${rho}_binary_e${ENRICHMENT}_n${SIM_N}.rds"
+        SIM_ARGS+=( "sparse_inf=${f}" )
+        [[ -f "$f" ]] || BUILD+=( "sparse_inf:${rho}:${f}" )
+      done
+      ;;
+    *)
+      echo "ERROR: unknown stratum '$st' in STRATA (want sparse and/or sparse_inf)" >&2
+      exit 1
+      ;;
+  esac
 done
+if [[ ${#SIM_ARGS[@]} -eq 0 ]]; then
+  echo "ERROR: STRATA selected no sims" >&2; exit 1
+fi
 
 N_SIMS=${#SIM_ARGS[@]}
 echo "Study      : $STUDY   (method=$METHOD, objective=$OBJECTIVE)"

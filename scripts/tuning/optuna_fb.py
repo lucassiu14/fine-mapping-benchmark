@@ -168,6 +168,10 @@ def suggest_params(trial, args):
     including it would let the search buy objective value with runtime and make
     trials incomparable. It is fixed at the production value.
     """
+    # getattr: callers that build an args namespace by hand (the unit
+    # tests, sweep_from_study.py) predate --pm-min/--pm-max and would
+    # otherwise raise AttributeError here rather than at parse time.
+    _pm_max = getattr(args, "pm_max", 0.0)
     # BOUNDS REVISION (2026-07-30), after study fb_binary_ref500 v1 (1586 trials).
     # The v1 optimum sat ON two of these bounds, which means the bound - not the
     # objective - was choosing the value:
@@ -220,9 +224,10 @@ def suggest_params(trial, args):
         # locally, prior_mass=1.0 took sparse_inf S=10 mass from 2.00 to 1.00.
         # --pm-max <= 0 keeps the anchor out of the space entirely, which is
         # every run before this.
-        "prior_mass":           (0.0 if args.pm_max <= 0 else
-                                 sfloat("prior_mass", max(args.pm_min, 1e-3),
-                                        args.pm_max, log=True)),
+        "prior_mass":           (0.0 if _pm_max <= 0 else
+                                 sfloat("prior_mass",
+                                        max(getattr(args, "pm_min", 0.5), 1e-3),
+                                        _pm_max, log=True)),
         # ADDED 2026-11-10. Both act BEFORE pip.csv is written, so both move the
         # PIPs and therefore AP and FDR; neither had ever been exposed by the R
         # wrappers, so every run so far used the Python defaults (0.1, 0.2).
@@ -331,8 +336,13 @@ def build_objective(args):
             if m["tp_at_95"] == m["tp_at_95"] and m["fp_at_95"] == m["fp_at_95"]:
                 cd["tp"] += m["tp_at_95"]; cd["fp"] += m["fp_at_95"]
 
+            # mass is logged per scenario as well as per stratum: v4's journal
+            # kept only the pooled mean, so when the mass constraint turned out
+            # to be the binding one there was no way to see from the completed
+            # trials which stratum was out of window. Keep it on the line.
             print(f"[trial {trial.number}] {lab} scenario {sc} "
                   f"({s}/{n_scen}) seconds={m['seconds']:.1f} ap={m['ap']:.4f} "
+                  f"mass={m['total_mass_ratio']:.3f} "
                   f"cum_min={(time.time() - t_trial) / 60:.1f}", flush=True)
 
             running_ap = sum(aps) / len(aps)
