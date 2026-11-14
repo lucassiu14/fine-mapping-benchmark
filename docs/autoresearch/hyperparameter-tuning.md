@@ -660,3 +660,77 @@ directly by sum_j p0_j, so an unanchored scale inflates every PIP.
 target total, differentiably, keeping the annotation head's shape. A flat logit
 returns p0_j = mass/bp, i.e. published BEATRICE's 1/m at mass = 1. The flag
 defaults to 0 = unanchored, so nothing changes until it is set.
+
+### Real-LD beds, and what `prior_mass` buys
+
+Local beds built with `make_tuning_sim.R` from the two VCFs in `data/vcf`
+(`--regions 2 --region_sizes 500,1000 --n 5000 --n_ref NA`, binary annotations,
+enrichment 10.8). Two regions is the local ceiling: `run_simulation` samples one
+VCF per region and refuses when `n_regions` exceeds the number available
+(`R/run_simulation.R:264`). Every number below comes through the real tuning
+path, `fb_objective.R -> run_methods -> wrapper_fb_joint.R -> beatrice_joint.py`,
+at the shipped defaults with only `prior_mass` varied, so the metrics are the
+ones `collect_results.R` computes.
+
+sparse, S=3, phi=0.2:
+
+| prior_mass | AP | FDR@.95 | mass | hi_pip_reliab | ece_hi |
+|---|---|---|---|---|---|
+| 0 (unanchored) | 0.834 | 0.000 | 1.043 | 1.000 | 0.140 |
+| 1 | 0.889 | 0.000 | 0.951 | 1.000 | 0.000 |
+| 2 | 0.886 | 0.000 | 1.140 | 1.000 | 0.087 |
+| 3 | 0.892 | 0.000 | 0.992 | 1.000 | 0.029 |
+| 5 | 0.958 | 0.000 | 1.077 | 1.000 | 0.054 |
+| 10 | 1.000 | 0.000 | 1.150 | 1.000 | 0.098 |
+
+sparse_inf rho=0.2, S=3, phi=0.2:
+
+| prior_mass | AP | FDR@.95 | mass | hi_pip_reliab | ece_hi |
+|---|---|---|---|---|---|
+| 0 (unanchored) | 0.248 | 0.892 | 6.193 | 0.108 | 0.884 |
+| 1 | 0.350 | 0.714 | 3.325 | 0.235 | 0.642 |
+| 2 | 0.293 | 0.750 | 3.332 | 0.235 | 0.613 |
+| 3 | 0.368 | 0.636 | 2.836 | 0.333 | 0.607 |
+| 5 | 0.360 | 0.765 | 3.333 | 0.235 | 0.701 |
+| 10 | 0.286 | 0.789 | 3.667 | 0.200 | 0.744 |
+
+Four things to take from this.
+
+**The stratum split is real and it is large.** At the SAME shipped
+configuration, mass is 1.04 under `sparse` and 6.19 under `sparse_inf`, with
+hi_pip_reliab 1.000 against 0.108. A single study whose binding constraint is a
+window on the average of those two cannot be satisfied by any configuration.
+That is v4's empty front, measured directly rather than inferred.
+
+**The anchor removes a pathological degree of freedom without adding a sensitive
+one.** Unanchored, sum(p0) is whatever training drifts to - large enough here
+that every anchored setting from 1 to 10 is a big REDUCTION in posterior mass
+(6.19 -> 2.8-3.3 under sparse_inf). Once the prior's scale is sane the
+likelihood dominates and the result is only weakly sensitive to the anchor
+value, which is the behaviour a nuisance parameter should have.
+
+**It is not a fix for misspecification.** Under `sparse_inf` the anchor roughly
+halves the mass and lifts AP from 0.248 to 0.368, but reliability only reaches
+0.333: two in three PIP>=0.9 calls are still wrong, because the model assumes a
+sparse effect vector and the data do not have one. The benchmark already carries
+`susie_inf` and `finemap_inf` (`R/wrapper_susie_inf.R`,
+`R/wrapper_finemap_inf.R`), which model the infinitesimal component, so those -
+not a hyperparameter - are the reference for that stratum.
+
+**The two strata have different optima, but a compromise exists.** `sparse`
+improves monotonically out to prior_mass = 10 (AP 0.834 -> 1.000);
+`sparse_inf` peaks at 3 and then degrades (AP 0.368 at 3, 0.286 at 10), because
+a larger prior budget under misspecification just admits more of the polygenic
+background. prior_mass = 3 beats the unanchored default on BOTH strata at once -
+sparse AP 0.834 -> 0.892 with ece 0.140 -> 0.029, sparse_inf AP 0.248 -> 0.368
+with FDR 0.892 -> 0.636 and reliability 0.108 -> 0.333 - which matters because
+`run_benchmark_job.R` deploys ONE fb_xregion configuration across every stratum.
+A per-stratum optimum is still a per-stratum optimum and must not be deployed as
+one without saying so: the comparators run at their own defaults, so tuning FB
+per stratum and reporting it per stratum would give FB an advantage they do not
+get. That is a presentation decision, not a tuning one.
+
+CAVEAT on the sparse table: one scenario, one seed, two regions, and at
+phi = 0.2 with n = 5000 the per-causal signal is strong (z ~ 18), so AP = 1.000
+at prior_mass = 10 is plausible but is not evidence of a trend. The 9-scenario
+S x phi grid is the check.
