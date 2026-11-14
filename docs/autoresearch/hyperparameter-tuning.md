@@ -793,3 +793,54 @@ z ~ N(sqrt(n) R b, R + n tau^2 R^2) rather than z ~ N(sqrt(n) R b, R), so `abf`
 would need tau^2 estimated per region and carried through its quadratic form and
 log-determinant. That is the FB analogue of SuSiE-inf / FINEMAP-inf and should
 be scoped as its own piece of work, not folded into a hyperparameter search.
+
+### prior_mass across the whole sparse grid (9 scenarios, real LD)
+
+`tuning/local_sparse_grid9.rds`: S x phi = {1,3,10} x {0.05,0.2,0.6}, 2 regions
+of 500/1000, n=5000, in-sample LD, binary annotations, enrichment 10.8. Each
+cell is one `fb_objective.R` call at the shipped defaults with only prior_mass
+varied. S and phi are read back from `scenarios[[k]]$S` rather than inferred
+from the expand.grid ordering.
+
+| S | phi | AP pm=0 | AP pm=3 | AP pm=10 | mass pm=0 | mass pm=3 | mass pm=10 |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.05 | 1.000 | 1.000 | 1.000 | 1.600 | 1.545 | 1.901 |
+| 3 | 0.05 | 0.772 | 0.834 | 0.834 | 0.739 | 0.841 | 0.901 |
+| 10 | 0.05 | 0.440 | 0.591 | 0.542 | 0.481 | 0.494 | 0.564 |
+| 1 | 0.20 | 1.000 | 1.000 | 1.000 | 2.160 | 1.295 | 1.577 |
+| 3 | 0.20 | 0.834 | 1.000 | 1.000 | 0.835 | 1.006 | 1.057 |
+| 10 | 0.20 | 0.746 | 0.687 | 0.693 | 0.707 | 0.691 | 0.694 |
+| 1 | 0.60 | 0.333 | 0.400 | 0.400 | 10.935 | 9.271 | 9.545 |
+| 3 | 0.60 | 0.921 | 0.915 | 0.915 | 1.639 | 1.357 | 1.524 |
+| 10 | 0.60 | 0.912 | 0.930 | 0.940 | 1.112 | 1.078 | 1.084 |
+
+| | pm=0 | pm=3 | pm=10 |
+|---|---|---|---|
+| mean AP over the 9 scenarios | 0.773 | 0.817 | 0.814 |
+| min-cell AP, cells keyed by S | 0.699 | 0.736 | 0.727 |
+| mean mass (what the constraint sees) | 2.245 | 1.953 | 2.094 |
+
+prior_mass = 3 wins in five cells, loses in two (S=10/phi=0.2 by 0.059,
+S=3/phi=0.6 by 0.006) and ties in two. It is not uniformly better, but it is
+better on both statistics the `cells` objective actually optimises, and the
+gains are largest in the hard cells (S=10/phi=0.05, +0.151). prior_mass = 10
+adds nothing over 3 and is worse at S=10/phi=0.05.
+
+Two findings that change the study setup.
+
+**The mass constraint is only satisfiable with the anchor, and barely.** The
+stratum mean is 2.245 at pm=0 - OUTSIDE a [0.5, 2.0] window - and 1.953 at
+pm=3, 2% inside the ceiling. So on the sparse stratum too, posterior mass is a
+quantity no pre-existing search parameter could reach the window with, and
+prior_mass is what makes the constraint satisfiable at all. But 2% of headroom
+on a 2-region bed is not something to rely on when the cluster grid has 10
+regions of 500-2000, so MASS_HI should be raised to about 3.0 for the sparse
+study rather than left at 2.0.
+
+**FB's worst sparse cell is S=1 / phi=0.6, not S=10.** That cell has mass 10.9
+and AP 0.333, both the worst in the grid, and it contributes essentially all of
+the stratum's mass excess - the other eight scenarios average 1.13. One causal
+variant explaining 60% of phenotypic variance, and the posterior asserts about
+eleven. The anchor helps (10.9 -> 9.3) but nowhere near enough, so something
+else is wrong in the single-strong-signal regime. Worth isolating on its own;
+it was invisible while mass was pooled across strata and reported as one number.
