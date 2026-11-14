@@ -94,3 +94,13 @@ docs/testing_report.md
 # Optuna tuning artefacts (sims, study journals, worker logs).
 # Root-anchored so it does NOT match scripts/tuning/ (the code).
 /tuning/
+
+# The chol application's outputs. Generated locally by the scratchpad pipeline
+# (12_figures.py etc.), not by anything in this repo, and the cluster has no use
+# for them. A previous note recorded these as gitignored when in fact no rule
+# existed - they were merely untracked, which is indistinguishable until a
+# `git add -A` sweeps them in (that happened in f7592fc; removed in the commit
+# that added these lines).
+application/figures/
+application/results/
+application/README.pdf
