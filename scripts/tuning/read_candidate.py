@@ -80,8 +80,14 @@ def show(path):
 
             print(f"  WORST  FDR@.95 {a.get('worst_fdr_at_95', float('nan')):.3f}"
                   f"  (stratum {a.get('worst_stratum', '?')})")
-            print(f"  WORST CELL  AP {a.get('min_cell_ap', float('nan')):.3f}"
-                  f"  FDR@.95 {a.get('worst_cell_fdr_at_95', float('nan')):.3f}"
+            # These are TWO DIFFERENT CELLS: min_cell_ap is the min over cells
+            # of AP, worst_cell/worst_cell_fdr_at_95 is the max over cells of
+            # FDR. Printing them on one line reads as a single cell and is
+            # wrong - under sparse_inf the worst-AP cell is S=10 while the
+            # worst-FDR cell is S=1, which are opposite ends of the grid.
+            print(f"  min-AP cell      AP {a.get('min_cell_ap', float('nan')):.3f}")
+            print(f"  worst-FDR cell   FDR@.95 "
+                  f"{a.get('worst_cell_fdr_at_95', float('nan')):.3f}"
                   f"  ({a.get('worst_cell', '?')})")
             print(f"  mean   AP {a.get('mean_ap', float('nan')):.3f}"
                   f"  mass {a.get('mean_total_mass_ratio', float('nan')):.3f}"
