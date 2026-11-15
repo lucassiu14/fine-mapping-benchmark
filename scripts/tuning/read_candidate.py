@@ -16,11 +16,16 @@ WORST stratum, not the mean. That is what this prints first.
 Usage:
   python3 scripts/tuning/read_candidate.py tuning/fb_cand01.journal [...]
 """
+import os
 import sys
 
 import optuna
-from optuna.storages import JournalStorage
-from optuna.storages.journal import JournalFileBackend
+
+# Reuse optuna_fb.make_storage rather than importing a Journal class directly:
+# the backend class moved between Optuna versions and that helper already
+# carries the three fallbacks (optuna_fb.py:50-71).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from optuna_fb import make_storage  # noqa: E402
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -38,7 +43,7 @@ def strata_of(attrs, prefix):
 
 
 def show(path):
-    storage = JournalStorage(JournalFileBackend(path))
+    storage = make_storage(path)
     names = [s.study_name for s in optuna.get_all_study_summaries(storage=storage)]
     for name in names:
         st = optuna.load_study(study_name=name, storage=storage)
