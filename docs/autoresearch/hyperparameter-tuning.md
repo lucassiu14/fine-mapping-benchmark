@@ -844,3 +844,105 @@ variant explaining 60% of phenotypic variance, and the posterior asserts about
 eleven. The anchor helps (10.9 -> 9.3) but nowhere near enough, so something
 else is wrong in the single-strong-signal regime. Worth isolating on its own;
 it was invisible while mass was pooled across strata and reported as one number.
+
+## v5 — two per-stratum studies, and what they settled (2026-11-15)
+
+**Layout.** Two studies, selected by the submitter's new `STRATA` variable:
+`fb_retune_sparse_v5` (array 4647783, 275 completed trials, median 47 min) and
+`fb_retune_sinf_v5` (array 4647784, 124 completed trials, median 103 min).
+Split because v4's mass constraint averaged `total_mass_ratio` across strata
+and no configuration can satisfy a pooled target — see the v4 post-mortem
+above. The constraint is worst-stratum from v5 on.
+
+### The anchor did what it was built for
+
+`mass-feasible trials: 239/275` in the sparse study, inside `[0.5, 3.0]`,
+against **v4's 0/76**. Posterior mass went from an unreachable target to a
+routinely satisfied one. That is `anchor_prior_mass` working, and it is the
+clearest result of the whole exercise.
+
+### The search found no accuracy
+
+Measured against the deployed configuration (shipped values + `prior_mass = 3`)
+scored on all 27 cells in `fb_cand01_canary.journal`:
+
+| stratum | AP | FDR@.95 | ece_hi | mass |
+|---|---|---|---|---|
+| sparse | 0.690 | 0.336 | 0.231 | 2.28 |
+| sparse_inf | 0.444 | 0.752 | 0.557 | 4.43 |
+
+- best sparse front point: mean AP **0.700** vs deployed 0.690 → **+0.010** from 275 trials
+- best sparse_inf front point: mean AP **0.461** vs deployed 0.444 → **+0.017** from 124 trials
+- on the worst cell, sparse_inf's best point (#35: min-AP 0.245, worst-FDR
+  0.860) is **indistinguishable from the deployed configuration** (0.246, 0.870)
+
+About 400 trials over two days of 20-way compute bought nothing on accuracy.
+**Treat that as a finding, not a failed search.** It says the remaining deficit
+is not in the hyperparameters, which is consistent with the missing
+residual-variance / infinitesimal component (SuSiE absorbs the background via
+`estimate_residual_variance = TRUE`; FB has no equivalent) rather than with
+anything on the search space.
+
+### S=1 and S=10 fail in opposite directions
+
+Every front point in both studies has its worst-FDR cell at `S=1` — 19/19
+sparse, 12/12 sparse_inf. But the worst-**AP** cell is `S=10`. At #35:
+`S=1` gives AP 0.735 / FDR 0.860, `S=10` gives AP 0.245 / FDR 0.641. S=1 ranks
+best and calibrates worst. Do not compress this to "S=1 is the failure mode";
+`min_cell_ap` and `worst_cell_fdr_at_95` are different cells and a reader that
+prints them on one line invites exactly that error (fixed, `43d4505`).
+
+A plausible reading of the S=1 calibration failure: `prior_mass` is a FIXED
+prior expected count, while the grid varies the true count 1 → 10. M ≈ 1 suits
+S=1 and M ≈ 10 suits S=10, so no single value is right everywhere, and the
+relative damage is largest where the truth is smallest. If that is right, the
+fix is an anchor estimated per region rather than a tuned constant. Untested.
+
+### What the parameters agree on
+
+Among front points good on BOTH axes (sparse AP ≥ 0.60, sparse_inf AP ≥ 0.20):
+
+| parameter | sparse | sparse_inf | shipped | fANOVA (sparse/sinf) |
+|---|---|---|---|---|
+| `sigma_sq` | 0.047 | 0.049 | **0.0899** | 0.60 / 0.51 |
+| `n_caus` | 8 | 7 | **10** | 0.03 / 0.24 |
+| `sparse_concrete` | 28 | 16 | **51** | 0.06 / 0.10 |
+| `prior_regularisation` | 1.63 | 1.94 | **0.1255** | 0.03 / 0.01 |
+| `prior_mass` | 1.19 | 3.13 | 3 deployed | 0.02 / 0.002 |
+
+The dominant parameter **agrees across strata** and the shipped value is about
+2x too high. Two traps here, both of which caught me:
+
+1. Selecting the top points by AP alone makes `sigma_sq` look like a 2.7x
+   cross-stratum conflict (medians 0.019 vs 0.052), and eyeballing the extremes
+   of those lists inflates it to ~100x. Requiring decent FDR as well collapses
+   it to 1.04x. **The conflict is an artefact of selecting on AP only.**
+2. `lambda_l1` and `hierarchy_M` disagree sharply between strata but carry
+   ~0.02 of the AP variance. That is noise wearing a disagreement's clothes.
+
+`prior_mass` is nearly inert for AP (0.02 / 0.002) because it is a CALIBRATION
+knob; judging it by AP importance understates it.
+
+### The objective is blind to phi
+
+Cell keys are `{stratum}|S={S}` (`optuna_fb.py:331`), so phi ∈ {0.05, 0.2, 0.6}
+is averaged inside each cell: **3 cells per stratum, not 9.** The worst cell
+found locally on real 1000G LD was S=1/**phi=0.6** (mass 10.9, AP 0.333), and
+this objective dilutes it threefold. Splitting by phi would give 9 cells of 10
+fits rather than 3 of 30, so the min gets noisier — a real trade, and a
+grid-design decision, so it is NOT changed here. Open for the user.
+
+### What is deployable
+
+Nothing on either front, as it stands. Each study scored one stratum, so
+`c013`/`c071`/`c119` have never been measured on `sparse` at all, and one
+configuration has to serve every setup. The sparse_inf front does expose an
+accuracy/calibration trade — roughly 0.06 of worst-cell AP buys 0.22 of
+worst-cell FDR (#35 0.245/0.860 → #13 0.226/0.800 → #119 0.195/0.733 →
+#71 0.183/0.650) — so the span is being re-scored on all 27 cells by
+`scripts/tuning/submit_candidates.sh` (jobs 4657240-4657246) rather than one
+point being picked on partial data.
+
+Whichever wins, note the scale: the best FDR@0.95 anywhere in either front is
+0.650, against ~0.02 for Oracle SuSiE under sparse. The choice is which
+compromise to ship, not whether tuning fixed the calibration.
