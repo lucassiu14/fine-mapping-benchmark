@@ -36,9 +36,12 @@ def strata_of(attrs, prefix):
     for k in attrs:
         if k.startswith(prefix + "_"):
             lab = k[len(prefix) + 1:]
-            # cell keys look like 'sparse|S=3|phi=0.2'; stratum keys do not.
-            if "|" not in lab and "=" not in lab:
-                out.append(lab)
+            # Three kinds of key share the 'ap_' prefix: stratum ('sparse'),
+            # cell ('sparse|S=3') and the per-scenario running mean
+            # ('ap_after_7', optuna_fb.py:349). Only strata are wanted.
+            if "|" in lab or "=" in lab or lab.startswith("after_"):
+                continue
+            out.append(lab)
     return sorted(out)
 
 
@@ -51,8 +54,14 @@ def show(path):
         print(f"\n=== {name}: {len(done)}/{len(st.trials)} complete ===")
         for t in done:
             a = t.user_attrs
-            pm = t.params.get("prior_mass", a.get("prior_mass", "n/a"))
+            # --fix REMOVES a parameter from the search space, so a pinned
+            # value is absent from t.params. optuna_fb records it under
+            # 'fixed_params' instead; fall back to both before giving up.
+            fx = a.get("fixed_params") or {}
+            pm = t.params.get("prior_mass", fx.get("prior_mass", "n/a"))
             print(f"\n[trial {t.number}]  prior_mass = {pm}")
+            if fx:
+                print(f"  pinned: {fx}")
             feas = a.get("mass_feasible")
             print(f"  mass_feasible = {feas}"
                   + ("   (so it is ABSENT from --report's Pareto front)"

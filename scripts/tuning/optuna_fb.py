@@ -196,6 +196,12 @@ def suggest_params(trial, args):
     # Kept as-is: lambda_l1, prior_regularisation and n_caus all found interior
     # optima in v1, so their ranges are doing their job.
     fixed = args.fix or {}
+    if fixed:
+        # --fix removes these from the search space, so they never appear in
+        # trial.params. Without this a pinned (CANARY) trial carries no record
+        # of what it actually evaluated, and the FIX string in a shell history
+        # becomes the only provenance.
+        trial.set_user_attr("fixed_params", dict(fixed))
 
     def sfloat(name, lo, hi, log=True):
         return fixed[name] if name in fixed else trial.suggest_float(name, lo, hi, log=log)
