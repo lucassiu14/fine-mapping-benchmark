@@ -31,13 +31,28 @@ S_INF06="sparse_inf=$TD/sim_sparseinf_rho0.6_binary_e5.4_n5000.rds"
 hdr () { printf '\n\n########## %s ##########\n' "$1"; }
 
 hdr "fb_cand01 - deployed config (prior_mass=3) on all 27 cells"
-if [[ -f "$TD/fb_cand01.journal" ]]; then
-  "$PY_BIN" scripts/tuning/read_candidate.py "$TD/fb_cand01.journal"
+# A CANARY writes "${STUDY}_canary.journal", not "${STUDY}.journal" - the
+# submitter's "Storage" banner line shows the search study's path even in
+# canary mode, which sent an earlier read of this to the wrong file.
+CAND_J=""
+for c in "$TD/fb_cand01_canary.journal" "$TD/fb_cand01.journal"; do
+  [[ -f "$c" ]] && CAND_J="$c" && break
+done
+if [[ -n "$CAND_J" ]]; then
+  echo "(reading $CAND_J)"
+  "$PY_BIN" scripts/tuning/read_candidate.py "$CAND_J"
 else
-  echo "NO JOURNAL at $TD/fb_cand01.journal - the canary never wrote one."
-  echo "Last canary log:"
-  ls -t tuning/logs/*.OU 2>/dev/null | head -1 | xargs -r tail -25
-  ls -t tuning/logs/*.ER 2>/dev/null | head -1 | xargs -r tail -25
+  echo "NO canary journal. Looked for:"
+  echo "  $TD/fb_cand01_canary.journal"
+  echo "  $TD/fb_cand01.journal"
+  echo "Journals that DO exist:"; ls -la "$TD"/*.journal 2>/dev/null
+  # Pick the canary's own log, not merely the newest one (a search worker's log
+  # is newer and says nothing about the canary).
+  echo "Most recent canary log:"
+  for ext in ER OU; do
+    f="$(grep -l canary tuning/logs/*."$ext" 2>/dev/null | xargs -r ls -t 2>/dev/null | head -1)"
+    [[ -n "$f" ]] && { echo "--- $f ---"; tail -30 "$f"; }
+  done
 fi
 
 hdr "fb_retune_sparse_v5 - sparse front (searched under MASS_HI=3.0)"

@@ -304,6 +304,10 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --fix ${FIX}
 echo "[canary] done \$(date)"
 PBS_EOF
+  echo "Canary storage   : ${TUNE_DIR}/${STUDY}_canary.journal"
+  echo "  (NOT the 'Storage' line above - that is the search study's journal.
+   A canary writes its own ${STUDY}_canary.journal, which is where its
+   metrics land.)"
   echo "Canary job script: $J"
   # shellcheck disable=SC2086
   JID="$(qsub ${DEPEND} "$J")"
