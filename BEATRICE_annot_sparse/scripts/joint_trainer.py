@@ -296,7 +296,8 @@ def complete_posterior(memo, mean_memo, S, z, ld, n_sub, sigma_sq, p0, bp,
             after = float(sum(memo.values()))
             gained = (after - before) / after if after > 0 else 0.0
             history.append({"round": rnd + 1, "added": added,
-                            "configs": len(memo), "mass_gained": gained})
+                            "configs": len(memo), "mass_gained": gained,
+                            "mass_before": before, "mass_after": after})
             if gained < tol:
                 break
     return history
@@ -611,6 +612,25 @@ def run_joint(options):
                 width=int(options.get('completion_width', 32)),
                 max_rounds=int(options.get('completion_rounds', 4)),
                 tol=_tol)
+        if completion:
+            # The ONLY stdout trace that completion ran. `res` is pickled into
+            # a wrapper tempdir that R deletes, so without this line a silent
+            # no-op is indistinguishable from "ran, but changed nothing" - the
+            # ambiguity that wasted an earlier canary. delta_hat is the share
+            # of the FINAL posterior mass that the sampler alone had MISSED,
+            # i.e. the measured, production value of the delta that bounds the
+            # PIP error above. last_gain is what the final round still found:
+            # small means the enlarged sum has converged, so delta_hat is a
+            # credible estimate of the omitted mass rather than a floor.
+            _w0 = completion[0]['mass_before']
+            _w1 = completion[-1]['mass_after']
+            _d = (_w1 - _w0) / _w1 if _w1 > 0 else 0.0
+            print(f"[completion] region={os.path.basename(r['target'])} "
+                  f"rounds={len(completion)} "
+                  f"configs={completion[-1]['configs']} "
+                  f"delta_hat={_d:.4f} "
+                  f"last_gain={completion[-1]['mass_gained']:.2e}",
+                  flush=True)
         res = {'memo': r['memo'], 'mean_memo': mean_memo,
                'names': r['names'], 'pip': calculate_pip(r['memo'], r['bp']),
                'completion': completion,
