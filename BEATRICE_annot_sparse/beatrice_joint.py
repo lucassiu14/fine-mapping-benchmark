@@ -65,6 +65,25 @@ flags.DEFINE_float('lambda_l1', 0.1223,
                    'The default is the best value from a sweep of this penalty; below '
                    '~0.06 annotation selection is no better than chance.')
 flags.DEFINE_float('hierarchy_M', 10.15, 'LassoNet hierarchy constraint multiplier.')
+flags.DEFINE_float('posterior_completion', 0.0,
+                   'Finish the partial sum calculate_pip takes. PIPs are '
+                   'normalised over the configurations the Concrete sampler '
+                   'visited, not over all of them, which biases them UPWARD by '
+                   'the omitted posterior mass. This runs add/delete/swap '
+                   'neighbourhood moves until a round discovers less than this '
+                   'fraction of new mass. 1e-3 is a sensible setting; 0 '
+                   '(default) is the behaviour before this flag existed. '
+                   'Changes no model, prior or likelihood - only how much of '
+                   'the posterior is summed.')
+flags.DEFINE_integer('completion_seeds', 8,
+                     'Configurations to expand from each completion round, '
+                     'heaviest first.')
+flags.DEFINE_integer('completion_width', 32,
+                     'Restrict add/swap to the top-N variants by current PIP.')
+flags.DEFINE_integer('completion_rounds', 4,
+                     'Maximum completion rounds before stopping regardless of '
+                     'the tolerance.')
+
 
 
 def _parse_manifest(path, default_N):
@@ -113,6 +132,10 @@ def main(argv):
         'hierarchy_M': FLAGS.hierarchy_M,
         'n_causal': FLAGS.n_caus,
         'prior_mass': FLAGS.prior_mass,
+        'posterior_completion': FLAGS.posterior_completion,
+        'completion_seeds': FLAGS.completion_seeds,
+        'completion_width': FLAGS.completion_width,
+        'completion_rounds': FLAGS.completion_rounds,
         'coverage_ths': FLAGS.gamma_coverage,
         'selection_prob': FLAGS.gamma_selection,
         'key_thres': FLAGS.gamma_key,

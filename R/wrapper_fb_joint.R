@@ -204,7 +204,17 @@
     # the LassoNet head fixes only the prior's SHAPE and leaves its SCALE
     # unidentified. 0 keeps that unanchored behaviour (what every run
     # before this flag used); 1.0 is the published scale.
-    "--prior_mass",           as.character(gv("prior_mass", 0))
+    "--prior_mass",           as.character(gv("prior_mass", 0)),
+    # calculate_pip normalises over the configurations the Concrete sampler
+    # VISITED, not over all of them, so PIPs are inflated by the omitted
+    # posterior mass. This completes the sum by add/delete/swap neighbourhood
+    # moves until a round finds less than `posterior_completion` of new mass.
+    # 0 keeps the partial sum (every run before this flag). It changes no
+    # model, prior or likelihood - only how much of the posterior is summed.
+    "--posterior_completion", as.character(gv("posterior_completion", 0)),
+    "--completion_seeds",     as.character(as.integer(gv("completion_seeds", 8))),
+    "--completion_width",     as.character(as.integer(gv("completion_width", 32))),
+    "--completion_rounds",    as.character(as.integer(gv("completion_rounds", 4)))
   )
 
   run_output <- tryCatch(

@@ -146,7 +146,16 @@ fb_args <- list(
   gamma_key            = getn("gamma_key", 0.2),
   # 0 = unanchored learned prior scale (pre-existing behaviour);
   # 1.0 = published BEATRICE's sum(p_0) = 1.
-  prior_mass           = getn("prior_mass", 0)
+  prior_mass           = getn("prior_mass", 0),
+  # calculate_pip normalises over the configurations the sampler VISITED, so
+  # PIPs are inflated by the omitted posterior mass (|PIP error| <= that mass;
+  # joint_trainer.complete_posterior). This completes the sum by add/delete/swap
+  # until a round finds less than this fraction of new mass. 0 = the partial
+  # sum every run before this used. No model, prior or likelihood changes.
+  posterior_completion = getn("posterior_completion", 0),
+  completion_seeds     = geti("completion_seeds", 8L),
+  completion_width     = geti("completion_width", 32L),
+  completion_rounds    = geti("completion_rounds", 4L)
 )
 
 t0 <- Sys.time()

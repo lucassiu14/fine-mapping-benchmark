@@ -34,6 +34,7 @@ The per-region ELBO maths (`_region_elbo`, `_abf`) is copied verbatim from
 single-region paths use identical likelihood, KL and regularisation terms and
 differ only in the optimisation.
 """
+import math
 import os
 import numpy as np
 import torch
@@ -159,6 +160,146 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
         memo[ind_m] = float(res.detach().cpu().numpy().squeeze())
         return res
     return None
+
+
+# ---------------------------------------------------------------------------
+# Posterior completion
+#
+# `calculate_pip` (trainer_annot.py:38) forms
+#
+#     PIP_j = sum_{g in M, j in g} w(g) / sum_{g in M} w(g)
+#
+# over M = `memo`, the set of configurations the Concrete sampler happened to
+# visit. The WEIGHTS are correct: with S = LD^{-1} z (trainer_annot.py:957),
+# VS = LD[ind,:] LD^{-1} z = z[ind], so w(g) is the standard approximate Bayes
+# factor times the independent-Bernoulli configuration prior. The INDEX SET is
+# not: the posterior normalises over all 2^m configurations, this sum over the
+# visited ones.
+#
+# Omitting a configuration drops it from the numerator AND the denominator, and
+# the configurations that do NOT contain j are exactly the ones that would
+# dilute PIP_j. An under-dispersed proposal misses those first, so the bias is
+# UPWARD - over-confidence. It is invariant to `sparse_concrete`, `gamma` and
+# `temp`, which change which configurations are visited but never that the sum
+# is partial; that is why FDR@0.95 had a floor no trial in 411 reached below.
+#
+# Completing the sum changes NO model, NO prior and NO likelihood. It evaluates
+# terms that were always in the definition of the posterior, using the same
+# `w`. The moves are add / delete / swap - the neighbourhood of
+# generate_credible_sets.py:241-290, which today runs only AFTER the PIPs, to
+# build credible sets - i.e. FINEMAP's shotgun neighbourhood (Benner et al.
+# 2016), applied where it belongs.
+#
+# `mass_gained` per round is reported so convergence is auditable: when a round
+# discovers a negligible share of new mass, M covers the posterior and the PIPs
+# are the posterior's, not the sampler's.
+# ---------------------------------------------------------------------------
+def _abf_at(S, z, ld, memo, n_sub, sigma_sq, p0, ind, mean_memo, _cap=10 ** 15):
+    """ABF for an EXPLICIT configuration, on the post-`reformat_memo` scale.
+
+    Identical formula to `_abf`; differs only in taking `ind` directly rather
+    than deriving it from a Concrete draw, and in storing exp(res - mean_memo)
+    instead of res - which is the scale the memo carries once `reformat_memo`
+    has run, and the scale `generate_credible_sets.abf` writes, so the two
+    interoperate on one memo.
+    """
+    key = tuple(sorted(int(i) for i in ind))
+    if key in memo:
+        return memo[key]
+    if len(key) == 0:
+        return None
+    idx = list(key)
+    cc = gpu(torch.ones(len(z)))
+    VU, zU, VS, _ = _woodbury_pieces(S, z, ld, n_sub, sigma_sq, cc, idx)
+    eyeK = gpu(torch.eye(len(idx)))
+    inv = torch.inverse(eyeK + VU)
+    # Same contraction as _abf: sigma_inv is U inv V, so the quadratic form is
+    # (z^T U) inv (V S) with no z^T S term.
+    sigma2 = torch.mm(torch.mm(zU, inv), VS) / 2
+    prior = 1 - p0
+    prior[idx] = p0[idx]
+    ex = (-torch.logdet(eyeK + VU) / 2 + sigma2
+          + torch.sum(torch.log(prior)) - mean_memo)
+    val = float(torch.clamp(torch.exp(torch.clamp(ex, max=math.log(_cap))),
+                            max=_cap).detach().cpu().numpy().squeeze())
+    memo[key] = val
+    return val
+
+
+def complete_posterior(memo, mean_memo, S, z, ld, n_sub, sigma_sq, p0, bp,
+                       n_seed=8, width=32, max_rounds=4, tol=1e-3, kmax=None):
+    """Enlarge `memo` by add/delete/swap until new mass falls below `tol`.
+
+    Mutates `memo` in place and returns a per-round diagnostic. `kmax` defaults
+    to the largest configuration the sampler itself reached, so completion
+    finishes the sum over the configuration sizes the model already explores
+    rather than widening the model's notion of sparsity.
+
+    `width` restricts add/swap to the top-`width` variants by current PIP. A
+    configuration that swaps in a variant with negligible marginal evidence
+    carries negligible weight, so this costs little mass - and `mass_gained`
+    reports what each round actually found, so the restriction is auditable
+    rather than assumed.
+
+    THE RESIDUAL MASS BOUNDS THE PIP ERROR. With W the total weight over all
+    configurations, W_M the weight over the visited ones, delta = (W - W_M)/W,
+    and A(j) = A_M(j) + a where 0 <= a <= W - W_M,
+
+        PIP_M(j) - PIP_exact(j) = [delta*A_M(j) - (1 - delta)*a]
+                                  / (W * (1 - delta))
+
+    which is at most delta*PIP_M(j) (at a = 0, i.e. none of the omitted mass
+    contains j) and at least -delta (at a maximal). So
+
+        |PIP_M(j) - PIP_exact(j)| <= delta        for every j.
+
+    The bias is therefore upward wherever the omitted configurations mostly
+    exclude j - which is the common case, since an under-dispersed proposal
+    misses the competing configurations first. `mass_gained` falling below the
+    tolerance is evidence that delta is small, so it is a calibration bound and
+    not merely a progress signal. Verified against exhaustive enumeration in
+    scripts/tuning/test_posterior_completion.py.
+    """
+    sizes = [len(g) for g in memo if len(g) > 0]
+    if not sizes:
+        return []
+    if kmax is None:
+        kmax = max(sizes)
+    history = []
+    with torch.no_grad():
+        for rnd in range(int(max_rounds)):
+            before = float(sum(memo.values()))
+            if before <= 0:
+                break
+            pip = calculate_pip(memo, bp)
+            search = [int(i) for i in np.argsort(np.asarray(pip))[::-1][:width]]
+            seeds = [g for g, _ in sorted(memo.items(),
+                                          key=lambda kv: -kv[1])[:n_seed]]
+            added = 0
+            for g in seeds:
+                cand = []
+                for i in range(len(g)):                       # delete
+                    cand.append(g[:i] + g[i + 1:])
+                if len(g) < kmax:                             # add
+                    for i in search:
+                        if i not in g:
+                            cand.append(tuple(sorted(g + (i,))))
+                for i in range(len(g)):                       # swap
+                    for j in search:
+                        if j not in g:
+                            cand.append(tuple(sorted(g[:i] + g[i + 1:] + (j,))))
+                for c in cand:
+                    if c and len(c) <= kmax and c not in memo:
+                        _abf_at(S, z, ld, memo, n_sub, sigma_sq, p0, c,
+                                mean_memo)
+                        added += 1
+            after = float(sum(memo.values()))
+            gained = (after - before) / after if after > 0 else 0.0
+            history.append({"round": rnd + 1, "added": added,
+                            "configs": len(memo), "mass_gained": gained})
+            if gained < tol:
+                break
+    return history
 
 
 def anchor_prior_mass(p0, mass, logit=None, eps=1e-7):
@@ -455,8 +596,24 @@ def run_joint(options):
             p_0 = anchor_prior_mass(p_0, options.get('prior_mass', 0.0),
                                     logit=getattr(prior_head, 'last_logit', None))
         mean_memo = reformat_memo(r['memo'], p_0)
+        # Finish the partial sum BEFORE reading PIPs off it. `calculate_pip`
+        # normalises over the visited configurations, which biases PIPs upward
+        # by the omitted posterior mass; see complete_posterior above. Tolerance
+        # 0 disables it, so the effect is measurable against the memo the
+        # sampler alone produced.
+        completion = []
+        _tol = float(options.get('posterior_completion', 0) or 0)
+        if _tol > 0:
+            completion = complete_posterior(
+                r['memo'], mean_memo, r['S'], r['Z'], r['LD'], r['N'],
+                gpu_ts(sigma_sq), p_0, r['bp'],
+                n_seed=int(options.get('completion_seeds', 8)),
+                width=int(options.get('completion_width', 32)),
+                max_rounds=int(options.get('completion_rounds', 4)),
+                tol=_tol)
         res = {'memo': r['memo'], 'mean_memo': mean_memo,
                'names': r['names'], 'pip': calculate_pip(r['memo'], r['bp']),
+               'completion': completion,
                'feature_importance': prior_head.feature_importance}
         os.makedirs(r['target'], exist_ok=True)
         save_object(res, os.path.join(r['target'], 'res'))
