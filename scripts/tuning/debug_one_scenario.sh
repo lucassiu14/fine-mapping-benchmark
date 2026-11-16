@@ -76,6 +76,8 @@ for TOLV in ${TOL} 0; do
   echo "================================================================"
   echo "=== posterior_completion = \${TOLV} ==="
   echo "================================================================"
+  export FB_COMPLETION_LOG="${LOG_DIR}/completion_diag.\${PBS_JOBID}.tol\${TOLV}.txt"
+  : > "\$FB_COMPLETION_LOG"
   Rscript scripts/tuning/fb_objective.R \\
       --sim "${SIM}" --stratum "${STRATUM}" --method "${METHOD}" \\
       --scenario ${SCENARIO} --regions ${REGIONS} \\
@@ -85,6 +87,8 @@ for TOLV in ${TOL} 0; do
       --posterior_completion \${TOLV} \\
       --completion_seeds 8 --completion_width 32 --completion_rounds 4
   echo "--- Rscript exit status: \$? ---"
+  echo "--- completion diagnostic (one line per region) ---"
+  cat "\$FB_COMPLETION_LOG" 2>/dev/null || echo "(no diagnostic written)"
   echo
 done
 echo "[debug1] done \$(date)"

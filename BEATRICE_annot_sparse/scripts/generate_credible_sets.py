@@ -387,6 +387,10 @@ def main(options):
     sigma_sq =  gpu_ts(options['sigma_sq'])
     m  = load_object(os.path.join(options['target'],'res'))['memo']
     mean_memo = load_object(os.path.join(options['target'],'res'))['mean_memo']
+    # Mass in the memo as the trainer left it, before the sweep below enlarges
+    # it. Needed to attribute how much of the completion work this file is
+    # already doing on its own.
+    _w_raw, _n_raw = float(sum(m.values())), len(m)
 
 
     ###############################################################################################################################################
@@ -411,6 +415,47 @@ def main(options):
     # them to a crash in machinery the caller may not even want is wrong.
     # (2) It keeps pip.csv holding the same quantity whether or not sets are
     # built. Set `options['skip_cred_sets']` to stop here.
+    # --- DIAGNOSTIC: how complete is the sum pip.csv is written from? -------
+    # Everything downstream reads THIS pip.csv, not res['pip']
+    # (wrapper_fb_joint.R:72,:234), and the sweep above - cond_stepwise_causal
+    # plus add - has already enlarged `m` using the same add/delete/change
+    # moves (:241-290) that joint_trainer.complete_posterior uses. So the
+    # quantity that bounds the REPORTED PIPs' error is the mass still missing
+    # HERE, not the mass the raw sampler memo was missing.
+    #
+    # Measured on a COPY: altering `m` would change the pip.csv this number is
+    # reported for. Written to the path in FB_COMPLETION_LOG because the
+    # wrapper captures python's stdout and discards it on success
+    # (wrapper_fb_joint.R:219-228) and then deletes the per-region target dir,
+    # so neither stdout nor a file in `target` survives.
+    _diag = os.environ.get('FB_COMPLETION_LOG', '')
+    if _diag:
+        try:
+            # Lazy: joint_trainer imports THIS module (:54), so a top-level
+            # import here would be circular.
+            from scripts.joint_trainer import complete_posterior
+            _w_sweep = float(sum(m.values()))
+            probe = dict(m)
+            hist = complete_posterior(probe, mean_memo, S, Z, LD, n_sub,
+                                      sigma_sq, p0, bp, n_seed=8, width=32,
+                                      max_rounds=4, tol=1e-4)
+            _w_done = float(sum(probe.values()))
+            sweep_gain = ((_w_sweep - _w_raw) / _w_sweep) if _w_sweep > 0 else 0.0
+            residual = ((_w_done - _w_sweep) / _w_done) if _w_done > 0 else 0.0
+            with open(_diag, 'a') as fh:
+                fh.write("target=%s configs raw=%d sweep=%d completed=%d "
+                         "sweep_gain=%.6f residual_delta=%.6f rounds=%d "
+                         "last_gain=%.3e\n"
+                         % (os.path.basename(options['target']), _n_raw,
+                            len(m), len(probe), sweep_gain, residual,
+                            len(hist),
+                            hist[-1]['mass_gained'] if hist else float('nan')))
+        except Exception as ex:
+            with open(_diag, 'a') as fh:
+                fh.write("target=%s DIAGNOSTIC FAILED: %s: %s\n"
+                         % (os.path.basename(options['target']),
+                            type(ex).__name__, str(ex)[:200]))
+
     pip = calculate_pip(m, bp)
     df = pd.DataFrame({'variant_index': list(range(bp)), 'pip': pip,
                        'variant_names': options['names']})
