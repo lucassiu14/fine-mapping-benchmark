@@ -35,6 +35,13 @@ PAIR="${PAIR:-1}"
 # Held fixed across BOTH arms, so it cannot be confounded with completion. 3 is
 # the provisionally deployed anchor value; 0 disables the anchor entirely.
 PRIOR_MASS="${PRIOR_MASS:-3}"
+# Completion's search window. Probe 4465 measured the trade directly: every
+# pass stops by EXHAUSTING its neighbourhood (last_gain=0.0 at every width),
+# so width is the lever and the round cap is not - complete_posterior already
+# refreshes its seeds each round. Going 32 -> 512 raised the mass recovered
+# from 0.165 to 0.252 in one region and 0.351 to 0.422 in another, at ~6s per
+# region, about 27 min on a 175 min trial. Only the ON arm reads it.
+CWIDTH="${CWIDTH:-512}"
 
 # submit_fb_retune.sh's default FIX (:98), verbatim, plus the anchor. Anything
 # added here must be added to BOTH arms - which is now automatic, since both
@@ -68,13 +75,15 @@ echo "  installed wrapper carries --posterior_completion: TRUE"
 echo
 echo "== 4/4  submit ================================================"
 echo "Both arms are pinned at prior_mass=${PRIOR_MASS} and differ ONLY in"
-echo "posterior_completion, so the difference between them is attributable to"
+echo "posterior_completion (the ON arm also sets completion_width=${CWIDTH},"
+echo "which the OFF arm never reads because completion is disabled there),"
+echo "so the difference between them is attributable to"
 echo "completing the sum and to nothing else."
 echo
 
 echo "--- arm 1/2: completion ON (posterior_completion=${TOL}) ---"
 CANARY=1 STRATA="sparse sparse_inf" STUDY="${STUDY}" PM_MAX=10 \
-  FIX="${BASE} posterior_completion=${TOL}" \
+  FIX="${BASE} posterior_completion=${TOL} completion_width=${CWIDTH}" \
   bash scripts/tuning/submit_fb_retune.sh
 rc=$?
 
