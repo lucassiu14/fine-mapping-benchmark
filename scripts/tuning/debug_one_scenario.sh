@@ -52,6 +52,10 @@ TOL="${TOL:-0.001}"
 # inherit the submitting shell's environment (no -V), so exporting them here
 # would silently leave the compute node on the defaults.
 FB_DIAG_WIDTHS="${FB_DIAG_WIDTHS:-32,128}"
+# The width the RUN uses (not the diagnostic sweep). Keep it equal to
+# submit_completion_canary.sh's CWIDTH or the probe gates a different
+# configuration from the one the canary will run.
+CWIDTH="${CWIDTH:-512}"
 FB_DIAG_SEEDS="${FB_DIAG_SEEDS:-8}"
 FB_DIAG_ROUNDS="${FB_DIAG_ROUNDS:-4}"
 
@@ -95,7 +99,7 @@ for TOLV in ${TOL} 0; do
       --python "${FB_PY}" --max_iter ${MAX_ITER} \\
       ${PARAMS} \\
       --posterior_completion \${TOLV} \\
-      --completion_seeds 8 --completion_width 32 --completion_rounds 4
+      --completion_seeds 8 --completion_width ${CWIDTH} --completion_rounds 4
   echo "--- Rscript exit status: \$? ---"
   echo "--- completion diagnostic (one line per region) ---"
   cat "\$FB_COMPLETION_LOG" 2>/dev/null || echo "(no diagnostic written)"
