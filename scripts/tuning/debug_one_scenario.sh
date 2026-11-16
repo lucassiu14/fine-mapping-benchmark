@@ -95,7 +95,16 @@ echo "Debug job script: $J"
 JOBID="$(qsub "$J")"
 echo "Debug job: ${JOBID}"
 echo
+# Print the REAL log path, fully substituted. This used to echo a literal
+# ${JOBID%%.*}, which does not expand in the reader's shell - so the natural
+# fallback is `ls -t *.OU | head -1`, and that silently returns the PREVIOUS
+# job's log while this one is still queued. Two runs then look identical and a
+# gate appears to pass when it was never checked.
+LOGF="${LOG_DIR}/${JOBID}.OU"
 echo "Reads EVERYTHING fb_objective.R prints, which optuna_fb normally captures"
-echo "and throws away. When it finishes (~30-60 min):"
-echo "  L=${LOG_DIR}/\${JOBID%%.*}.*.OU; grep -E 'status|message|n_failed|ap=|\\[completion\\]' \$L"
-echo "  tail -60 ${LOG_DIR}/\${JOBID%%.*}.*.OU"
+echo "and throws away. This job's log, and no other (~4-60 min):"
+echo "  grep -nE 'status=|n_failed=|^ap=|^fdr_at_95=|^total_mass_ratio=|\\[completion\\]' ${LOGF}"
+echo "  tail -60 ${LOGF}"
+echo
+echo "If that path does not exist yet the job has not started - wait, do NOT"
+echo "fall back to the newest .OU, which is a different job."
