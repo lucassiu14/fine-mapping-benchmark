@@ -48,6 +48,12 @@ QUEUE="${QUEUE:-}"
 # plus the prior_mass=3 the canary banner reported).
 PARAMS="${PARAMS:---sigma_sq 0.0899 --n_caus 10 --sparse_concrete 51 --prior_regularisation 0.1255 --lambda_l1 0.1223 --hierarchy_M 10.15 --gamma 0.1 --gamma_key 0.2 --prior_mass 3}"
 TOL="${TOL:-0.001}"
+# Diagnostic knobs. These must be BAKED INTO the job script: PBS does not
+# inherit the submitting shell's environment (no -V), so exporting them here
+# would silently leave the compute node on the defaults.
+FB_DIAG_WIDTHS="${FB_DIAG_WIDTHS:-32,128}"
+FB_DIAG_SEEDS="${FB_DIAG_SEEDS:-8}"
+FB_DIAG_ROUNDS="${FB_DIAG_ROUNDS:-4}"
 
 J="$(mktemp -t fbdbg1_XXXXXX.sh)"
 cat > "$J" <<PBS_EOF
@@ -62,7 +68,11 @@ set -uo pipefail
 cd "${PROJECT_ROOT}"
 module load ${R_MODULE}
 module load ${PY_MODULE}
+export FB_DIAG_WIDTHS="${FB_DIAG_WIDTHS}"
+export FB_DIAG_SEEDS="${FB_DIAG_SEEDS}"
+export FB_DIAG_ROUNDS="${FB_DIAG_ROUNDS}"
 echo "[debug1 on \$(hostname)] start \$(date)"
+echo "diag     : widths=${FB_DIAG_WIDTHS} seeds=${FB_DIAG_SEEDS} rounds=${FB_DIAG_ROUNDS}"
 echo "sim      : ${SIM}"
 echo "stratum  : ${STRATUM}   scenario ${SCENARIO}   regions ${REGIONS}"
 echo "params   : ${PARAMS}"
