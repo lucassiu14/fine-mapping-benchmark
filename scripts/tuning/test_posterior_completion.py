@@ -91,12 +91,29 @@ def main():
     chk("torch ABF == numpy ABF", abs(got - want) < 1e-6,
         f"log w: torch {got:.6f} vs numpy {want:.6f}")
 
+    # --- the PRODUCTION z shape ---------------------------------------------
+    # A region dict stores the 1-D Z that `_load_region` returns, while
+    # training passes Zc = Z.unsqueeze(1) (joint_trainer.py:381). This test
+    # originally built z_t already 2-D, so it could not catch a caller that
+    # passed the 1-D form - and that is precisely what shipped: every region
+    # fit raised "self must be a matrix" inside _woodbury_pieces. Assert both
+    # shapes are accepted and agree exactly.
+    tmp1, tmp2 = {}, {}
+    _abf_at(S_t, z_t.squeeze(-1), ld_t, tmp1, n, sigma_sq, p0_t, probe, 0.0)
+    _abf_at(S_t, z_t, ld_t, tmp2, n, sigma_sq, p0_t, probe, 0.0)
+    k = tuple(sorted(probe))
+    chk("1-D and 2-D z give the same ABF",
+        abs(tmp1[k] - tmp2[k]) <= 1e-12 * max(1.0, abs(tmp2[k])),
+        f"1-D {tmp1[k]:.12g} vs 2-D {tmp2[k]:.12g}")
+
     # --- partial sum, then completion, through the real code ----------------
     mean_memo = reformat_memo(memo_log, p0_t)   # in place: log -> exp(.-m0)
     pip_part = calculate_pip(memo_log, m)
     W_part = sum(memo_log.values())
 
-    hist = complete_posterior(memo_log, mean_memo, S_t, z_t, ld_t, n,
+    hist = complete_posterior(memo_log, mean_memo, S_t,
+                              z_t.squeeze(-1),      # the production shape
+                              ld_t, n,
                               sigma_sq, p0_t, m,
                               n_seed=8, width=m, max_rounds=6, tol=1e-6)
     pip_done = calculate_pip(memo_log, m)

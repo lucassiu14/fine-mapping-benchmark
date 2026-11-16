@@ -209,6 +209,13 @@ def _abf_at(S, z, ld, memo, n_sub, sigma_sq, p0, ind, mean_memo, _cap=10 ** 15):
     if len(key) == 0:
         return None
     idx = list(key)
+    # `_woodbury_pieces` computes zS = torch.mm(z.T, S) unconditionally, which
+    # needs a MATRIX. The training path hands it Zc = Z.unsqueeze(1) (:381),
+    # but a region dict stores the 1-D Z that `_load_region` returns, and
+    # torch.mm on a 1-D z raises "self must be a matrix" on the first call -
+    # failing every region fit. Normalise here so either shape is accepted.
+    if z.dim() == 1:
+        z = z.unsqueeze(-1)
     cc = gpu(torch.ones(len(z)))
     VU, zU, VS, _ = _woodbury_pieces(S, z, ld, n_sub, sigma_sq, cc, idx)
     eyeK = gpu(torch.eye(len(idx)))
@@ -263,6 +270,8 @@ def complete_posterior(memo, mean_memo, S, z, ld, n_sub, sigma_sq, p0, bp,
     sizes = [len(g) for g in memo if len(g) > 0]
     if not sizes:
         return []
+    if z.dim() == 1:                    # see the note in `_abf_at`
+        z = z.unsqueeze(-1)
     if kmax is None:
         kmax = max(sizes)
     history = []
@@ -606,7 +615,10 @@ def run_joint(options):
         _tol = float(options.get('posterior_completion', 0) or 0)
         if _tol > 0:
             completion = complete_posterior(
-                r['memo'], mean_memo, r['S'], r['Z'], r['LD'], r['N'],
+                # Zc, not Z: `_woodbury_pieces` needs a matrix, and training
+                # passes Z.unsqueeze(1) for exactly this reason (:381).
+                r['memo'], mean_memo, r['S'], r['Z'].unsqueeze(1),
+                r['LD'], r['N'],
                 gpu_ts(sigma_sq), p_0, r['bp'],
                 n_seed=int(options.get('completion_seeds', 8)),
                 width=int(options.get('completion_width', 32)),
