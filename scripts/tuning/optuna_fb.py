@@ -150,15 +150,35 @@ def run_one_scenario(args, params, sim_path, stratum, scenario):
         except ValueError:
             return float("nan")
 
-    return {k: num(k) for k in
+    out = {k: num(k) for k in
             ("ap", "max_fdr_violation_n20", "fdr_at_90", "fdr_at_95",
              "tp_at_95", "fp_at_95",
              "total_mass_ratio", "hi_pip_reliab", "ece_hi", "seconds",
+             # n_failed is the count of region fits that produced nothing.
+             # fb_objective.R has always printed it; it was simply never read,
+             # so an all-NaN trial gave no clue whether the fits failed or the
+             # metrics did.
+             "n_failed",
              # scen_S is the scenario's TRUE causal count, reported by
              # fb_objective.R from simulation$scenarios[[k]]$S rather than
              # re-derived here from the expand.grid(S, phi) ordering. It keys
              # the per-S cells the `cells` objective worst-cases over.
              "scen_S", "scen_phi")}
+    if out["ap"] != out["ap"]:
+        # status was 'ok' yet the ranking metric is NaN. R's stdout is CAPTURED
+        # here, not echoed, so unless this is printed the trial completes on the
+        # all-NaN sentinel ([0.0, 1.0, 1.0] for `cells`) and leaves no record
+        # anywhere of what went wrong - which is exactly how canary 956 spent
+        # two hours and reported nothing diagnosable.
+        print(f"[WARN] scenario {scenario} ({stratum}) status=ok but ap=NaN:"
+              f" n_failed={kv.get('n_failed', '?')}"
+              f" seconds={kv.get('seconds', '?')}"
+              f" total_mass_ratio={kv.get('total_mass_ratio', '?')}", flush=True)
+        for stream, label in ((proc.stdout, "stdout"), (proc.stderr, "stderr")):
+            tail = (stream or "").strip()
+            if tail:
+                print(f"[WARN]   {label} tail: {tail[-800:]}", flush=True)
+    return out
 
 
 def suggest_params(trial, args):
