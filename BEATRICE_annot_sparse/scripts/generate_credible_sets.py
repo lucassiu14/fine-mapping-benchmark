@@ -408,6 +408,28 @@ def main(options):
         ss.pop(ij)
         add(m, mean_memo, Z, LD, n_sub, sigma_sq, p0, S,ss, range(bp))
 
+    # --- complete the sum HERE, where it still reaches pip.csv --------------
+    # joint_trainer runs completion before saving `res`, but the sweep above
+    # then enlarges the memo further and `pip` is recomputed below, so anything
+    # the trainer found is only a starting point. Probe 4465 measured what a
+    # pass at THIS point adds to the swept memo: 0.42 of the final mass in one
+    # region (and 0.006 in another - it is highly region-dependent), at ~6s per
+    # region for width=512. Since everything downstream reads pip.csv
+    # (wrapper_fb_joint.R:72,:234) and never res['pip'], this is the only
+    # placement at which completing the sum changes a reported number.
+    #
+    # Note each pass stops by EXHAUSTING its neighbourhood (last_gain=0.0 in
+    # every row of 4465), not by reaching `tol`, so widening the window - not
+    # raising the round cap - is what recovers more.
+    _ctol = float(options.get('posterior_completion', 0) or 0)
+    if _ctol > 0:
+        from scripts.joint_trainer import complete_posterior   # lazy: cycle
+        complete_posterior(m, mean_memo, S, Z, LD, n_sub, sigma_sq, p0, bp,
+                           n_seed=int(options.get('completion_seeds', 8)),
+                           width=int(options.get('completion_width', 32)),
+                           max_rounds=int(options.get('completion_rounds', 4)),
+                           tol=_ctol)
+
     #########################################################################################################################################################
     # PIPs are computed and written BEFORE the credible-set search, for two
     # reasons. (1) find_credible_set can fail - at a large sparse_concrete it
@@ -458,15 +480,21 @@ def main(options):
                                               max_rounds=_rounds, tol=1e-4)
                     _secs = _time.time() - _t0
                     _w_done = float(sum(probe.values()))
-                    residual = (((_w_done - _w_sweep) / _w_done)
-                                if _w_done > 0 else 0.0)
+                    # NOT a residual. This is the mass this pass RECOVERED as a
+                    # fraction of the new total, so it RISES with width (0.165
+                    # -> 0.234 -> 0.252 in probe 4465) and cannot bound what is
+                    # still missing. Read it as a LOWER bound on how incomplete
+                    # the swept memo was: 1 - recovered is the share of the
+                    # found mass the sweep already held.
+                    recovered = (((_w_done - _w_sweep) / _w_done)
+                                 if _w_done > 0 else 0.0)
                     fh.write("target=%s width=%d seeds=%d configs raw=%d "
                              "sweep=%d completed=%d sweep_gain=%.6f "
-                             "residual_delta=%.6f rounds=%d last_gain=%.3e "
+                             "mass_recovered=%.6f rounds=%d last_gain=%.3e "
                              "secs=%.1f\n"
                              % (os.path.basename(options['target']), _w,
                                 _seeds, _n_raw, len(m), len(probe),
-                                sweep_gain, residual, len(hist),
+                                sweep_gain, recovered, len(hist),
                                 hist[-1]['mass_gained'] if hist
                                 else float('nan'), _secs))
                     fh.flush()

@@ -678,6 +678,13 @@ def run_joint(options):
             # with. Without it generate_credible_sets falls back to a
             # uniform prior and the annotations never reach the PIPs.
             'p0_t': p_0,
+            # gen_cred recomputes the PIPs after its own sweep and writes
+            # pip.csv, which is the only PIP anything downstream reads, so it
+            # needs these to complete the sum at that point too.
+            'posterior_completion': options.get('posterior_completion', 0),
+            'completion_seeds': options.get('completion_seeds', 8),
+            'completion_width': options.get('completion_width', 32),
+            'completion_rounds': options.get('completion_rounds', 4),
             'n_causal': options['n_causal'], 'allow_duplicates': options['allow_duplicates'],
             'coverage_ths': options['coverage_ths'], 'selection_prob': options['selection_prob'],
             'purity': options.get('purity', 0.0),
