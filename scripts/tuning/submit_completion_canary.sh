@@ -1,9 +1,19 @@
 #!/bin/bash
-# Posterior-completion canary: the deployed configuration, completion ON.
+# Posterior-completion canary: a MATCHED PAIR at one configuration, completion
+# ON in one arm and OFF in the other.
 #
-# Pairs against fb_cand01_canary, which is the SAME configuration with
-# completion off (sparse AP 0.690 / FDR@0.95 0.336; sparse_inf 0.444 / 0.752),
-# so the difference is attributable to completing the sum and nothing else.
+# It used to submit the ON arm alone and tell the reader to compare it with
+# fb_cand01_canary. That comparison was invalid. fb_cand01_canary ran with the
+# prior anchor DISABLED: optuna_fb.py:253 sets prior_mass to the literal 0.0
+# whenever PM_MAX <= 0, which is why read_candidate shows it as neither a
+# searched param nor a pinned one. This script pins prior_mass=3. Since
+# sum(p0) "governs directly the posterior expected configuration size - hence
+# sum_j PIP_j" (anchor_prior_mass's own docstring), the two runs differ in the
+# prior scale as well as in completion, and every PIP, AP, FDR and mass moves
+# with it. Two variables, one comparison.
+#
+# So both arms are now submitted here, from one BASE, differing ONLY in
+# posterior_completion. Set PAIR=0 to submit the ON arm by itself.
 #
 # Safe to run from a fresh login session: loads R, reinstalls fmbenchmark (the
 # objective prefers the INSTALLED package over the checkout, so a bare git pull
@@ -19,13 +29,19 @@ cd "$(dirname "$0")/../.." || exit 1
 
 R_MODULE="${R_MODULE:-R/4.5.2-gfbf-2025b}"
 STUDY="${STUDY:-fb_complete01}"
+OFF_STUDY="${OFF_STUDY:-fb_nocomplete01}"
 TOL="${TOL:-0.001}"
+PAIR="${PAIR:-1}"
+# Held fixed across BOTH arms, so it cannot be confounded with completion. 3 is
+# the provisionally deployed anchor value; 0 disables the anchor entirely.
+PRIOR_MASS="${PRIOR_MASS:-3}"
 
-# The shipped configuration, unchanged, plus completion. Keep this identical to
-# submit_fb_retune.sh's default FIX or the comparison stops being a comparison.
+# submit_fb_retune.sh's default FIX (:98), verbatim, plus the anchor. Anything
+# added here must be added to BOTH arms - which is now automatic, since both
+# arms are built from this one string.
 BASE="sigma_sq=0.0899 n_caus=10 sparse_concrete=51 prior_regularisation=0.1255"
 BASE="${BASE} lambda_l1=0.1223 hierarchy_M=10.15 gamma=0.1 gamma_key=0.2"
-BASE="${BASE} prior_mass=3"
+BASE="${BASE} prior_mass=${PRIOR_MASS}"
 
 echo "== 1/4  git pull =============================================="
 git pull --ff-only || { echo "pull failed"; exit 1; }
@@ -51,19 +67,38 @@ echo "  installed wrapper carries --posterior_completion: TRUE"
 
 echo
 echo "== 4/4  submit ================================================"
+echo "Both arms are pinned at prior_mass=${PRIOR_MASS} and differ ONLY in"
+echo "posterior_completion, so the difference between them is attributable to"
+echo "completing the sum and to nothing else."
+echo
+
+echo "--- arm 1/2: completion ON (posterior_completion=${TOL}) ---"
 CANARY=1 STRATA="sparse sparse_inf" STUDY="${STUDY}" PM_MAX=10 \
   FIX="${BASE} posterior_completion=${TOL}" \
   bash scripts/tuning/submit_fb_retune.sh
 rc=$?
 
+if [[ "$PAIR" == "1" ]]; then
+  echo
+  echo "--- arm 2/2: completion OFF (posterior_completion=0) ---"
+  # Explicitly 0 rather than omitted: 0 is the documented "keep the partial
+  # sum" value, and passing it keeps the two argv vectors identical in length
+  # and order, so nothing but the tolerance differs between the arms.
+  CANARY=1 STRATA="sparse sparse_inf" STUDY="${OFF_STUDY}" PM_MAX=10 \
+    FIX="${BASE} posterior_completion=0" \
+    bash scripts/tuning/submit_fb_retune.sh
+  rc2=$?
+  [[ $rc -eq 0 ]] && rc=$rc2
+fi
+
 echo
-echo "Expect 'Pinned configuration:' to end with posterior_completion=${TOL}."
-echo "It prints AFTER qsub, so if qsub fails you will not see it - that is the"
-echo "submission failing, not the pin."
+echo "Expect each arm's 'Pinned configuration:' to end with its own"
+echo "posterior_completion (${TOL} and 0). It prints AFTER qsub, so if qsub"
+echo "fails you will not see it - that is the submission failing, not the pin."
 echo
-echo "When it finishes (~3h), read it against the completion-off baseline:"
+echo "The two arms run concurrently, so both land in ~3h. Read them together:"
 echo "  bash scripts/tuning/report_candidates.sh"
-echo "  PY_BIN=\${PY_BIN:-\$HOME/tools/fmpy-venv/bin/python} \\"
-echo "    \$PY_BIN scripts/tuning/read_candidate.py \\"
-echo "      tuning/fb_cand01_canary.journal tuning/${STUDY}_canary.journal"
+echo
+echo "A trial that reports values [0.0, 1.0, 1.0] produced NO PIPs at all and"
+echo "is a failure, not a poor score - check the [WARN] lines for n_failed."
 exit $rc
