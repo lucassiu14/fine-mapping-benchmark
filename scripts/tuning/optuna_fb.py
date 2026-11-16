@@ -260,6 +260,16 @@ def suggest_params(trial, args):
     }
     if args.tune_gamma_coverage:
         p["gamma_coverage"] = sfloat("gamma_coverage", 0.8, 0.99, log=False)
+    # Forward any pinned key the search space does not define. run_one_scenario
+    # turns every entry of `p` into a --flag, and fb_objective.R reads its
+    # arguments by name, so this makes --fix a general override for options that
+    # are NOT being searched (posterior_completion, completion_*, ...). Without
+    # it such a key lands in `fixed`, never enters `p`, and is dropped in
+    # silence - the same failure mode that wasted canary 4647827 on a
+    # prior_mass that was sampled rather than pinned.
+    for k, v in fixed.items():
+        if k not in p:
+            p[k] = v
     return p
 
 
