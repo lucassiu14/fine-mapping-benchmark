@@ -433,23 +433,43 @@ def main(options):
         try:
             # Lazy: joint_trainer imports THIS module (:54), so a top-level
             # import here would be circular.
+            import time as _time
             from scripts.joint_trainer import complete_posterior
             _w_sweep = float(sum(m.values()))
-            probe = dict(m)
-            hist = complete_posterior(probe, mean_memo, S, Z, LD, n_sub,
-                                      sigma_sq, p0, bp, n_seed=8, width=32,
-                                      max_rounds=4, tol=1e-4)
-            _w_done = float(sum(probe.values()))
             sweep_gain = ((_w_sweep - _w_raw) / _w_sweep) if _w_sweep > 0 else 0.0
-            residual = ((_w_done - _w_sweep) / _w_done) if _w_done > 0 else 0.0
+            # `width` restricts add/swap to the top-`width` variants by PIP, so
+            # it sets the SIZE OF THE NEIGHBOURHOOD, and the 4421 probe showed
+            # that is the binding constraint, not max_rounds: completion
+            # reported last_gain=0 (neighbourhood exhausted) while ~0.5 of the
+            # mass was still missing. Sweeping width measures how far delta can
+            # actually be driven, and what it costs, in ONE run.
+            _seeds = int(os.environ.get('FB_DIAG_SEEDS', 8))
+            _rounds = int(os.environ.get('FB_DIAG_ROUNDS', 4))
+            _widths = [int(w) for w in
+                       os.environ.get('FB_DIAG_WIDTHS', '32,128').split(',')
+                       if w.strip()]
             with open(_diag, 'a') as fh:
-                fh.write("target=%s configs raw=%d sweep=%d completed=%d "
-                         "sweep_gain=%.6f residual_delta=%.6f rounds=%d "
-                         "last_gain=%.3e\n"
-                         % (os.path.basename(options['target']), _n_raw,
-                            len(m), len(probe), sweep_gain, residual,
-                            len(hist),
-                            hist[-1]['mass_gained'] if hist else float('nan')))
+                for _w in _widths:
+                    probe = dict(m)
+                    _t0 = _time.time()
+                    hist = complete_posterior(probe, mean_memo, S, Z, LD,
+                                              n_sub, sigma_sq, p0, bp,
+                                              n_seed=_seeds, width=_w,
+                                              max_rounds=_rounds, tol=1e-4)
+                    _secs = _time.time() - _t0
+                    _w_done = float(sum(probe.values()))
+                    residual = (((_w_done - _w_sweep) / _w_done)
+                                if _w_done > 0 else 0.0)
+                    fh.write("target=%s width=%d seeds=%d configs raw=%d "
+                             "sweep=%d completed=%d sweep_gain=%.6f "
+                             "residual_delta=%.6f rounds=%d last_gain=%.3e "
+                             "secs=%.1f\n"
+                             % (os.path.basename(options['target']), _w,
+                                _seeds, _n_raw, len(m), len(probe),
+                                sweep_gain, residual, len(hist),
+                                hist[-1]['mass_gained'] if hist
+                                else float('nan'), _secs))
+                    fh.flush()
         except Exception as ex:
             with open(_diag, 'a') as fh:
                 fh.write("target=%s DIAGNOSTIC FAILED: %s: %s\n"
