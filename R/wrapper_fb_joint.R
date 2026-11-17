@@ -210,7 +210,7 @@
       return(list(.fb_joint_annotated = FALSE, .fb_joint_head = prior_head))
     }
     .fb_check_z_premise(z, regions[[i]]$beta_hat, regions[[i]]$se,
-                        genotypes[[i]]$n, gv0("rss_z_rescale", "lead"))
+                        genotypes[[i]]$n, gv0("rss_z_rescale", "null"))
     specs[[i]] <- list(z = z, LD = genotypes[[i]]$LD, A = A,
                        variant_ids = genotypes[[i]]$variant_ids, n = genotypes[[i]]$n)
     keys[i] <- .fb_fingerprint(z)
@@ -294,7 +294,7 @@
     # 'lead' rescales to the full-model residual variance (leaves max|z|
     # unchanged); 'null' is EXACTLY susieR's susie_rss adjustment; 'off' is the
     # pre-fix behaviour. Inert when z^2/n is small, so low-phi is untouched.
-    "--rss_z_rescale",        as.character(gv("rss_z_rescale", "lead")),
+    "--rss_z_rescale",        as.character(gv("rss_z_rescale", "null")),
     # calculate_pip normalises over the configurations the Concrete sampler
     # VISITED, not over all of them, so PIPs are inflated by the omitted
     # posterior mass. This completes the sum by add/delete/swap neighbourhood

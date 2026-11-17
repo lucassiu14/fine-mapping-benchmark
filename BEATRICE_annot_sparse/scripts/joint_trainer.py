@@ -456,7 +456,7 @@ def _region_elbo(model, p_0, S, Z, LD, temp, n_samples, sigma_sq,
 # The joint driver.
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-def rss_rescale_z(Z, n, mode='lead'):
+def rss_rescale_z(Z, n, mode='null'):
     """Put marginal z-scores on a COMMON residual scale -- the RSS model's S.
 
     The ABF likelihood is the Zhu & Stephens (2017) RSS model, in which
@@ -509,9 +509,24 @@ def rss_rescale_z(Z, n, mode='lead'):
 
       'lead'  ref = n - 2 + max(z^2). References the FULL-model residual
               variance, estimated by the smallest marginal se -- which is the
-              lead variant's, since se_j is monotone decreasing in |z_j|. This
-              is the statistically correct target and lands sd(t) -> 0.93.
-              It also leaves max|z| UNCHANGED, so no signal is discarded.
+              lead variant's, since se_j is monotone decreasing in |z_j|. It is
+              the better-CALIBRATED target in-sample (sd(t) -> 0.93 against
+              null's 0.59; Q/df closer to 1 in 47 of 50 region-scenarios
+              against null's 3) and leaves max|z| UNCHANGED.
+
+              It is NOT the default, because calibration is not the objective.
+              Over the full 25-cell in-sample grid 'lead' and 'null' are
+              indistinguishable on the metrics that matter -- mean AP 0.8243 vs
+              0.8223, mean FDR@0.95 0.0164 vs 0.0193, mean |sum(PIP)-1| 0.223
+              vs 0.220, AP better in 8 cells against 7 with 10 tied -- because
+              conservatism costs calibration without costing a rank metric or a
+              thresholded FDR. Under a MISSPECIFIED R it is much worse: the
+              LD-induced residual scales with |z|, and 'lead' INFLATES weak z
+              while 'null' SHRINKS strong z. At n_ref = 500, S = 1, phi = 0.4
+              over 5 seeds, FDR@0.95 was 0.855 under 'lead' (sum(PIP) ~ 12.1)
+              against 0.000 under 'null' (~2.9), with 'off' at 0.698; across
+              that whole arm, mean FDR 0.289 'lead', 0.273 'off', 0.157 'null'.
+              Selecting ONE mode on its worst stratum therefore picks 'null'.
 
       'off' / '' / None  no rescaling (the pre-fix behaviour, for A/B).
 
@@ -656,7 +671,7 @@ def run_joint(options):
         # Put z on a common residual scale BEFORE anything derives from it:
         # `network` below, S = LD^-1 Z, the training memo, gen_cred's sweep and
         # posterior completion must all see the same z. See rss_rescale_z.
-        Z = rss_rescale_z(Z, rc['N'], options.get('rss_z_rescale', 'lead'))
+        Z = rss_rescale_z(Z, rc['N'], options.get('rss_z_rescale', 'null'))
         if m_annots is None:
             m_annots = v.shape[1]
         elif v.shape[1] != m_annots:

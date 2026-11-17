@@ -51,7 +51,7 @@ flags.DEFINE_float('temp_lower_bound', 0.01, 'Extent of continuous relaxation.',
 flags.DEFINE_integer('sparse_concrete', 51, 'Non-zero locations of the concrete vector per iteration.', lower_bound=1)
 flags.DEFINE_integer('n_caus', 10, 'Prior number of causal variants.', lower_bound=1)
 flags.DEFINE_boolean('allow_dup', False, 'Allow duplicate variants across credible sets.')
-flags.DEFINE_string('rss_z_rescale', 'lead',
+flags.DEFINE_string('rss_z_rescale', 'null',
                     "Put z on a COMMON residual scale before the ABF sees it: "
                     "'lead' (reference = full-model residual, n-2+max(z^2); "
                     "statistically correct, leaves max|z| unchanged), "

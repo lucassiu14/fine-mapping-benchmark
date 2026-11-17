@@ -161,7 +161,7 @@ fb_args <- list(
   # signal-dependent and the conditional residuals are over-dispersed (sd 4.61
   # vs 1.0 at S=1, phi=0.6). 'lead' = full-model reference, 'null' = susieR's
   # own susie_rss adjustment, 'off' = pre-fix. See joint_trainer.rss_rescale_z.
-  rss_z_rescale        = gets("rss_z_rescale", "lead")
+  rss_z_rescale        = gets("rss_z_rescale", "null")
 )
 
 t0 <- Sys.time()
