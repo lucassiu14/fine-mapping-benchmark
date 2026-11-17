@@ -59,11 +59,11 @@ BASE="sigma_sq=0.0899 n_caus=10 sparse_concrete=51 prior_regularisation=0.1255"
 BASE="${BASE} lambda_l1=0.1223 hierarchy_M=10.15 gamma=0.1 gamma_key=0.2"
 BASE="${BASE} prior_mass=${PRIOR_MASS}"
 
-echo "== 1/4  git pull =============================================="
+echo "== 1/5  git pull =============================================="
 git pull --ff-only || { echo "pull failed"; exit 1; }
 
 echo
-echo "== 2/4  module load + reinstall fmbenchmark ==================="
+echo "== 2/5  module load + reinstall fmbenchmark ==================="
 module load "${R_MODULE}" 2>/dev/null || true
 command -v Rscript >/dev/null 2>&1 || {
   echo "ERROR: Rscript not on PATH. Try: module load ${R_MODULE}"; exit 1; }
@@ -71,7 +71,7 @@ Rscript -e 'install.packages(".", repos = NULL, type = "source")' \
   2>&1 | tail -3 || { echo "install failed"; exit 1; }
 
 echo
-echo "== 3/4  verify the flag reached the installed wrapper ========="
+echo "== 3/5  verify the flag reached the installed wrapper ========="
 OK="$(Rscript -e 'cat(any(grepl("posterior_completion", deparse(fmbenchmark:::.fb_joint_scenario_setup))))' 2>/dev/null | tail -1)"
 if [[ "$OK" != "TRUE" ]]; then
   echo "ERROR: the installed fmbenchmark does NOT carry --posterior_completion."
@@ -82,7 +82,56 @@ fi
 echo "  installed wrapper carries --posterior_completion: TRUE"
 
 echo
-echo "== 4/4  submit ================================================"
+echo "== 4/5  preflight receipt ====================================="
+# A canary costs hours. It is not submitted unless ONE scenario has already
+# run clean at the PRODUCTION region count, at this width, on this exact
+# commit - and unless the walltime provably fits the cost that run measured.
+# 956 (2h, a z-shape bug a 2-D test input could not catch) and 4580 (7.6h,
+# killed at scenario 26/27 by a cost estimate that was 10x low) are both
+# failures this check would have stopped.
+COMMIT="$(git rev-parse HEAD 2>/dev/null)"
+RECEIPT="${TUNE_DIR:-$PWD/tuning}/preflight/${COMMIT}.receipt"
+if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
+  echo "  SKIP_PREFLIGHT=1 - submitting unverified, on your head."
+elif [[ ! -f "$RECEIPT" ]]; then
+  echo "  REFUSING: no preflight receipt for commit ${COMMIT:0:12}."
+  echo
+  echo "  Run this first (~15-45 min, one scenario at 10 regions, both arms):"
+  echo "    CWIDTH=${CWIDTH} bash scripts/tuning/preflight_canary.sh"
+  echo
+  echo "  It writes the receipt only if both arms return n_failed=0 with a"
+  echo "  real AP, and the receipt is what sizes the walltime below."
+  echo "  SKIP_PREFLIGHT=1 overrides, which is how hours get wasted."
+  exit 1
+else
+  R_WIDTH="$(sed -n 's/^width=//p' "$RECEIPT" | tail -1)"
+  R_SECS="$(sed -n 's/^max_scenario_secs=//p' "$RECEIPT" | tail -1)"
+  R_REG="$(sed -n 's/^regions=//p' "$RECEIPT" | tail -1)"
+  echo "  receipt: commit ${COMMIT:0:12}  width=${R_WIDTH}  regions=${R_REG}"
+  echo "           slowest scenario measured: ${R_SECS}s"
+  if [[ "$R_WIDTH" != "$CWIDTH" ]]; then
+    echo "  REFUSING: receipt is for width ${R_WIDTH}, this submits ${CWIDTH}."
+    echo "            Cost scales with the window, so the receipt does not"
+    echo "            vouch for this configuration. Re-run preflight with"
+    echo "            CWIDTH=${CWIDTH}."
+    exit 1
+  fi
+  # 27 scenarios, x1.4 margin. The receipt times a deliberately SLOW scenario,
+  # so this is an over-estimate for the average one - which is the right
+  # direction to err.
+  NEED_H="$(python3 -c "
+import math
+print(max(4, math.ceil(27 * float('${R_SECS}') * 1.4 / 3600)))" 2>/dev/null)"
+  HAVE_H="${CANARY_WALLTIME%%:*}"
+  echo "           walltime needed ~${NEED_H}h, requested ${HAVE_H}h"
+  if (( NEED_H > HAVE_H )); then
+    export CANARY_WALLTIME="$(printf '%02d:00:00' "$NEED_H")"
+    echo "  raised CANARY_WALLTIME to ${CANARY_WALLTIME} to fit the measured cost."
+  fi
+fi
+
+echo
+echo "== 5/5  submit ================================================"
 echo "Both arms are pinned at prior_mass=${PRIOR_MASS} and differ ONLY in"
 echo "posterior_completion (the ON arm also sets completion_width=${CWIDTH},"
 echo "which the OFF arm never reads because completion is disabled there),"
