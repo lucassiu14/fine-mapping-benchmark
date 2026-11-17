@@ -35,13 +35,22 @@ PAIR="${PAIR:-1}"
 # Held fixed across BOTH arms, so it cannot be confounded with completion. 3 is
 # the provisionally deployed anchor value; 0 disables the anchor entirely.
 PRIOR_MASS="${PRIOR_MASS:-3}"
-# Completion's search window. Probe 4465 measured the trade directly: every
-# pass stops by EXHAUSTING its neighbourhood (last_gain=0.0 at every width),
-# so width is the lever and the round cap is not - complete_posterior already
-# refreshes its seeds each round. Going 32 -> 512 raised the mass recovered
-# from 0.165 to 0.252 in one region and 0.351 to 0.422 in another, at ~6s per
-# region, about 27 min on a 175 min trial. Only the ON arm reads it.
-CWIDTH="${CWIDTH:-512}"
+# Completion's search window. Probe 4465: every pass stops by EXHAUSTING its
+# neighbourhood (last_gain=0.0 at every width), so width is the lever and the
+# round cap is not - complete_posterior already refreshes seeds each round.
+#
+# 128, not 512. The widths traded as mass_recovered 0.234 at 1.4s versus 0.252
+# at 5.9s, i.e. 128 buys ~93% of the recovery for ~a quarter of the cost. The
+# earlier default of 512 was set from that 5.9s figure, which was measured on
+# 2-region probes whose memos held ~8,000 configs. In the real 10-region run
+# the memo reaches 72,000+ and completion's cost scales with memo size, so
+# canary 4580 ran 877-2517s per scenario against the OFF arm's ~390s - 2.7x
+# overall, +280 min on the trial - and died on the 8h walltime at scenario
+# 26/27. Hence also CANARY_WALLTIME below.
+CWIDTH="${CWIDTH:-128}"
+# submit_fb_retune.sh defaults this to 08:00:00, which 4580 exceeded. The OFF
+# arm needs ~3h and is unaffected by the larger ceiling.
+export CANARY_WALLTIME="${CANARY_WALLTIME:-16:00:00}" 
 
 # submit_fb_retune.sh's default FIX (:98), verbatim, plus the anchor. Anything
 # added here must be added to BOTH arms - which is now automatic, since both
