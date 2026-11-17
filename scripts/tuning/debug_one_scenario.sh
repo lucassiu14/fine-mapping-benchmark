@@ -92,6 +92,12 @@ for TOLV in ${TOL} 0; do
   echo "================================================================"
   export FB_COMPLETION_LOG="${LOG_DIR}/completion_diag.\${PBS_JOBID}.tol\${TOLV}.txt"
   : > "\$FB_COMPLETION_LOG"
+  # The weighted configuration-SIZE distribution the PIPs are formed from.
+  # O(|memo|) and no model evaluations, so it is free next to the completion
+  # sweep above. See scripts/tuning/size_probe.sh for why size is the quantity
+  # that bounds the FDR@0.95 floor.
+  export FB_SIZE_LOG="${LOG_DIR}/size_diag.\${PBS_JOBID}.tol\${TOLV}.txt"
+  : > "\$FB_SIZE_LOG"
   Rscript scripts/tuning/fb_objective.R \\
       --sim "${SIM}" --stratum "${STRATUM}" --method "${METHOD}" \\
       --scenario ${SCENARIO} --regions ${REGIONS} \\
@@ -103,6 +109,8 @@ for TOLV in ${TOL} 0; do
   echo "--- Rscript exit status: \$? ---"
   echo "--- completion diagnostic (one line per region) ---"
   cat "\$FB_COMPLETION_LOG" 2>/dev/null || echo "(no diagnostic written)"
+  echo "--- configuration-size distribution (E_size MUST equal sum_pip) ---"
+  cat "\$FB_SIZE_LOG" 2>/dev/null || echo "(no size diagnostic written)"
   echo
 done
 echo "[debug1] done \$(date)"

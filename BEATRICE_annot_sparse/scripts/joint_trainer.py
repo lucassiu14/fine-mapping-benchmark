@@ -176,12 +176,26 @@ def _abf(S, z, ld, memo, n_sub, sigma_sq, cc, p0, K_C, eps):
 # not: the posterior normalises over all 2^m configurations, this sum over the
 # visited ones.
 #
-# Omitting a configuration drops it from the numerator AND the denominator, and
-# the configurations that do NOT contain j are exactly the ones that would
-# dilute PIP_j. An under-dispersed proposal misses those first, so the bias is
-# UPWARD - over-confidence. It is invariant to `sparse_concrete`, `gamma` and
-# `temp`, which change which configurations are visited but never that the sum
-# is partial; that is why FDR@0.95 had a floor no trial in 411 reached below.
+# Omitting a configuration drops it from the numerator AND the denominator.
+#
+# CORRECTED 2026-11-17. This comment used to argue that the omitted
+# configurations are the ones that would DILUTE PIP_j, so the bias is upward /
+# over-confident, and that the FDR@0.95 floor followed from it. The paired
+# canary (jobs 4580/4581, 26 scenarios) refuted that: completing the sum raised
+# realised mass in 26 of 26 scenarios. The mass M was missing therefore sits on
+# LARGER configurations, so truncation biased the PIPs DOWNWARD, and completion
+# cannot be the explanation for either the ece_hi=0.232 over-confidence or the
+# FDR floor. Completion is still worth having on its own terms - mean dAP
+# +0.0442 over those 26 scenarios, 19 wins / 6 losses - but as an accuracy fix,
+# not an FDR fix.
+#
+# What the floor does follow from: sum_j PIP_j = E[|gamma| | gamma in M], and
+# the trainer's draws have |gamma| = #{j in top-`sparse_concrete` : c_j >
+# `gamma`} (:141-144, :395). The number of variants able to hold a high PIP is
+# therefore set by `gamma`, which has been pinned at the Python default 0.1
+# since it was first exposed (2026-11-10) and never searched. See the
+# FB_SIZE_LOG diagnostic in generate_credible_sets.py, which measures the
+# weighted size distribution the reported PIPs are formed from.
 #
 # Completing the sum changes NO model, NO prior and NO likelihood. It evaluates
 # terms that were always in the definition of the posterior, using the same

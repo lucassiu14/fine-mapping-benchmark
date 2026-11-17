@@ -505,6 +505,48 @@ def main(options):
                             type(ex).__name__, str(ex)[:200]))
 
     pip = calculate_pip(m, bp)
+
+    # --- DIAGNOSTIC: the weighted configuration-SIZE distribution -----------
+    # sum_j PIP_j = sum_g w(g)|g| / sum_g w(g) = E[|gamma| | gamma in M]. So the
+    # number of variants that CAN carry a high PIP is set by how large the
+    # configurations in M are, and nothing else. M is dominated by the trainer's
+    # Concrete draws, whose size is
+    #     |gamma| = #{j in top-`sparse_concrete` : c_j > eps},  eps = `gamma`
+    # (joint_trainer.py:141-144, :395). That makes `gamma` - not `sigma_sq` and
+    # not sum(p0) - the knob that sets realised mass, and therefore the FDR@0.95
+    # floor. Both of the alternatives were measured on a real 1000G locus
+    # (600 variants, 170 kb, 463 pairs at |r|>0.99) against this same abf/add/
+    # calculate_pip path: prior_mass 0.5->5 moved sum(PIP) from 1.01 to 1.08 at
+    # |z|=3 and from 1.05 to 1.38 at |z|=8 with ZERO false positives at 0.95,
+    # and sigma_sq over kappa=10..450 never made |gamma|>1 win when z is drawn
+    # consistently with the LD. Neither can produce the 11.8 observed at S=1.
+    #
+    # E|g| below is computed independently of `pip` and must EQUAL sum(pip); a
+    # mismatch means the two disagree about the same memo, so it is a check as
+    # well as a measurement. O(|M|), no model evaluations.
+    _slog = os.environ.get('FB_SIZE_LOG', '')
+    if _slog:
+        try:
+            _tot, _by = 0.0, {}
+            for _k, _v in m.items():
+                _w = float(np.asarray(_v).squeeze())
+                _tot += _w
+                _by[len(_k)] = _by.get(len(_k), 0.0) + _w
+            _ek = (sum(k * w for k, w in _by.items()) / _tot) if _tot > 0 else float('nan')
+            _top = sorted(_by.items(), key=lambda kv: -kv[1])[:6]
+            with open(_slog, 'a') as fh:
+                fh.write("target=%s configs=%d sum_pip=%.4f E_size=%.4f "
+                         "mass_on_size1=%.4f top_sizes=%s\n"
+                         % (os.path.basename(options['target']), len(m),
+                            float(np.sum(pip)), _ek,
+                            (_by.get(1, 0.0) / _tot) if _tot > 0 else float('nan'),
+                            ";".join("%d:%.3f" % (k, w / _tot) for k, w in _top)))
+        except Exception as ex:
+            with open(_slog, 'a') as fh:
+                fh.write("target=%s SIZE DIAGNOSTIC FAILED: %s: %s\n"
+                         % (os.path.basename(options['target']),
+                            type(ex).__name__, str(ex)[:200]))
+
     df = pd.DataFrame({'variant_index': list(range(bp)), 'pip': pip,
                        'variant_names': options['names']})
     df.to_csv(os.path.join(options['target'], 'pip.csv'), index=False)
