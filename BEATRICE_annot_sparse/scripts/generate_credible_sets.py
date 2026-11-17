@@ -534,13 +534,26 @@ def main(options):
                 _by[len(_k)] = _by.get(len(_k), 0.0) + _w
             _ek = (sum(k * w for k, w in _by.items()) / _tot) if _tot > 0 else float('nan')
             _top = sorted(_by.items(), key=lambda kv: -kv[1])[:6]
+            # The PRIOR's admission cost. Adding variant j to a configuration
+            # changes the prior term by log(p0_j/(1-p0_j)); the likelihood pays
+            # about 0.5*z_c^2 and the logdet about 0.5*log(1+n*sigma^2). So
+            # `cost_med` is what a variant must beat to be worth including, and
+            # when it approaches 0 extra variants are FREE and configurations
+            # grow until they hit a cap (n_caus / sparse_concrete).
+            _p0n = cpu(p0).data.numpy().reshape(-1)
+            _pmed, _pmax = float(np.median(_p0n)), float(_p0n.max())
+            _cost = lambda q: float(np.log(q / (1 - q))) if 0 < q < 1 else float('nan')
             with open(_slog, 'a') as fh:
                 fh.write("target=%s configs=%d sum_pip=%.4f E_size=%.4f "
-                         "mass_on_size1=%.4f top_sizes=%s\n"
+                         "mass_on_size1=%.4f top_sizes=%s "
+                         "p0_sum=%.4f p0_med=%.3e p0_max=%.3e "
+                         "cost_med=%.2f cost_max=%.2f\n"
                          % (os.path.basename(options['target']), len(m),
                             float(np.sum(pip)), _ek,
                             (_by.get(1, 0.0) / _tot) if _tot > 0 else float('nan'),
-                            ";".join("%d:%.3f" % (k, w / _tot) for k, w in _top)))
+                            ";".join("%d:%.3f" % (k, w / _tot) for k, w in _top),
+                            float(_p0n.sum()), _pmed, _pmax,
+                            _cost(_pmed), _cost(_pmax)))
         except Exception as ex:
             with open(_slog, 'a') as fh:
                 fh.write("target=%s SIZE DIAGNOSTIC FAILED: %s: %s\n"

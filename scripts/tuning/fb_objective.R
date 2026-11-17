@@ -155,7 +155,13 @@ fb_args <- list(
   posterior_completion = getn("posterior_completion", 0),
   completion_seeds     = geti("completion_seeds", 8L),
   completion_width     = geti("completion_width", 32L),
-  completion_rounds    = geti("completion_rounds", 4L)
+  completion_rounds    = geti("completion_rounds", 4L),
+  # Puts z on a COMMON residual scale before the ABF sees it. se is estimated
+  # and se_j = 1/sqrt(n-2+z_j^2) exactly, so the RSS model's S is
+  # signal-dependent and the conditional residuals are over-dispersed (sd 4.61
+  # vs 1.0 at S=1, phi=0.6). 'lead' = full-model reference, 'null' = susieR's
+  # own susie_rss adjustment, 'off' = pre-fix. See joint_trainer.rss_rescale_z.
+  rss_z_rescale        = gets("rss_z_rescale", "lead")
 )
 
 t0 <- Sys.time()

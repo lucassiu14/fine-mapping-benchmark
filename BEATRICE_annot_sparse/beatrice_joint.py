@@ -51,6 +51,15 @@ flags.DEFINE_float('temp_lower_bound', 0.01, 'Extent of continuous relaxation.',
 flags.DEFINE_integer('sparse_concrete', 51, 'Non-zero locations of the concrete vector per iteration.', lower_bound=1)
 flags.DEFINE_integer('n_caus', 10, 'Prior number of causal variants.', lower_bound=1)
 flags.DEFINE_boolean('allow_dup', False, 'Allow duplicate variants across credible sets.')
+flags.DEFINE_string('rss_z_rescale', 'lead',
+                    "Put z on a COMMON residual scale before the ABF sees it: "
+                    "'lead' (reference = full-model residual, n-2+max(z^2); "
+                    "statistically correct, leaves max|z| unchanged), "
+                    "'null' (reference = n-1; EXACTLY susieR's susie_rss "
+                    "adjustment, conservative), or 'off' (pre-fix behaviour). "
+                    "se_j = 1/sqrt(n-2+z_j^2) exactly, so an estimated se makes "
+                    "the RSS model's S signal-dependent and over-disperses the "
+                    "conditional residuals; see joint_trainer.rss_rescale_z.")
 flags.DEFINE_list('neural_network', '10,200,10', 'Finemapping net hidden dims.')
 flags.DEFINE_list('prior_neural_network', '10,200,10', 'LassoNet prior hidden dims.')
 flags.DEFINE_float('prior_regularisation', 0.1255, 'L2 regularisation on the prior (p_0).')
@@ -140,6 +149,7 @@ def main(argv):
         'selection_prob': FLAGS.gamma_selection,
         'key_thres': FLAGS.gamma_key,
         'allow_duplicates': FLAGS.allow_dup,
+        'rss_z_rescale': FLAGS.rss_z_rescale,
     }
     joint_trainer.run_joint(options)
 

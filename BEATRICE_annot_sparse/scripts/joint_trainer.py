@@ -455,6 +455,84 @@ def _region_elbo(model, p_0, S, Z, LD, temp, n_samples, sigma_sq,
 # ---------------------------------------------------------------------------
 # The joint driver.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+def rss_rescale_z(Z, n, mode='lead'):
+    """Put marginal z-scores on a COMMON residual scale -- the RSS model's S.
+
+    The ABF likelihood is the Zhu & Stephens (2017) RSS model, in which
+    z = S^-1 beta_hat is assumed to satisfy
+
+        z | b  ~  N(R b, R),    b = S^-1 beta,    S = diag(se),
+
+    with S treated as KNOWN. For a single causal at c that gives
+    E[z_j] = r_jc E[z_c], so the standardised conditional residual
+
+        t_j = (z_j - r_jc z_c) / sqrt(1 - r_jc^2)
+
+    is N(0, 1). But se is ESTIMATED, and for a marginal regression on
+    standardised variables se_j = 1/sqrt(n - 2 + z_j^2) EXACTLY (verified
+    against the simulator's own se to 9.5e-14). So se shrinks for variants in
+    LD with a strong causal, S becomes signal-dependent, the model's covariance
+    R is wrong, and t is badly over-dispersed.
+
+    MEASURED on tuning/local_sparse_grid9.rds scenario 7 (S=1, phi=0.6,
+    pve=0.60, z_causal=85.15, n=5000, p=500): se spans 1.565x with
+    corr(se, |r to causal|) = -0.93, and sd(t) = 4.61 against the assumed 1.0 --
+    253 of 499 variants past |t|>2 and 39 past |t|>8 where N(0,1) predicts ~0.
+    The ABF pays about 0.5 t_j^2 to add variant j against a prior + logdet cost
+    of only ~8.3 nats, so variants are admitted until a cap binds: the memo held
+    100% of its mass on configurations of size 8-10 and ZERO on size 1, giving
+    sum(PIP) = 9.27 and FDR@0.95 = 0.857 against ONE true causal. The greedy
+    argmax of the real log-BF was |gamma| = 10; every added variant RAISED the
+    quadratic form (3617 -> 4252, a gain of 634 against a cost of ~70).
+
+    The fix restores a common S, and needs only z and n:
+
+        z_j  <-  z_j * sqrt( ref / (z_j^2 + n - 2) )
+
+    `mode` picks the reference residual variance `ref`:
+
+      'null'  ref = n - 1. EXACTLY what susieR applies whenever susie_rss is
+              given n (susieR:::summary_stats_constructor:
+              `adj <- (n-1)/(z^2 + n-2); z <- sqrt(adj)*z`), so FB and the
+              SuSiE comparator share one convention. Conservative: it
+              references the residual variance under the NULL, which exceeds
+              the full model's when real signal is present, so it slightly
+              over-shrinks (sd(t) -> 0.59 on scenario 7).
+
+      'lead'  ref = n - 2 + max(z^2). References the FULL-model residual
+              variance, estimated by the smallest marginal se -- which is the
+              lead variant's, since se_j is monotone decreasing in |z_j|. This
+              is the statistically correct target and lands sd(t) -> 0.93.
+              It also leaves max|z| UNCHANGED, so no signal is discarded.
+
+      'off' / '' / None  no rescaling (the pre-fix behaviour, for A/B).
+
+    Both are inert where they should be: adj -> 1 as z^2/n -> 0, so low-signal
+    variants and low-phi scenarios are untouched, and the correction acts only
+    where z^2 is an appreciable fraction of n -- exactly the regime that breaks
+    the model's assumption.
+
+    Applied to Z before `network(...)`, before S = LD^-1 Z and before the
+    region dict is built, so the trainer, generate_credible_sets' sweep and
+    posterior completion all see ONE consistent z.
+    """
+    if mode in (None, '', 'off', 'none', 'OFF'):
+        return Z
+    n = float(n)
+    if n <= 2.0:
+        return Z
+    z2 = Z * Z
+    if mode == 'null':
+        ref = n - 1.0
+    elif mode == 'lead':
+        ref = n - 2.0 + float(torch.max(z2))
+    else:
+        raise ValueError("rss_rescale_z mode must be 'lead', 'null' or 'off', "
+                         f"got {mode!r}")
+    return Z * torch.sqrt(ref / (z2 + n - 2.0))
+
+
 def _load_region(z_path, ld_path, annot_path):
     names = list(pd_read_col0(z_path))
     Z = gpu_t(pd_read(z_path)[:, 1].astype(float))
@@ -509,8 +587,14 @@ def run_joint(options):
       n_causal, coverage_ths, selection_prob, key_thres, allow_duplicates,
       save_prior_weights (path or '')
     """
-    torch.manual_seed(1)
-    import random; random.seed(1)
+    # Seeded so a configuration is reproducible. FB_SEED overrides it, which is
+    # how run-to-run variance gets measured: the variational optimiser is
+    # sensitive to initial conditions, so a single run cannot tell a systematic
+    # effect from a trajectory flip. Default 1 = the historical value, so
+    # nothing changes unless FB_SEED is set.
+    _seed = int(os.environ.get('FB_SEED', '1'))
+    torch.manual_seed(_seed)
+    import random; random.seed(_seed)
 
     regions_cfg = options['regions']
     R = len(regions_cfg)
@@ -533,6 +617,10 @@ def run_joint(options):
     m_annots = None
     for rc in regions_cfg:
         names, Z, LD, v = _load_region(rc['z'], rc['LD'], rc['annot'])
+        # Put z on a common residual scale BEFORE anything derives from it:
+        # `network` below, S = LD^-1 Z, the training memo, gen_cred's sweep and
+        # posterior completion must all see the same z. See rss_rescale_z.
+        Z = rss_rescale_z(Z, rc['N'], options.get('rss_z_rescale', 'lead'))
         if m_annots is None:
             m_annots = v.shape[1]
         elif v.shape[1] != m_annots:

@@ -205,6 +205,19 @@
     # unidentified. 0 keeps that unanchored behaviour (what every run
     # before this flag used); 1.0 is the published scale.
     "--prior_mass",           as.character(gv("prior_mass", 0)),
+    # The RSS model (Zhu & Stephens 2017) treats S = diag(se) as KNOWN, but se
+    # is estimated and se_j = 1/sqrt(n - 2 + z_j^2) exactly, so se SHRINKS for
+    # variants in LD with a strong causal. S is then signal-dependent, the
+    # model's covariance R is wrong, and the standardised conditional residuals
+    # are over-dispersed: measured sd 4.61 against the assumed 1.0 on the local
+    # sparse grid at S=1, phi=0.6 (pve 0.60, z_causal 85.15). The ABF pays
+    # ~0.5 t^2 per added variant against a prior+logdet cost of ~8.3 nats, so
+    # it filled configurations to the cap -- 100% of the memo's mass on sizes
+    # 8-10, ZERO on size 1, sum(PIP) 9.27, FDR@0.95 0.857 against ONE causal.
+    # 'lead' rescales to the full-model residual variance (leaves max|z|
+    # unchanged); 'null' is EXACTLY susieR's susie_rss adjustment; 'off' is the
+    # pre-fix behaviour. Inert when z^2/n is small, so low-phi is untouched.
+    "--rss_z_rescale",        as.character(gv("rss_z_rescale", "lead")),
     # calculate_pip normalises over the configurations the Concrete sampler
     # VISITED, not over all of them, so PIPs are inflated by the omitted
     # posterior mass. This completes the sum by add/delete/swap neighbourhood
