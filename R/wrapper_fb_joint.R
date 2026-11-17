@@ -236,8 +236,22 @@
     w <- .fb_joint_write_region(work_dir, i, specs[[i]]$z, specs[[i]]$LD,
                                 specs[[i]]$A, specs[[i]]$variant_ids)
     written[[i]] <- w
+    # N is not decoration: rss_rescale_z scales z by sqrt(1/(1-v)) with
+    # v = max(z^2)/(n-2+max(z^2)), so a wrong n gives a wrong correction. At the
+    # cholesterol chr19 lead (max|Z| = 82.85) the factor is 1.0100 at the true
+    # n = 3.4e5 but 1.0740 at beatrice_joint.py's --N default of 50000.
+    # And an absent n is WORSE than an error: sprintf() returns character(0) for
+    # a zero-length argument, so the region would be silently dropped from the
+    # manifest and never fitted at all. Assert it.
+    n_i <- specs[[i]]$n
+    if (length(n_i) != 1L || !is.finite(n_i) || n_i <= 2) {
+      stop(sprintf(paste0("fb_xregion: region %d has no usable sample size ",
+                          "(n = %s). It is required: z rescaling and the ABF's ",
+                          "kappa = n*sigma_sq both depend on it."),
+                   i, paste(format(n_i), collapse = ",")), call. = FALSE)
+    }
     man <- c(man, sprintf("%s\t%s\t%s\t%s\t%d",
-                          w$z, w$LD, w$annot, w$target, as.integer(specs[[i]]$n)))
+                          w$z, w$LD, w$annot, w$target, as.integer(n_i)))
   }
   manifest_path <- file.path(work_dir, "manifest.tsv")
   writeLines(man, manifest_path)
