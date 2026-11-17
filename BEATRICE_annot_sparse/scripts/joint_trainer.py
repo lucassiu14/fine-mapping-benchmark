@@ -516,6 +516,27 @@ def rss_rescale_z(Z, n, mode='lead'):
     Applied to Z before `network(...)`, before S = LD^-1 Z and before the
     region dict is built, so the trainer, generate_credible_sets' sweep and
     posterior completion all see ONE consistent z.
+
+    PRECONDITION -- NOT optional, and NOT idempotent. This expects z that
+    arrived as beta_hat_j / se_j with se_j the MARGINAL per-variant standard
+    error, which is what every GWAS and this benchmark's simulator produce
+    (R/simulate_phenotypes.R compute_summary_statistics; the identity
+    se_j * sqrt(n - 2 + z_j^2) = const was verified against it to 1.9e-13 on
+    all 18 region-scenarios of the tuning grid). Applied to z that is ALREADY
+    on a common scale it inflates the LD partners a SECOND time and recreates
+    the very pathology it fixes: measured on z drawn from N(Rb, R) with
+    scenario 7's signal, mode 'off' gave AP 1.000 / FDR 0.000 / sum(PIP) 1.34
+    while mode 'lead' gave FDR 0.882 / sum(PIP) 14.5 with 84% of the mass on
+    configurations of size 25. R/wrapper_fb_joint.R .fb_check_z_premise tests
+    the identity and refuses to run when the correction would be material and
+    the premise does not hold, so this cannot happen silently.
+
+    Note the correction's SIZE is set by the per-causal variance explained,
+    not by n: for one causal explaining a fraction v of the phenotype,
+    max(z^2) = (n-2) v/(1-v), so the largest factor is sqrt(1/(1-v)) with n
+    cancelling. v = 0.6 gives 1.58; a real GWAS hit with v < 0.001 gives
+    1.0005. That is why the simulation grid is affected and the cholesterol
+    application is not.
     """
     if mode in (None, '', 'off', 'none', 'OFF'):
         return Z
@@ -526,7 +547,17 @@ def rss_rescale_z(Z, n, mode='lead'):
     if mode == 'null':
         ref = n - 1.0
     elif mode == 'lead':
-        ref = n - 2.0 + float(torch.max(z2))
+        # max() over the FINITE entries only. `_load_region` clamps +inf to 200
+        # but leaves -inf and NaN alone, and a monomorphic variant standardises
+        # to 0/0 = NaN, so a single bad z must not be allowed to set `ref`:
+        # max(z^2) = inf or nan would make EVERY variant's factor non-finite and
+        # destroy the whole region. Measured: one -inf among 5 variants left
+        # 0/5 finite outputs before this guard. Bad entries stay bad (they were
+        # already), good ones are scaled correctly.
+        ok = torch.isfinite(z2)
+        if not bool(torch.any(ok)):
+            return Z
+        ref = n - 2.0 + float(torch.max(z2[ok]))
     else:
         raise ValueError("rss_rescale_z mode must be 'lead', 'null' or 'off', "
                          f"got {mode!r}")

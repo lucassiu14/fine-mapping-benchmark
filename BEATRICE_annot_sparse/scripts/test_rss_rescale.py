@@ -108,4 +108,37 @@ if all(os.path.exists(p) for p in (zp, ldp, cp)):
 else:
     print("  [SKIP] real-locus check (scratch fixtures absent)")
 
+# 8. A non-finite z must not poison the rest of the region. `_load_region`
+#    clamps +inf to 200 but leaves -inf and NaN, and a monomorphic variant
+#    standardises to 0/0 = NaN. Before the finite-mask guard, one -inf among
+#    five variants left 0/5 finite outputs: max(z^2) = inf made EVERY factor
+#    non-finite.
+for bad, label in ((float('-inf'), '-inf'), (float('nan'), 'NaN')):
+    zb = torch.tensor([1.0, 2.0, 5.0, bad, 3.0], dtype=torch.float64)
+    out = rss_rescale_z(zb, 5000, 'lead')
+    good = torch.isfinite(out)
+    check(f"one {label} in the region damages only itself",
+          int(good.sum()) == 4 and not bool(good[3]),
+          f"{int(good.sum())}/5 finite")
+    check(f"one {label} leaves max|z| of the finite entries exact",
+          float(out[2]) == 5.0, f"5.0 -> {float(out[2])}")
+zall = torch.tensor([float('nan')] * 4, dtype=torch.float64)
+check("an all-non-finite region is a no-op",
+      bool(torch.equal(torch.isnan(rss_rescale_z(zall, 5000, 'lead')), torch.isnan(zall))))
+
+# 9. The three modes are ONE formula differing only in the residual variance
+#    they reference:  ref = (y'y_c)/sigma2_hat.  'null' takes sigma2_hat =
+#    Var(y) (no signal; susieR's choice), 'lead' takes the lead variant's
+#    marginal residual variance.  So 'lead' >= 'null' always, with equality
+#    only when max|z| -> 1.
+N2 = 5000
+zz = torch.tensor([0.3, 1.0, 4.0, 19.0, 60.0], dtype=torch.float64)
+ref_null, ref_lead = N2 - 1.0, N2 - 2.0 + float(zz.max() ** 2)
+check("ref_lead >= ref_null whenever max|z| >= 1",
+      ref_lead >= ref_null, f"{ref_lead:.0f} >= {ref_null:.0f}")
+check("'lead' is 'null' with the residual variance re-estimated at the lead",
+      bool(torch.allclose(rss_rescale_z(zz, N2, 'lead'),
+                          rss_rescale_z(zz, N2, 'null') * (ref_lead / ref_null) ** 0.5,
+                          atol=0, rtol=1e-12)))
+
 print(f"\n{ok} checks passed")
