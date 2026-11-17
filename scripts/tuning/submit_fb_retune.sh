@@ -70,6 +70,15 @@ OBJECTIVE="${OBJECTIVE:-cells}"
 # refuses to start below it. Do not lower SC_MIN.
 SC_MIN="${SC_MIN:-10}"
 SC_MAX="${SC_MAX:-300}"
+
+# sigma_sq's range. After the RSS z-scale fix sigma_sq means
+# Var(beta)/sigma^2_resid (susie's scaled_prior_variance), whose oracle for this
+# simulation is phi/(S*(1-phi)) - verified on all 50 regions of the 25-cell grid.
+# That spans 0.0053 (S=10, phi=0.05) to 1.50 (S=1, phi=0.60), so the historical
+# ceiling of 0.5 cannot represent the high-phi / low-S corner at all. Defaults
+# are the historical range; set SIG_MAX=2.0 to cover the grid.
+SIG_MIN="${SIG_MIN:-0.0001}"
+SIG_MAX="${SIG_MAX:-0.5}"
 MASS_LO="${MASS_LO:-0.5}"
 MASS_HI="${MASS_HI:-2.0}"
 # prior_mass: the per-region anchor on sum(p_0), added 2026-11-14. Until it
@@ -207,6 +216,7 @@ echo "             = $(( PER_SIM * N_SIMS * REGIONS )) region-fits per trial"
 for s in "${SIM_ARGS[@]}"; do echo "             $s"; done
 echo "Storage    : $STORAGE"
 echo "Objective  : ${OBJECTIVE}  sparse_concrete in [${SC_MIN}, ${SC_MAX}]"
+echo "             sigma_sq in [${SIG_MIN}, ${SIG_MAX}] - oracle is phi/(S(1-phi)), 0.005-1.5 on the grid"
 echo "             mass constraint: sum(PIP)/#causal in [${MASS_LO}, ${MASS_HI}]"
 if [[ "${PM_MAX}" != "0" ]]; then
   echo "             prior_mass in [${PM_MIN}, ${PM_MAX}] - anchors sum(p_0) per region"
@@ -298,6 +308,7 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --method "${METHOD}" --objective "${OBJECTIVE}" \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
     --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
+    --sigma-min ${SIG_MIN} --sigma-max ${SIG_MAX} \\
     --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
     --pm-min ${PM_MIN} --pm-max ${PM_MAX} \\
     --n-trials 1 --python "${FB_PY}" \\
@@ -343,6 +354,7 @@ ${PY} scripts/tuning/optuna_fb.py ${SIM_FLAGS} \\
     --method "${METHOD}" --objective "${OBJECTIVE}" \\
     --scenarios ${PER_SIM} --regions ${REGIONS} --max_iter ${MAX_ITER} \\
     --sc-min ${SC_MIN} --sc-max ${SC_MAX} \\
+    --sigma-min ${SIG_MIN} --sigma-max ${SIG_MAX} \\
     --mass-lo ${MASS_LO} --mass-hi ${MASS_HI} \\
     --pm-min ${PM_MIN} --pm-max ${PM_MAX} \\
     --timeout \$(( WALL_SEC - ${TRIAL_MARGIN} )) --python "${FB_PY}"

@@ -192,6 +192,10 @@ def suggest_params(trial, args):
     # tests, sweep_from_study.py) predate --pm-min/--pm-max and would
     # otherwise raise AttributeError here rather than at parse time.
     _pm_max = getattr(args, "pm_max", 0.0)
+    # Same for --sigma-min/--sigma-max (added 2026-11-17): fall back to the
+    # historical range so a hand-built namespace keeps the old search space.
+    _sig_min = getattr(args, "sigma_min", 1e-4)
+    _sig_max = getattr(args, "sigma_max", 0.5)
     # BOUNDS REVISION (2026-07-30), after study fb_binary_ref500 v1 (1586 trials).
     # The v1 optimum sat ON two of these bounds, which means the bound - not the
     # objective - was choosing the value:
@@ -232,7 +236,21 @@ def suggest_params(trial, args):
     p = {
         "lambda_l1":            sfloat("lambda_l1", 1e-4, 1.0),
         "prior_regularisation": sfloat("prior_regularisation", 0.1, 50.0),
-        "sigma_sq":             sfloat("sigma_sq", 1e-4, 0.5),
+        # RANGE PARAMETERISED 2026-11-17. After the RSS z-scale fix, sigma_sq
+        # is no longer a free dial: b = beta/se puts the ABF's kappa = n*sigma_sq
+        # on susie's scaled_prior_variance scale, so the ORACLE value is
+        #   sigma_sq* = Var(beta)*(x'x/n) / sigma^2_resid = phi / (S*(1-phi))
+        # for a PVE-calibrated sparse simulation (the effect distribution and
+        # effect_variance cancel: sigma^2_resid is calibrated from Var(Xb)).
+        # Verified against the stored truth of all 50 regions of the 25-cell
+        # grid (scripts/tuning/test_sigma_oracle.R): agreement to sampling noise
+        # on the finite causal draw. Across that grid the oracle spans
+        # 0.0053 (S=10, phi=0.05) to 1.50 (S=1, phi=0.60), so the historical
+        # ceiling of 0.5 CLIPPED the oracle in 3 of 25 cells (s16 0.67, s22
+        # 0.75, s21 1.50) and in the tuning grid's own S=1/phi=0.60 corner.
+        # Defaults are left at the historical [1e-4, 0.5] so no existing
+        # invocation changes; widen it deliberately with --sigma-max.
+        "sigma_sq":             sfloat("sigma_sq", _sig_min, _sig_max),
         "hierarchy_M":          sfloat("hierarchy_M", 1.0, 100.0),
         "n_caus":               sint("n_caus", 1, 10),
         "sparse_concrete":      sint("sparse_concrete", args.sc_min, args.sc_max,
@@ -574,6 +592,17 @@ def main():
                     help="sparse_concrete floor (published lower_bound is 10)")
     ap.add_argument("--sc-max", type=int, default=300,
                     help="sparse_concrete ceiling (the original declares none)")
+    # sigma_sq's oracle is phi/(S*(1-phi)) once z is on a common residual
+    # scale (see the search space). The historical range is kept as the default
+    # so nothing changes silently; raise --sigma-max to let the search reach the
+    # high-phi / low-S corner, whose oracle is 1.5 at phi=0.6, S=1.
+    ap.add_argument("--sigma-min", type=float, default=1e-4,
+                    help="sigma_sq search floor (log-uniform). Grid oracle "
+                         "minimum is 0.0053 at S=10, phi=0.05.")
+    ap.add_argument("--sigma-max", type=float, default=0.5,
+                    help="sigma_sq search ceiling (log-uniform). The historical "
+                         "0.5 clips the oracle for phi>=0.4 at S<=2; 2.0 covers "
+                         "the whole 25-cell grid with margin.")
     ap.add_argument("--pm-min", type=float, default=0.5,
                     help="Lower bound for prior_mass, the per-region anchor on "
                          "sum(p_0). Only used when --pm-max > 0.")

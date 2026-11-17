@@ -318,6 +318,15 @@
                 .fb_joint_cache = list()))
   }
 
+  # Surface the python-side completion trace. system2(stdout = TRUE) CAPTURES
+  # stdout into `run_output` rather than streaming it, so without this the
+  # `[completion]` line joint_trainer.py prints - the only evidence completion
+  # ran at all, and the only place delta_hat (the MEASURED share of posterior
+  # mass the sampler alone had missed, which bounds the PIP error) is reported
+  # - was silently discarded on every run, HPC included.
+  comp_lines <- grep("^\\[completion\\]", run_output, value = TRUE)
+  for (ln in comp_lines) message("    ", ln)
+
   # parse per-region outputs into the fingerprint-keyed cache
   cache <- list()
   for (i in seq_len(n_regions)) {
