@@ -69,52 +69,60 @@
 
 # --- precondition for the RSS z rescaling -------------------------------------
 # rss_rescale_z (BEATRICE_annot_sparse/scripts/joint_trainer.py) puts z on a
-# common residual scale using only z and n. Its premise is that z arrived as
-#   z_j = beta_hat_j / se_j
-# with se_j the MARGINAL per-variant standard error, in which case
-#   se_j = sqrt(A) / sqrt(n - 2 + z_j^2),   A = (y'y_c) / (x_j'x_j)
-# exactly, so se_j * sqrt(n - 2 + z_j^2) is the SAME for every j (A is free of j
-# whenever x_j'x_j is, which standardising the genotypes guarantees). That is a
-# testable identity, and it is how the correction knows the per-variant scale
-# without being told it.
+# common residual scale. Its one premise is that z is the MARGINAL z of the
+# summary statistics it is handed, i.e. z_j = beta_hat_j / se_j, because the
+# marginal residual variance it rescales by is recovered from z itself:
 #
-# Applying the correction to z that is ALREADY on a common scale is actively
-# harmful, not merely wasted: measured on z drawn from N(Rb, R) with scenario
-# 7's signal, mode 'off' gave AP 1.000 / FDR 0.000, while mode 'lead' inflated
-# the LD partners a second time and gave FDR 0.882 with sum(PIP) = 14.5.
+#   sigma_hat_j^2 = RSS_j/(n-2) = (y'y_c)/(n - 2 + z_j^2)       EXACTLY
 #
-# So check the identity rather than trust it. The check runs only when the
-# correction is MATERIAL -- its largest factor exceeds `tol_factor`. Real GWAS
-# summary statistics have max(z^2)/n tiny (the cholesterol application: max|Z| =
-# 13.05 at n = 3.4e5, largest factor 1.0003), so the correction is inert there
-# and the identity, which real unstandardised genotypes do not satisfy, is not
-# required. Measured separation at the material end: raw z gives spread 1.9e-13,
-# any already-common-scale z gives 4.6e-04 or worse.
-.fb_check_z_premise <- function(z, se, n, mode, tol = 1e-6, tol_factor = 1.01) {
+# Note what is NOT in that identity: x_j'x_j. It cancels, so the correction is
+# free of the genotype coding. Verified to 2.4e-16 on raw 1000G dosages
+# (x_j'x_j spread 7.4), on standardised genotypes (3.7e-13) and under random
+# per-column rescaling (spread 18.9). Real unstandardised GWAS dosages are
+# therefore just as valid an input as the simulator's standardised ones.
+#
+# What the correction genuinely cannot survive is z that has been ALTERED after
+# the summary statistics were computed, because it is not idempotent: applied to
+# z already on a common scale it inflates the LD partners a SECOND time. On z
+# drawn from N(Rb, R) with scenario 7's signal, mode 'off' gave AP 1.000 / FDR
+# 0.000 / sum(PIP) 1.34 while mode 'lead' gave FDR 0.882 / sum(PIP) 14.5.
+#
+# So the check is the exact, coding-free identity z == beta_hat/se. Measured
+# |z - beta_hat/se|/|z|: 0 on every input above, against 0.3-0.6 for
+# already-rescaled z. (An earlier version of this check tested whether
+# se_j*sqrt(n-2+z_j^2) was constant, which is a test for STANDARDISED
+# GENOTYPES, not for this premise -- it reads 2.8 on raw dosages and 61 under
+# random rescaling, and it would have failed the cholesterol chr19 region.)
+#
+# The materiality gate keeps this out of the way of runs the correction cannot
+# affect. It is set at 1.02 because the largest factor anywhere in the
+# cholesterol application is 1.01004 (ldEUR_19_0031, max|Z| = 82.85 at
+# n = 3.4e5): real GWAS v is tiny, and sqrt(1/(1-v)) with it.
+.fb_check_z_premise <- function(z, beta_hat, se, n, mode,
+                                tol_warn = 1e-6, tol_stop = 1e-3,
+                                tol_factor = 1.02) {
   if (is.null(mode) || mode %in% c("off", "none", "")) return(invisible(NULL))
-  if (is.null(se) || length(se) != length(z) || !is.finite(n) || n <= 2) {
-    return(invisible(NULL))
+  if (is.null(beta_hat) || is.null(se) ||
+      length(beta_hat) != length(z) || length(se) != length(z) ||
+      !is.finite(n) || n <= 2) {
+    return(invisible(NULL))                      # nothing to check against
   }
-  ok <- is.finite(z) & is.finite(se) & se > 0
+  ok <- is.finite(z) & is.finite(beta_hat) & is.finite(se) & se > 0 & abs(z) > 0
   if (sum(ok) < 3L) return(invisible(NULL))
-  z <- z[ok]; se <- se[ok]
-  root <- sqrt(n - 2 + z^2)
-  if (max(root) / min(root) <= tol_factor) return(invisible(NULL))  # inert
-  implied <- se * root
-  spread  <- (max(implied) - min(implied)) / stats::median(implied)
-  if (spread > tol) {
-    stop(sprintf(paste0(
-      "fb_xregion: rss_z_rescale = '%s' but the z supplied do not look like ",
-      "beta_hat/se with marginal per-variant standard errors: ",
-      "se * sqrt(n - 2 + z^2) varies by %.3g across variants (tolerance %.0e, ",
-      "n = %g, largest correction factor %.3f). Rescaling z that is already on ",
-      "a common scale inflates LD partners a second time and inflates the FDR. ",
-      "Pass rss_z_rescale = 'off' if the z are already on a common scale."),
-      mode, spread, tol, n, max(root) / min(root)), call. = FALSE)
-  }
+  root <- sqrt(n - 2 + z[ok]^2)
+  if (max(root) / min(root) <= tol_factor) return(invisible(NULL))   # inert
+  dev <- max(abs(z[ok] - beta_hat[ok] / se[ok]) / abs(z[ok]))
+  msg <- sprintf(paste0(
+    "fb_xregion: rss_z_rescale = '%s' but z != beta_hat/se (max relative ",
+    "deviation %.3g; n = %g, largest correction factor %.4f). The rescaling ",
+    "assumes z is the marginal z of these summary statistics; applying it to z ",
+    "that is already on a common residual scale inflates LD partners a second ",
+    "time and inflates the FDR. Pass rss_z_rescale = 'off' for pre-scaled z."),
+    mode, dev, n, max(root) / min(root))
+  if (dev > tol_stop) stop(msg, call. = FALSE)
+  if (dev > tol_warn) warning(msg, call. = FALSE)
   invisible(NULL)
 }
-
 
 # --- parse one region's joint output (same contract as the FB wrapper) --------
 .fb_joint_parse_output <- function(out_dir, variant_ids, p) {
@@ -201,8 +209,8 @@
     if (is.null(m_ann)) m_ann <- ncol(A) else if (ncol(A) != m_ann) {
       return(list(.fb_joint_annotated = FALSE, .fb_joint_head = prior_head))
     }
-    .fb_check_z_premise(z, regions[[i]]$se, genotypes[[i]]$n,
-                        gv0("rss_z_rescale", "lead"))
+    .fb_check_z_premise(z, regions[[i]]$beta_hat, regions[[i]]$se,
+                        genotypes[[i]]$n, gv0("rss_z_rescale", "lead"))
     specs[[i]] <- list(z = z, LD = genotypes[[i]]$LD, A = A,
                        variant_ids = genotypes[[i]]$variant_ids, n = genotypes[[i]]$n)
     keys[i] <- .fb_fingerprint(z)

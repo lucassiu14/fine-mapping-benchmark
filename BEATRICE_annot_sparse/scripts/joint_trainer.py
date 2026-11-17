@@ -469,11 +469,18 @@ def rss_rescale_z(Z, n, mode='lead'):
 
         t_j = (z_j - r_jc z_c) / sqrt(1 - r_jc^2)
 
-    is N(0, 1). But se is ESTIMATED, and for a marginal regression on
-    standardised variables se_j = 1/sqrt(n - 2 + z_j^2) EXACTLY (verified
-    against the simulator's own se to 9.5e-14). So se shrinks for variants in
-    LD with a strong causal, S becomes signal-dependent, the model's covariance
-    R is wrong, and t is badly over-dispersed.
+    is N(0, 1). But S is ESTIMATED, and the sigma inside each se_j is the
+    MARGINAL residual sd, not the full model's. That marginal residual variance
+    is recoverable from z alone:
+
+        sigma_hat_j^2 = RSS_j/(n-2) = (y'y_c)/(n - 2 + z_j^2)    EXACTLY
+
+    (x_j'x_j cancels -- verified to 2.4e-16 on raw 1000G dosages with x_j'x_j
+    spread 7.4, on standardised genotypes, and under random per-column
+    rescaling, so this is free of the genotype coding). sigma_hat_j therefore
+    SHRINKS for variants in LD with a strong causal, S becomes
+    signal-dependent, the model's covariance R is wrong, and t is badly
+    over-dispersed.
 
     MEASURED on tuning/local_sparse_grid9.rds scenario 7 (S=1, phi=0.6,
     pve=0.60, z_causal=85.15, n=5000, p=500): se spans 1.565x with
@@ -517,19 +524,17 @@ def rss_rescale_z(Z, n, mode='lead'):
     region dict is built, so the trainer, generate_credible_sets' sweep and
     posterior completion all see ONE consistent z.
 
-    PRECONDITION -- NOT optional, and NOT idempotent. This expects z that
-    arrived as beta_hat_j / se_j with se_j the MARGINAL per-variant standard
-    error, which is what every GWAS and this benchmark's simulator produce
-    (R/simulate_phenotypes.R compute_summary_statistics; the identity
-    se_j * sqrt(n - 2 + z_j^2) = const was verified against it to 1.9e-13 on
-    all 18 region-scenarios of the tuning grid). Applied to z that is ALREADY
-    on a common scale it inflates the LD partners a SECOND time and recreates
-    the very pathology it fixes: measured on z drawn from N(Rb, R) with
-    scenario 7's signal, mode 'off' gave AP 1.000 / FDR 0.000 / sum(PIP) 1.34
-    while mode 'lead' gave FDR 0.882 / sum(PIP) 14.5 with 84% of the mass on
-    configurations of size 25. R/wrapper_fb_joint.R .fb_check_z_premise tests
-    the identity and refuses to run when the correction would be material and
-    the premise does not hold, so this cannot happen silently.
+    PRECONDITION -- one requirement, and it is NOT idempotence. z must be the
+    marginal z OF THESE summary statistics, z_j = beta_hat_j/se_j. Nothing is
+    required of the genotype coding (see the sigma_hat identity above).
+    Applied to z already on a common scale it inflates the LD partners a
+    SECOND time and recreates the very pathology it fixes: measured on z drawn
+    from N(Rb, R) with scenario 7's signal, mode 'off' gave AP 1.000 / FDR
+    0.000 / sum(PIP) 1.34 while mode 'lead' gave FDR 0.882 / sum(PIP) 14.5
+    with 84% of the mass on configurations of size 25.
+    R/wrapper_fb_joint.R .fb_check_z_premise asserts z == beta_hat/se -- exact
+    and coding-free, 0 deviation on every legitimate input tested against
+    0.3-0.6 for pre-rescaled z -- so this cannot happen silently.
 
     Note the correction's SIZE is set by the per-causal variance explained,
     not by n: for one causal explaining a fraction v of the phenotype,
